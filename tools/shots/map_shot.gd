@@ -21,7 +21,6 @@ func _ready() -> void:
 	var map: TestMap = main.map
 	var x := map.base_x(0) + 24.0
 	main.player.global_position = Vector3(x, map.height_at(x, 0.0) + 0.5, 0.0)
-	main.dummy.fire_enabled = false
 	for i in 90:
 		await get_tree().physics_frame
 	main.input.source.pitch = -0.1

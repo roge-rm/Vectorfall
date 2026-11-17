@@ -13,3 +13,13 @@ func make_command(_delta: float) -> PlayerCommand:
 	command.yaw = yaw
 	command.pitch = pitch
 	return command
+
+
+## What it needs to carry on the same after a match's set_state(), for those
+## that keep any. Bots keep their goal, route and memory here.
+func get_state() -> Dictionary:
+	return {}
+
+
+func set_state(_state: Dictionary) -> void:
+	pass

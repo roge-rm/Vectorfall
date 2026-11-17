@@ -123,7 +123,7 @@ func _part(parent: Node3D, mesh: Mesh, at: Vector3, material: Material) -> MeshI
 
 func set_team_colour(colour: Color) -> void:
 	for view: GeometryInstance3D in _meshes(self):
-		view.set_instance_shader_parameter("team_colour", colour)
+		Cel.set_team(view, colour)
 
 
 func set_render_layer(layer: int) -> void:

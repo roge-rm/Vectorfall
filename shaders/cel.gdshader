@@ -1,5 +1,5 @@
 // Cel shading for everything solid: flat colour, three hard light bands from
-// the sun, a rim light on the lit side, and a team colour per instance.
+// the sun, a rim light on the lit side, and a team colour.
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
 
@@ -26,7 +26,7 @@ uniform float shade_dark = 0.12;
 uniform float rim_amount : hint_range(0.0, 1.0) = 0.35;
 uniform float rim_edge : hint_range(0.0, 1.0) = 0.62;
 
-instance uniform vec4 team_colour : source_color = vec4(1.0);
+uniform vec4 team_colour : source_color = vec4(1.0);
 
 void fragment() {
 	vec3 colour = mix(albedo.rgb, team_colour.rgb, team_amount);

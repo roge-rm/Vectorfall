@@ -40,6 +40,38 @@ static func material(colour: Color, team_amount := 0.0, outlined := true, vertex
 	return made
 
 
+## Gives a mesh its team colour by swapping its cel materials for copies in
+## that colour, shared by material and colour. A per-instance uniform would
+## need a uniform slot per mesh, and GLES3 runs out with a few soldiers.
+static func set_team(view: GeometryInstance3D, colour: Color) -> void:
+	var override := view.material_override as ShaderMaterial
+	if override != null and override.shader == CEL:
+		view.material_override = _team_copy(override, colour)
+	var mesh_view := view as MeshInstance3D
+	if mesh_view == null or mesh_view.mesh == null:
+		return
+	for k in mesh_view.mesh.get_surface_count():
+		var surface := mesh_view.get_surface_override_material(k) as ShaderMaterial
+		if surface == null:
+			surface = mesh_view.mesh.surface_get_material(k) as ShaderMaterial
+		if surface != null and surface.shader == CEL:
+			mesh_view.set_surface_override_material(k, _team_copy(surface, colour))
+
+
+static func _team_copy(source: ShaderMaterial, colour: Color) -> ShaderMaterial:
+	var base: ShaderMaterial = source.get_meta("team_base", source)
+	if float(base.get_shader_parameter("team_amount")) <= 0.0:
+		return base
+	var key := "team/%d/%s" % [base.get_instance_id(), colour.to_html()]
+	if _materials.has(key):
+		return _materials[key]
+	var made := base.duplicate() as ShaderMaterial
+	made.set_shader_parameter("team_colour", colour)
+	made.set_meta("team_base", base)
+	_materials[key] = made
+	return made
+
+
 ## The ground's material, which colours by steepness and a patch noise kept
 ## in the vertex colours.
 static func ground_material() -> ShaderMaterial:

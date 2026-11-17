@@ -19,6 +19,12 @@ const STAND_HEIGHT := 0.5
 ## over the run.
 const HILL_HEIGHT := 38.0
 const HILLS := 3
+## The ramp up the front of each base: its length along the ground and its
+## slope, for 14 m at 12°.
+const RAMP_RUN := 13.69
+const RAMP_SLOPE := 0.2126
+## Grid cell size for looking up obstacles, in metres.
+const OBSTACLE_CELL := 10.0
 
 const GRASS := Color(0.45, 0.62, 0.32)
 const GRASS_DARK := Color(0.36, 0.52, 0.28)
@@ -29,6 +35,15 @@ const CONCRETE := Color(0.72, 0.72, 0.7)
 var noise := FastNoiseLite.new()
 var rng := RandomNumberGenerator.new()
 var ground: StaticBody3D
+## Things the bots can't pass, as (x, z, radius) circles, kept for the route
+## graph.
+var obstacles: Array[Vector3] = []
+## The bots' route graph, made with the map.
+var route_graph: RouteGraph
+## The ground's height at each corner of its mesh, row by row along x.
+var heights := PackedFloat32Array()
+## Obstacles by grid cell, for blocked_at().
+var _obstacle_cells := {}
 
 
 func _init() -> void:
@@ -43,6 +58,7 @@ func _init() -> void:
 	for team in 2:
 		_build_base(team)
 	_build_props()
+	route_graph = build_route_graph()
 
 
 ## Ground height: long ridges across the map, bent and varied along z with a
@@ -101,6 +117,126 @@ func spawn_points(team: int) -> Array[Transform3D]:
 	return points
 
 
+## The height of the ground's mesh, which is flat between its corners, so
+## quicker than height_at() and closer to what you stand on.
+func ground_height(x: float, z: float) -> float:
+	var nx := int(LENGTH / CELL)
+	var nz := int(WIDTH / CELL)
+	var gx := clampf((x + LENGTH * 0.5) / CELL, 0.0, nx - 0.001)
+	var gz := clampf((z + WIDTH * 0.5) / CELL, 0.0, nz - 0.001)
+	var i := int(gx)
+	var j := int(gz)
+	var fx := gx - i
+	var fz := gz - j
+	var a := heights[j * (nx + 1) + i]
+	var b := heights[j * (nx + 1) + i + 1]
+	var c := heights[(j + 1) * (nx + 1) + i]
+	var d := heights[(j + 1) * (nx + 1) + i + 1]
+	# Each cell is two triangles split from b to c, like the mesh.
+	if fx + fz <= 1.0:
+		return a + (b - a) * fx + (c - a) * fz
+	return d + (c - d) * (1.0 - fx) + (b - d) * (1.0 - fz)
+
+
+## Where you'd stand: the ground, or the base deck or its ramp above it.
+func surface_at(x: float, z: float) -> float:
+	var h := ground_height(x, z)
+	if absf(z) > BASE_SIZE * 0.5 or absf(absf(x) - BASE_X) > BASE_SIZE * 0.5 + RAMP_RUN:
+		return h
+	for team in 2:
+		var dx := x - base_x(team)
+		if absf(dx) <= BASE_SIZE * 0.5 and absf(z) <= BASE_SIZE * 0.5:
+			return BASE_HEIGHT + 2.0
+		var front := 1.0 if team == 0 else -1.0
+		var along := dx * front - BASE_SIZE * 0.5
+		if along > 0.0 and along < RAMP_RUN and absf(z) <= 5.0:
+			h = maxf(h, BASE_HEIGHT + 2.0 - along * RAMP_SLOPE)
+	return h
+
+
+## True inside a rock, pillar, tower or anything else you can't walk through,
+## with room for a soldier.
+func blocked_at(x: float, z: float) -> bool:
+	if _obstacle_cells.is_empty():
+		_sort_obstacles()
+	var cell := Vector2i(floori(x / OBSTACLE_CELL), floori(z / OBSTACLE_CELL))
+	for o: Vector3 in _obstacle_cells.get(cell, []):
+		var dx := x - o.x
+		var dz := z - o.y
+		if dx * dx + dz * dz < o.z * o.z:
+			return true
+	return false
+
+
+## Puts each obstacle, grown by the room a soldier needs, in every cell of a
+## grid it touches, so blocked_at() only checks the few nearby.
+func _sort_obstacles() -> void:
+	for o in obstacles:
+		var r := o.z + 1.0
+		for i in range(floori((o.x - r) / OBSTACLE_CELL), floori((o.x + r) / OBSTACLE_CELL) + 1):
+			for j in range(floori((o.y - r) / OBSTACLE_CELL), floori((o.y + r) / OBSTACLE_CELL) + 1):
+				var key := Vector2i(i, j)
+				if not _obstacle_cells.has(key):
+					_obstacle_cells[key] = []
+				_obstacle_cells[key].append(Vector3(o.x, o.y, r))
+
+
+## The bots' route graph: a grid of points every 20 m over the ground, points
+## on each base's deck and its ramp, and the points of interest, all linked to
+## their neighbours up to 46 m away.
+func build_route_graph() -> RouteGraph:
+	var graph := RouteGraph.new()
+	for i in range(-12, 13):
+		for j in range(-4, 5):
+			var x := i * 20.0
+			var z := j * 20.0
+			var on_base := false
+			for team in 2:
+				on_base = on_base or (absf(x - base_x(team)) < BASE_SIZE * 0.5 + 2.0 and absf(z) < BASE_SIZE * 0.5 + 2.0)
+			if on_base or blocked_at(x, z):
+				continue
+			graph.add_point(Vector3(x, surface_at(x, z), z))
+	var deck := BASE_HEIGHT + 2.0
+	for team in 2:
+		var x := base_x(team)
+		var front := 1.0 if team == 0 else -1.0
+		graph.add_interest(RouteGraph.FLAG_STAND, team, graph.add_point(Vector3(x, deck, 0.0)))
+		graph.add_interest(RouteGraph.SPAWN, team, graph.add_point(Vector3(x + front * 6.0, deck, 0.0)))
+		for corner in [Vector2(7.0, 7.0), Vector2(7.0, -7.0), Vector2(-7.0, 7.0), Vector2(-7.0, -7.0)]:
+			graph.add_interest(RouteGraph.DEFENCE, team, graph.add_point(Vector3(x + corner.x, deck, corner.y)))
+		# The ramp up the front of the deck is the way in without a jet.
+		var ramp_top := graph.add_point(Vector3(x + front * 10.5, deck, 0.0))
+		var foot_x := x + front * 27.0
+		var ramp_foot := graph.add_point(Vector3(foot_x, surface_at(foot_x, 0.0), 0.0))
+		graph.add_interest(RouteGraph.WAY_IN, team, ramp_top)
+		graph.add_interest(RouteGraph.WAY_IN, team, ramp_foot)
+		for side in [-1.0, 1.0]:
+			var side_z: float = side * (BASE_SIZE * 0.5 + 6.0)
+			graph.add_interest(RouteGraph.WAY_IN, team, graph.add_point(Vector3(x, surface_at(x, side_z), side_z)))
+	for side in [-1.0, 1.0]:
+		for z in [-40.0, 40.0]:
+			var x: float = side * BASE_X / 3.0
+			if not blocked_at(x, z):
+				graph.add_interest(RouteGraph.HIGH_GROUND, -1, graph.add_point(Vector3(x, surface_at(x, z), z)))
+	graph.auto_link(46.0, surface_at, blocked_at)
+	# The deck on top of each tower, jetted up to from beside it and dropped
+	# off back to the same spot.
+	for team in 2:
+		var front := 1.0 if team == 0 else -1.0
+		var back := base_x(team) - front * (BASE_SIZE * 0.5 - 4.0)
+		var top := graph.add_point(Vector3(back, BASE_HEIGHT + 17.0, 3.75))
+		var foot := graph.add_point(Vector3(back, deck, 8.0))
+		graph.add_interest(RouteGraph.HIGH_GROUND, team, top)
+		graph.add_interest(RouteGraph.DEFENCE, team, top)
+		graph.add_link(foot, top, RouteGraph.Kind.JET, true)
+		graph.add_link(top, foot, RouteGraph.Kind.RUN)
+		var near := graph.nearest(Vector3(back + front * 3.0, deck, 7.0))
+		if near != foot:
+			graph.add_link(foot, near, RouteGraph.Kind.RUN)
+			graph.add_link(near, foot, RouteGraph.Kind.RUN)
+	return graph
+
+
 func _build_ground() -> void:
 	var nx := int(LENGTH / CELL)
 	var nz := int(WIDTH / CELL)
@@ -113,6 +249,7 @@ func _build_ground() -> void:
 			var x := -LENGTH * 0.5 + i * CELL
 			var z := -WIDTH * 0.5 + j * CELL
 			var h := height_at(x, z)
+			heights.append(h)
 			vertices.append(Vector3(x, h, z))
 			var normal := Vector3(height_at(x - 1.0, z) - height_at(x + 1.0, z), 2.0, height_at(x, z - 1.0) - height_at(x, z + 1.0)).normalized()
 			normals.append(normal)
@@ -170,9 +307,11 @@ func _build_base(team: int) -> void:
 	_build_stand(base, team)
 	var back := x - front * (BASE_SIZE * 0.5 - 4.0)
 	_box(base, Vector3(4.0, 14.0, 4.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 9.0, 0.0)), colour)
+	obstacles.append(Vector3(back, 0.0, 2.9))
 	_box(base, Vector3(10.0, 1.0, 10.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 16.5, 0.0)), CONCRETE)
 	for side in [-1.0, 1.0]:
 		_box(base, Vector3(3.0, 4.0, 3.0), Transform3D(Basis.IDENTITY, Vector3(x, BASE_HEIGHT + 4.0, side * (BASE_SIZE * 0.5 - 2.0))), colour)
+		obstacles.append(Vector3(x, side * (BASE_SIZE * 0.5 - 2.0), 2.2))
 
 
 ## A round pad in the team's colour with a ring of light around it, for the
@@ -210,15 +349,19 @@ func _build_props() -> void:
 		var tilt := deg_to_rad(rng.randf_range(14.0, 24.0))
 		var basis := Basis(Vector3.UP, heading) * Basis(Vector3.RIGHT, tilt)
 		_box(props, Vector3(6.0, 1.0, 14.0), Transform3D(basis, Vector3(x, height_at(x, z) + 1.0, z)), CONCRETE)
+		obstacles.append(Vector3(x, z, 7.5))
 	for k in 18:
 		var x := rng.randf_range(-165.0, 165.0)
 		var z := rng.randf_range(-75.0, 75.0)
-		_rock(props, Vector3(x, height_at(x, z) - 0.5, z), rng.randf_range(2.0, 5.0))
+		var size := rng.randf_range(2.0, 5.0)
+		_rock(props, Vector3(x, height_at(x, z) - 0.5, z), size)
+		obstacles.append(Vector3(x, z, size * 1.2))
 	for k in 8:
 		var x := rng.randf_range(-150.0, 150.0)
 		var z := rng.randf_range(-70.0, 70.0)
 		var tall := rng.randf_range(8.0, 18.0)
 		_pillar(props, Vector3(x, height_at(x, z) - 1.0 + tall * 0.5, z), 1.6, tall)
+		obstacles.append(Vector3(x, z, 1.6))
 
 
 func _box(parent: Node3D, size: Vector3, where: Transform3D, colour: Color) -> void:

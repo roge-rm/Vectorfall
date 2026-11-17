@@ -1,6 +1,6 @@
 # Vectorfall
 
-Vectorfall is a team capture the flag shooter for Android with jetpacks and a cel shaded look. Two teams of 8 fight over each other's flags, on foot or in the air. It's early: for now there's a test map with three hills to ski over, two weapons, a stand-in enemy to shoot at and a full capture the flag match you can play alone.
+Vectorfall is a team capture the flag shooter for Android with jetpacks and a cel shaded look. Two teams of 8 fight over each other's flags, on foot or in the air. It's early: for now there's a test map with three hills to ski over, two weapons, bots on both teams that ski and jet between the bases but don't fight or take flags yet, and a full capture the flag match.
 
 ## Controls
 
@@ -17,6 +17,7 @@ Vectorfall is a team capture the flag shooter for Android with jetpacks and a ce
 | Use | E | X | |
 | Deploy | G | Y | |
 | Let go of the mouse | Esc | | |
+| Bot overlay | F3 | | |
 
 Click in the window to capture the mouse. The touch controls show when you touch the screen and hide when you use a keyboard or gamepad.
 
@@ -68,7 +69,15 @@ Run the headless tests on the computer:
 tools/run-tests.sh
 ```
 
-They check the jetpack, skiing, movement in the air, that soldiers move only from their commands, the touch controls, weapon damage, splash and disc jumps, every capture the flag rule, that shots can't pass through walls, respawning, the test map's ski speed and saving and loading match state.
+They check the jetpack, skiing, movement in the air, that soldiers move only from their commands, the touch controls, weapon damage, splash and disc jumps, every capture the flag rule, that shots can't pass through walls, respawning, the test map's ski speed and saving and loading match state. For the bots they check the route graph and planner, what bots see and hear, a bot getting from base to base past 40 m/s, a boxed in bot getting out, and that the same seed moves bots the same way.
+
+The bot match runs bots headless, faster than real time, and writes a report to `build/bot-reports/` with each bot's distance, speeds, routes and where it got stuck:
+
+```sh
+tools/bot-match.sh --bots 8 --seed 1 --minutes 5
+```
+
+F3 in the game shows the bots' route graph (run links white, ski blue, jet orange, walls red, points of interest as yellow posts), each bot's route and a label with what it's doing. `tools/shots/bots_shot.tscn` takes a picture of it.
 
 ## Licence
 

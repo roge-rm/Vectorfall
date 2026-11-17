@@ -1,15 +1,21 @@
 extends Node
 
 ## Loads straight into the test map with you on team 0's base, a flag on each
-## base, and a dummy enemy on team 1 posted down the slope in front of it, strafing and firing
-## discs now and then so there's something to shoot.
+## base, and bots on both teams skiing and jetting between the flag stands.
+## They don't fight or take flags yet. F3 shows what the bots are doing.
+
+## Bots on your team, and on the other.
+const OWN_BOTS := 3
+const ENEMY_BOTS := 4
 
 var map: TestMap
 var game: Match
 var input: LocalInput
 var player: Soldier
+## The first enemy bot's soldier.
 var enemy: Soldier
-var dummy: DummySource
+var bots: BotDirector
+var overlay: BotOverlay
 var camera: FirstPersonCamera
 var hud: Hud
 var touch: TouchControls
@@ -33,14 +39,15 @@ func _ready() -> void:
 	player.display_name = "You"
 	player.set_first_person(true)
 
-	dummy = DummySource.new()
-	var post_x := map.base_x(0) + 45.0
-	dummy.post = Vector3(post_x, map.height_at(post_x, 0.0), 0.0)
-	var facing := Transform3D(Basis(Vector3.UP, PI * 0.5), dummy.post + Vector3.UP * 0.5)
-	enemy = game.add_soldier(1, facing, dummy)
-	dummy.game = game
-	dummy.soldier = enemy
-	dummy.target = player
+	bots = BotDirector.new(game, map.route_graph)
+	for k in OWN_BOTS:
+		# Slot 3 is yours.
+		bots.add_bot(0, map.spawn_point(0, k if k < 3 else k + 1))
+	for k in ENEMY_BOTS:
+		bots.add_bot(1, map.spawn_point(1, k))
+	enemy = bots.brains[OWN_BOTS].soldier
+	overlay = BotOverlay.new(bots)
+	add_child(overlay)
 
 	var view := ProjectileView.new()
 	view.game = game

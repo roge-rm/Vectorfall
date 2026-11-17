@@ -3,8 +3,8 @@ extends RefCounted
 
 ## Weapon meshes built from boxes and cylinders, used both in soldiers' hands
 ## and as the first person view model. The grip is at the origin and the
-## barrel points down -z. Parts in the team's colour take the instance's
-## team_colour, so set it on every mesh under the model.
+## barrel points down -z. Parts in the team's colour get it from
+## Cel.set_team, so call that on every mesh under the model.
 
 const BODY := Color(0.3, 0.32, 0.36)
 const DARK := Color(0.18, 0.19, 0.22)

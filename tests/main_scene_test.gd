@@ -1,9 +1,10 @@
 extends SceneTree
 
-## Runs the main scene for five seconds and checks the player is standing on
-## its base, the touch controls show only after a touch, and the touch stick
-## and buttons, the SKI toggle and SWAP too, end up in the player's
-## commands, and the outline setting turns outlines on and off.
+## Runs the main scene for five seconds and checks the bots have set off,
+## the player is standing on its base, the touch controls show only after a
+## touch, and the touch stick and buttons, the SKI toggle and SWAP too, end
+## up in the player's commands, and the outline setting turns outlines on and
+## off.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/main_scene_test.gd
 
 var checks := TestWorld.Checks.new()
@@ -21,14 +22,18 @@ func ticks(n: int) -> void:
 func _run() -> void:
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(main)
-	# The dummy's discs would knock the player about.
-	main.dummy.fire_enabled = false
 	await ticks(300)
 	var player: Soldier = main.player
 	checks.check(player.grounded, "the player is standing after five seconds")
 	checks.check(absf(player.global_position.y - (TestMap.BASE_HEIGHT + 2.0)) < 0.1, "on top of the base platform (y %.2f)" % player.global_position.y)
-	checks.check(main.game.entities.size() == 2, "the match has both soldiers")
-	checks.check(main.enemy.team != player.team and not main.enemy.dead, "the second soldier is an enemy")
+	checks.check(main.game.entities.size() == 1 + main.OWN_BOTS + main.ENEMY_BOTS, "the match has you and the bots")
+	checks.check(main.enemy.team != player.team and not main.enemy.dead, "the enemy bots are on the other team")
+	var moving := 0
+	for brain: BotBrain in main.bots.brains:
+		if brain.soldier.global_position.distance_to(brain.soldier.game.spawns[brain.soldier.team][0].origin) > 15.0:
+			moving += 1
+	checks.check(moving == main.bots.brains.size(), "every bot has set off from its base")
+	checks.check(not main.overlay.visible, "the bot overlay starts hidden")
 	var outlined := Cel.material(Color(0.5, 0.5, 0.5))
 	Settings.outlines = false
 	Cel.set_outlines(false)

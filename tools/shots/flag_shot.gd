@@ -15,7 +15,6 @@ func _ready() -> void:
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	var map: TestMap = main.map
-	main.dummy.fire_enabled = false
 	var deck := TestMap.BASE_HEIGHT + 2.0
 	main.input.source.yaw = -PI * 0.5
 	main.input.source.pitch = 0.02

@@ -363,6 +363,11 @@ func get_state() -> Dictionary:
 	var shots := []
 	for shot in projectiles:
 		shots.append(shot.get_state())
+	var source_states := {}
+	for id: int in sources:
+		var source_state := sources[id].get_state()
+		if not source_state.is_empty():
+			source_states[id] = source_state
 	var flag_states := {}
 	for team in flags:
 		flag_states[team] = flags[team].get_state()
@@ -379,6 +384,7 @@ func get_state() -> Dictionary:
 		"next_id": next_id,
 		"entities": states,
 		"projectiles": shots,
+		"sources": source_states,
 	}
 
 
@@ -414,6 +420,10 @@ func set_state(state: Dictionary) -> void:
 			add_flag(team, stands[team], flag_state.home)
 			flags[team].entity_id = flag_state.id
 		flags[team].set_state(flag_state)
+	var source_states: Dictionary = state.get("sources", {})
+	for id: int in source_states:
+		if sources.has(id):
+			sources[id].set_state(source_states[id])
 	projectiles.clear()
 	for shot_state: Dictionary in state.get("projectiles", []):
 		projectiles.append(Projectile.from_state(shot_state))

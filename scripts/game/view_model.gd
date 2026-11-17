@@ -31,7 +31,7 @@ func _init() -> void:
 func set_team_colour(colour: Color) -> void:
 	for gun in _guns:
 		for view in gun.find_children("*", "GeometryInstance3D", true, false):
-			(view as GeometryInstance3D).set_instance_shader_parameter("team_colour", colour)
+			Cel.set_team(view as GeometryInstance3D, colour)
 
 
 func _process(delta: float) -> void:

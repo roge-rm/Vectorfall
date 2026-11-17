@@ -1,0 +1,199 @@
+class_name BotSteering
+extends RefCounted
+
+## Turns a bot's planned route into a command each tick, the way a good
+## player moves: look and push towards a point a little further along the
+## route, ski whenever it keeps or builds speed, jet up climbs only once the
+## speed won't carry it over and save energy on the way down, slow down
+## before tight turns and the goal, and hop over things it runs into.
+
+## Speed the bot slows to for the goal and the tightest turns, in m/s.
+const ARRIVE_SPEED := 8.0
+const CORNER_SPEED := 12.0
+## Slowing the bot plans on when braking, in m/s². Braking on the ground is
+## much harder, but a fast bot is often in the air.
+const BRAKE := 12.0
+## Below this speed on a climb the bot jets, if it has energy.
+const CLIMB_SPEED := 18.0
+## Energy a bot wants before it starts a jet climb, so it doesn't spend its
+## last on the bottom of a hill.
+const CLIMB_RESERVE := 30.0
+## Energy a bot waits for when it's out below a climb it can't run up.
+const REST_UNTIL := 95.0
+## Ticks of jetting to get over something in the way, and the energy it
+## needs to start.
+const HOP_TICKS := 40
+const HOP_ENERGY := 15.0
+
+## Waiting for energy below a climb.
+var resting := false
+## Where it last waited for energy.
+var rest_spot := Vector3.INF
+## Ticks left of a hop over something in the way.
+var hop_ticks := 0
+## Jetting up a climb, which carries on until the energy runs low.
+var climbing := false
+## What it's doing, for the debug overlay.
+var doing := ""
+
+
+func reset() -> void:
+	hop_ticks = 0
+	climbing = false
+	resting = false
+	doing = ""
+
+
+func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
+	var command := PlayerCommand.new()
+	var s := brain.soldier
+	var t := s.tuning
+	var pos := s.global_position
+	var vh := Vector3(s.velocity.x, 0.0, s.velocity.z)
+	var speed := vh.length()
+	var lookahead := clampf(speed * 0.7, 6.0, 30.0)
+	var aim := brain.aim_point(lookahead)
+	var to_aim := aim - pos
+	var flat := Vector3(to_aim.x, 0.0, to_aim.z)
+	var dir := flat.normalized() if flat.length() > 0.1 else -s.transform.basis.z
+	var target := brain.target()
+	var link := brain.current_link()
+	var last := brain.path_index == brain.path.size() - 1
+
+	# How fast to go: slow enough to stop at the goal and to make the next turn.
+	var limit := t.max_speed
+	var to_target := Vector2(target.x - pos.x, target.z - pos.z).length()
+	if last:
+		limit = sqrt(ARRIVE_SPEED * ARRIVE_SPEED + 2.0 * BRAKE * to_target)
+	else:
+		var after := brain.director.graph.points[brain.path[brain.path_index + 1]]
+		var into := Vector2(target.x - pos.x, target.z - pos.z)
+		var out := Vector2(after.x - target.x, after.z - target.z)
+		if into.length() > 0.1 and out.length() > 0.1:
+			var turn := absf(into.angle_to(out))
+			if turn > deg_to_rad(60.0):
+				var corner := lerpf(25.0, CORNER_SPEED, clampf((turn - deg_to_rad(60.0)) / deg_to_rad(90.0), 0.0, 1.0))
+				limit = sqrt(corner * corner + 2.0 * BRAKE * to_target)
+	var heading_error := vh.angle_to(dir) if speed > 2.0 else 0.0
+	var braking := speed > limit + 2.0 or (s.grounded and speed > 14.0 and heading_error > deg_to_rad(75.0))
+
+	# Where to push. Skiing and in the air, pushing only adds speed in a
+	# direction you're slower than a few m/s in, so to turn at speed the bot
+	# pushes along the difference between where it's going and where it wants
+	# to go.
+	var wish := dir
+	var correction := dir * speed - vh
+	if braking:
+		wish = (dir * minf(limit, t.run_speed) - vh).normalized()
+	elif speed > t.run_speed + 1.0:
+		wish = correction.normalized() if correction.length() > 0.3 else Vector3.ZERO
+
+	# Skiing: whenever moving fast, in the air or going downhill, but not
+	# while braking or slowly climbing, where running is quicker.
+	# Up and down are along where the bot wants to go, and sliding the wrong
+	# way it runs, which stops it quickest.
+	var along := vh / speed if speed > 0.5 else dir
+	var downhill := s.grounded and s.floor_normal.dot(dir) > 0.03
+	var uphill := s.grounded and s.floor_normal.dot(dir) < -0.05
+	var wrong_way := speed > 2.0 and heading_error > deg_to_rad(90.0)
+	var ski := not braking and not (s.grounded and wrong_way) and (speed > t.run_speed + 1.5 or downhill or not s.grounded)
+	if uphill and speed < t.run_speed + 1.0:
+		ski = false
+
+	# Jetting: over walls and gaps, and up climbs the speed won't carry.
+	var jet := false
+	var jump := false
+	var rise := maxf(aim.y, target.y) - pos.y
+	var carries := speed * speed / (2.0 * t.gravity)
+	var wall_ahead := link != null and link.must_jet and to_target < 15.0 and target.y > pos.y - 0.5
+	if hop_ticks == 0 and _blocked(s, dir):
+		# A jump clears about a metre, the jet more if there's energy for it.
+		jump = s.grounded
+		if s.energy > HOP_ENERGY:
+			hop_ticks = HOP_TICKS
+	if resting:
+		# Out of energy below a climb it can't run up: wait for a tank.
+		resting = s.energy < REST_UNTIL and s.grounded
+		climbing = not resting
+	elif s.grounded and speed < 3.0 and rise > 3.0 and s.energy < CLIMB_RESERVE and brain.no_progress > 1.0 and pos.distance_to(rest_spot) > 5.0:
+		# Only once in a place: if a full tank didn't get it moving, it's stuck.
+		resting = true
+		rest_spot = pos
+	if resting:
+		wish = Vector3.ZERO
+		ski = false
+		brain.no_progress = 0.0
+		doing = "wait for energy"
+	elif hop_ticks > 0:
+		hop_ticks -= 1
+		jet = s.energy > 2.0
+		doing = "hop"
+	elif wall_ahead and s.grounded and s.energy < link.energy and not climbing:
+		# Not enough energy to get over: wait for it by the wall.
+		wish = Vector3.ZERO if to_target < 8.0 else dir
+		ski = false
+		brain.no_progress = 0.0
+		doing = "wait for energy"
+	elif wall_ahead:
+		climbing = s.energy > 2.0
+		jet = climbing
+		jump = s.grounded
+		doing = "jet over"
+	elif rise > (0.3 if climbing else 1.5) and (carries < rise + 3.0 or speed < CLIMB_SPEED) and (climbing or s.velocity.y > -3.0):
+		if climbing:
+			climbing = s.energy > 2.0
+		else:
+			climbing = s.energy > CLIMB_RESERVE
+		jet = climbing
+		doing = "jet climb" if jet else "climb"
+	elif not s.grounded and s.velocity.y < -2.0 and pos.y < target.y - 1.0 and s.energy > 10.0:
+		# Falling short of a point above.
+		jet = true
+		doing = "jet gap"
+	else:
+		climbing = false
+		doing = "brake" if braking else ("ski" if ski else "run")
+	if not jet:
+		climbing = false
+	if jet and not braking:
+		# The jet pushes along the push direction at speed, so push forward
+		# with some correction.
+		wish = (dir + correction / maxf(speed, 1.0) * 2.0).normalized()
+	elif braking and not s.grounded and speed > limit + 8.0 and s.energy > 40.0:
+		jet = true
+		wish = -along
+		doing = "air brake"
+
+	command.yaw = atan2(-dir.x, -dir.z)
+	command.pitch = clampf(atan2(to_aim.y, maxf(flat.length(), 1.0)), -0.6, 0.6)
+	if wish != Vector3.ZERO:
+		var local := Basis(Vector3.UP, command.yaw).inverse() * wish
+		command.move = Vector2(local.x, -local.z).limit_length(1.0)
+	if ski:
+		command.buttons |= PlayerCommand.SKI
+	if jet:
+		command.buttons |= PlayerCommand.JET
+	if jump:
+		command.buttons |= PlayerCommand.JUMP
+	return command
+
+
+## True if the soldier ran into a wall last tick while heading into it.
+func _blocked(s: Soldier, dir: Vector3) -> bool:
+	for k in s.get_slide_collision_count():
+		var normal := s.get_slide_collision(k).get_normal()
+		if absf(normal.y) < 0.4 and normal.dot(dir) < -0.5:
+			return true
+	return false
+
+
+func get_state() -> Dictionary:
+	return { "hop_ticks": hop_ticks, "climbing": climbing, "resting": resting, "rest_spot": rest_spot, "doing": doing }
+
+
+func set_state(state: Dictionary) -> void:
+	hop_ticks = state.hop_ticks
+	climbing = state.climbing
+	resting = state.resting
+	rest_spot = state.rest_spot
+	doing = state.doing
