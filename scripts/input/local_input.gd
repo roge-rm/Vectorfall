@@ -104,6 +104,9 @@ func make_command(delta: float) -> PlayerCommand:
 		if touch != null:
 			command.move = touch.stick
 			command.buttons = touch.buttons | touch.take_pulses()
+			# Holding jump skis, like space and the gamepad A button.
+			if command.buttons & PlayerCommand.JUMP:
+				command.buttons |= PlayerCommand.SKI
 		return command
 	command.weapon = _slot_wanted
 	_slot_wanted = -1

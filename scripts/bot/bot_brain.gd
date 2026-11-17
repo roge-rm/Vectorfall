@@ -730,7 +730,10 @@ func describe() -> String:
 	var fight := ""
 	if combat.target_id != 0:
 		fight = "  fights %d with %s" % [combat.target_id, Weapon.all[combat.weapon].short_name]
-	return "%s %s: %s%s\n%.0f m/s  energy %.0f  health %.0f  knows %d" % [ROLE_NAMES[role], GOAL_NAMES[goal], doing, fight, soldier.velocity.length(), soldier.energy, soldier.health, perception.known_count()]
+	var name_ := ROLE_NAMES[role]
+	if GOAL_NAMES[goal] != name_:
+		name_ += " " + GOAL_NAMES[goal]
+	return "%s: %s%s\n%.0f m/s  energy %.0f  health %.0f  knows %d" % [name_, doing, fight, soldier.velocity.length(), soldier.energy, soldier.health, perception.known_count()]
 
 
 func get_state() -> Dictionary:

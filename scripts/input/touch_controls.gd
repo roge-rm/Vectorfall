@@ -2,21 +2,22 @@ class_name TouchControls
 extends Control
 
 ## On-screen controls: a stick that appears where your left thumb lands, drag
-## anywhere else on the right half to look, and round buttons for fire, jet and
-## jump, a SKI button that turns skiing on and off and SWAP for the next
-## weapon. Sizes follow the shorter side of the screen.
+## anywhere else on the right half to look, and round buttons for fire, jet,
+## jump (hold it to ski) and SWAP for the next weapon, and a small second FIRE
+## on the left. A touch that starts on a FIRE button also looks when dragged.
+## Sizes follow the shorter side of the screen.
 
 ## Left thumb movement in pixels for a full push, as a share of the short side.
 const STICK_REACH := 0.1
+## Name, command bit, distance of the centre from the bottom corner as a share
+## of the short side, radius, and whether the corner is the left one.
 const BUTTONS := [
-	["FIRE", PlayerCommand.FIRE, Vector2(0.15, 0.4), 0.1],
-	["JET", PlayerCommand.JET, Vector2(0.36, 0.15), 0.095],
-	["JUMP", PlayerCommand.JUMP, Vector2(0.13, 0.14), 0.075],
-	["SKI", PlayerCommand.SKI, Vector2(0.36, 0.36), 0.065],
-	["SWAP", PlayerCommand.NEXT_WEAPON, Vector2(0.14, 0.63), 0.06],
+	["FIRE", PlayerCommand.FIRE, Vector2(0.15, 0.4), 0.1, false],
+	["JET", PlayerCommand.JET, Vector2(0.36, 0.15), 0.095, false],
+	["JUMP", PlayerCommand.JUMP, Vector2(0.13, 0.14), 0.075, false],
+	["FIRE", PlayerCommand.FIRE, Vector2(0.4, 0.4), 0.065, true],
+	["SWAP", PlayerCommand.NEXT_WEAPON, Vector2(0.14, 0.63), 0.06, false],
 ]
-## Buttons that a tap turns on and off rather than being held.
-const TOGGLES := PlayerCommand.SKI
 ## Buttons sent for one tick per tap.
 const PULSES := PlayerCommand.NEXT_WEAPON
 
@@ -26,7 +27,7 @@ var buttons := 0
 var _look := Vector2.ZERO
 ## Taps on PULSES buttons not yet sent.
 var _pulses := 0
-## Touch index to what it's doing: "stick", "look" or a button's bit.
+## Touch index to what it's doing: "stick", "look", "pulse" or a button's bit.
 var _touches: Dictionary[int, Variant] = {}
 var _stick_origin := Vector2.ZERO
 var _stick_at := Vector2.ZERO
@@ -59,7 +60,8 @@ func _short_side() -> float:
 func button_centre(k: int) -> Vector2:
 	var s := _short_side()
 	var from_corner: Vector2 = BUTTONS[k][2]
-	return Vector2(size.x - from_corner.x * s, size.y - from_corner.y * s)
+	var x := from_corner.x * s if BUTTONS[k][4] else size.x - from_corner.x * s
+	return Vector2(x, size.y - from_corner.y * s)
 
 
 func button_radius(k: int) -> float:
@@ -77,7 +79,9 @@ func _input(event: InputEvent) -> void:
 		queue_redraw()
 	elif event is InputEventScreenDrag and _touches.has(event.index):
 		var role: Variant = _touches[event.index]
-		if role is String and role == "stick":
+		if role is int and role == PlayerCommand.FIRE:
+			_look += event.relative
+		elif role is String and role == "stick":
 			_stick_at = event.position
 			var reach := STICK_REACH * _short_side()
 			var offset: Vector2 = (_stick_at - _stick_origin).limit_length(reach) / reach
@@ -91,10 +95,7 @@ func _press(index: int, at: Vector2) -> void:
 	for k in BUTTONS.size():
 		if at.distance_to(button_centre(k)) < button_radius(k) * 1.2:
 			var bit: int = BUTTONS[k][1]
-			if bit & TOGGLES:
-				_touches[index] = "toggle"
-				buttons ^= bit
-			elif bit & PULSES:
+			if bit & PULSES:
 				_touches[index] = "pulse"
 				_pulses |= bit
 			else:
@@ -116,7 +117,11 @@ func _release(index: int) -> void:
 	var role: Variant = _touches[index]
 	_touches.erase(index)
 	if role is int:
+		# Another touch may still hold the same button.
 		buttons &= ~role
+		for other: Variant in _touches.values():
+			if other is int:
+				buttons |= other
 	elif role == "stick":
 		stick = Vector2.ZERO
 

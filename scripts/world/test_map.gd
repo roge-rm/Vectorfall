@@ -86,12 +86,18 @@ func base_x(team: int) -> float:
 	return -BASE_X if team == 0 else BASE_X
 
 
-## Where a team's soldiers start: on their base platform, facing the other base.
+## How far to the side of the flag stand the spawn points are, in metres.
+const SPAWN_SIDE := 40.0
+
+## Where a team's soldiers start: on the ridge 40 m beside their flag stand in
+## two groups of four, one each side, facing the other base.
 func spawn_point(team: int, slot := 0) -> Transform3D:
-	var x := base_x(team) + (6.0 if team == 0 else -6.0)
-	var z := (slot - 3.5) * 2.5
+	var side := 1.0 if slot % 2 == 0 else -1.0
+	var row := slot / 2
+	var x := base_x(team) + (row - 1.5) * 4.0
+	var z := side * (SPAWN_SIDE + (row % 2) * 3.0)
 	var facing := -PI * 0.5 if team == 0 else PI * 0.5
-	return Transform3D(Basis(Vector3.UP, facing), Vector3(x, BASE_HEIGHT + 2.2, z))
+	return Transform3D(Basis(Vector3.UP, facing), Vector3(x, surface_at(x, z) + 0.3, z))
 
 
 ## The top of a team's flag stand, in the middle of its base deck.
@@ -201,7 +207,9 @@ func build_route_graph() -> RouteGraph:
 		var x := base_x(team)
 		var front := 1.0 if team == 0 else -1.0
 		graph.add_interest(RouteGraph.FLAG_STAND, team, graph.add_point(Vector3(x, deck, 0.0)))
-		graph.add_interest(RouteGraph.SPAWN, team, graph.add_point(Vector3(x + front * 6.0, deck, 0.0)))
+		for side in [-1.0, 1.0]:
+			var spawn_z: float = side * SPAWN_SIDE
+			graph.add_interest(RouteGraph.SPAWN, team, graph.add_point(Vector3(x, surface_at(x, spawn_z), spawn_z)))
 		for corner in [Vector2(7.0, 7.0), Vector2(7.0, -7.0), Vector2(-7.0, 7.0), Vector2(-7.0, -7.0)]:
 			graph.add_interest(RouteGraph.DEFENCE, team, graph.add_point(Vector3(x + corner.x, deck, corner.y)))
 		# The ramp up the front of the deck is the way in without a jet.

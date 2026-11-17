@@ -2,7 +2,7 @@ extends SceneTree
 
 ## Runs the main scene for five seconds and checks the bots but defence have set off,
 ## the player is standing on its base, the touch controls show only after a
-## touch, and the touch stick and buttons, the SKI toggle and SWAP too, end
+## touch, and the touch stick and buttons, holding JUMP to ski, FIRE and SWAP too, end
 ## up in the player's commands, and the outline setting turns outlines on and
 ## off.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/main_scene_test.gd
@@ -25,7 +25,8 @@ func _run() -> void:
 	await ticks(300)
 	var player: Soldier = main.player
 	checks.check(player.grounded, "the player is standing after five seconds")
-	checks.check(absf(player.global_position.y - (TestMap.BASE_HEIGHT + 2.0)) < 0.1, "on top of the base platform (y %.2f)" % player.global_position.y)
+	var from_flag := Vector2(player.global_position.x - main.map.base_x(0), player.global_position.z).length()
+	checks.check(from_flag > 30.0 and from_flag < 50.0, "the player starts 30 to 50 m beside their flag (%.1f m)" % from_flag)
 	checks.check(main.game.entities.size() == 1 + main.OWN_BOTS + main.ENEMY_BOTS, "the match has you and the bots")
 	checks.check(main.enemy.team != player.team and not main.enemy.dead, "the enemy bots are on the other team")
 	var moving := 0
@@ -72,22 +73,45 @@ func _run() -> void:
 	checks.check(player.global_position.y > start.y + 0.5, "the jet button lifts the player")
 	checks.check((player.global_position - start).x > 0.5, "the stick pushes the player forward, towards the other base")
 
-	# SKI is a toggle: one tap turns it on, the next turns it off.
-	for on: bool in [true, false]:
-		var tap := InputEventScreenTouch.new()
-		tap.index = 2
-		tap.pressed = true
-		tap.position = to_window * touch.button_centre(3)
-		Input.parse_input_event(tap)
-		tap = tap.duplicate()
-		tap.pressed = false
-		Input.parse_input_event(tap)
-		await ticks(2)
-		checks.check(player.ski_held == on, "a tap on SKI turns skiing %s" % ("on" if on else "off"))
+	# Holding JUMP skis, and letting go stops.
+	var hold := InputEventScreenTouch.new()
+	hold.index = 2
+	hold.pressed = true
+	hold.position = to_window * touch.button_centre(2)
+	Input.parse_input_event(hold)
+	await ticks(3)
+	checks.check(player.ski_held, "holding JUMP skis")
+	hold = hold.duplicate()
+	hold.pressed = false
+	Input.parse_input_event(hold)
+	await ticks(3)
+	checks.check(not player.ski_held, "letting go of JUMP stops skiing")
+
+	# Dragging from the left FIRE fires and looks.
+	var fire := InputEventScreenTouch.new()
+	fire.index = 4
+	fire.pressed = true
+	fire.position = to_window * touch.button_centre(3)
+	Input.parse_input_event(fire)
+	var fire_drag := InputEventScreenDrag.new()
+	fire_drag.index = 4
+	fire_drag.position = fire.position
+	fire_drag.relative = to_window.basis_xform(Vector2(40.0, 0.0))
+	Input.parse_input_event(fire_drag)
+	await ticks(2)
+	checks.check(touch.buttons & PlayerCommand.FIRE != 0 and touch.buttons & PlayerCommand.JET != 0, "the left FIRE and JET are held at once")
+	checks.check(touch.stick.y > 0.99, "the stick still works with FIRE and JET held")
+	var turned := touch.take_look()
+	checks.check(turned.x > 0.0 or absf(main.input.source.yaw) > 0.0, "a drag from FIRE looks")
+	fire = fire.duplicate()
+	fire.pressed = false
+	Input.parse_input_event(fire)
+	await ticks(2)
+	checks.check(touch.buttons == PlayerCommand.JET, "letting go of FIRE leaves JET held")
 
 	# SWAP switches to the next weapon once per tap.
 	var swap := InputEventScreenTouch.new()
-	swap.index = 3
+	swap.index = 5
 	swap.pressed = true
 	swap.position = to_window * touch.button_centre(4)
 	Input.parse_input_event(swap)

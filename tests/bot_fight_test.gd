@@ -98,7 +98,7 @@ func _captures_alone() -> void:
 	var setup := _ctf_match(8, 2, 0)
 	var game: Match = setup.game
 	var captured := -1.0
-	for i in 60 * 120:
+	for i in 60 * 300:
 		await physics_frame
 		if game.scores[0] > 0:
 			captured = i / 60.0

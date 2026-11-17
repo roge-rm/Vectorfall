@@ -20,11 +20,12 @@ func _initialize() -> void:
 
 func _run() -> void:
 	for team in 2:
-		var on_deck := true
+		var good := map.spawn_points(team).size() == 8
 		for point in map.spawn_points(team):
-			var off := point.origin - Vector3(map.base_x(team), 0.0, 0.0)
-			on_deck = on_deck and absf(off.x) < TestMap.BASE_SIZE * 0.5 and absf(off.z) < TestMap.BASE_SIZE * 0.5
-		checks.check(on_deck and map.spawn_points(team).size() == 8, "team %d's 8 spawn points are on its base" % team)
+			var away := Vector2(point.origin.x - map.base_x(team), point.origin.z).length()
+			good = good and away > 30.0 and away < 50.0 and not map.blocked_at(point.origin.x, point.origin.z)
+			good = good and absf(point.origin.y - map.surface_at(point.origin.x, point.origin.z)) < 1.0
+		checks.check(good, "team %d's 8 spawn points are 30 to 50 m from its flag, clear and on the ground" % team)
 
 	var x := map.base_x(0) + 20.0
 	var soldier := game.add_soldier(0, Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3(x, map.height_at(x, 0.0) + 1.0, 0.0)), input)

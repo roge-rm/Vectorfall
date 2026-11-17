@@ -1,6 +1,6 @@
 extends Node
 
-## Loads straight into the test map with you on team 0's base, a flag on each
+## Loads straight into the test map with you beside team 0's base, a flag on each
 ## base, and bots on both teams playing capture the flag with you, as
 ## offence, defence or midfield. F3 shows what the bots are doing.
 
