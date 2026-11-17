@@ -20,6 +20,10 @@ var device := Device.KEYBOARD
 var source := Source.new()
 var touch: TouchControls
 var _mouse_look := Vector2.ZERO
+## Weapon switches pressed since the last command, sent one tick each.
+var _next_presses := 0
+var _prev_presses := 0
+var _slot_wanted := -1
 
 
 ## The CommandSource the match asks each tick.
@@ -57,6 +61,14 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("next_weapon"):
+		_next_presses += 1
+	elif event.is_action_pressed("prev_weapon"):
+		_prev_presses += 1
+	elif event.is_action_pressed("weapon_1"):
+		_slot_wanted = 0
+	elif event.is_action_pressed("weapon_2"):
+		_slot_wanted = 1
 	if event.is_action_pressed("pause"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event is InputEventMouseButton and event.pressed and event.device != InputEvent.DEVICE_ID_EMULATION:
@@ -91,8 +103,16 @@ func make_command(delta: float) -> PlayerCommand:
 		# Touches also make pretend mouse clicks, which mustn't fire.
 		if touch != null:
 			command.move = touch.stick
-			command.buttons = touch.buttons
+			command.buttons = touch.buttons | touch.take_pulses()
 		return command
+	command.weapon = _slot_wanted
+	_slot_wanted = -1
+	if _next_presses > 0:
+		command.buttons |= PlayerCommand.NEXT_WEAPON
+		_next_presses -= 1
+	elif _prev_presses > 0:
+		command.buttons |= PlayerCommand.PREV_WEAPON
+		_prev_presses -= 1
 	command.move = Input.get_vector("move_left", "move_right", "move_back", "move_forward")
 	for pair: Array in [["fire", PlayerCommand.FIRE], ["jump", PlayerCommand.JUMP], ["jet", PlayerCommand.JET], ["use", PlayerCommand.USE], ["deploy", PlayerCommand.DEPLOY], ["ski", PlayerCommand.SKI]]:
 		if Input.is_action_pressed(pair[0]):

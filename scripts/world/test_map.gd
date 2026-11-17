@@ -1,22 +1,25 @@
 class_name TestMap
 extends Node3D
 
-## A greybox map built in code: smooth rolling hills to ski over, ramps, rocks
+## A greybox map built in code: a long valley between the bases to ski down, ramps, rocks
 ## and pillars, and a base platform with a tower at each end. Team 0's base is
 ## at -x and team 1's at +x.
 
-const LENGTH := 360.0
-const WIDTH := 180.0
+const LENGTH := 520.0
+const WIDTH := 200.0
 const CELL := 3.0
-const BASE_X := 150.0
+const BASE_X := 200.0
 const BASE_HEIGHT := 6.0
 const BASE_SIZE := 24.0
 const MAP_SEED := 7
-## Distance from one ridge to the next along the map, and their height from
-## valley floor to top. Ridges sit at the bases and x = ±50, valleys at 0 and
-## ±100, so each base skis down, over a ridge and into the middle.
-const HILL_SPACING := 100.0
-const HILL_HEIGHT := 20.0
+## The ground falls from each base's ridge to a long valley in the middle,
+## about HILL_HEIGHT below, 70 to 90 m along its length. Skiing straight
+## down from a base reaches about 50 m/s; drag makes each extra m/s cost a
+## lot more height up there. A smaller wave keeps the first 60 m out of each
+## base gentle and makes the drop after it steeper, so a crest about 100 m
+## out throws you when you're fast.
+const HILL_HEIGHT := 78.0
+const SHELF_HEIGHT := 16.0
 
 const GRASS := Color(0.45, 0.62, 0.32)
 const GRASS_DARK := Color(0.36, 0.52, 0.28)
@@ -48,9 +51,12 @@ func _init() -> void:
 ## edges into a bowl.
 func height_at(x: float, z: float) -> float:
 	var bent := x + 14.0 * sin(z * 0.025)
-	var amplitude := HILL_HEIGHT * 0.5 * (1.0 + 0.3 * sin(z * 0.035 + 1.0))
-	var ridges := cos(TAU * bent / HILL_SPACING + PI)
-	var h := BASE_HEIGHT - HILL_HEIGHT * 0.5 + ridges * amplitude + noise.get_noise_2d(x, z) * 4.0
+	var depth := HILL_HEIGHT * (1.0 + 0.15 * sin(z * 0.035 + 1.0))
+	var shelf := SHELF_HEIGHT * (1.0 + 0.3 * sin(z * 0.05 + 2.0))
+	# 1 at the bases and -1 in the middle, and a wave twice as fast.
+	var valley := -cos(TAU * bent / (BASE_X * 2.0))
+	var wave := cos(TAU * bent / BASE_X)
+	var h := BASE_HEIGHT + (valley - 1.0) * depth * 0.5 + (1.0 - wave) * shelf * 0.25 + noise.get_noise_2d(x, z) * 4.0
 	for team in 2:
 		var d := Vector2(x - base_x(team), z).length()
 		var t := smoothstep(BASE_SIZE * 0.9, BASE_SIZE * 2.2, d)
@@ -73,6 +79,14 @@ func spawn_point(team: int, slot := 0) -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, facing), Vector3(x, BASE_HEIGHT + 2.2, z))
 
 
+## Every place a team's soldiers respawn.
+func spawn_points(team: int) -> Array[Transform3D]:
+	var points: Array[Transform3D] = []
+	for slot in 8:
+		points.append(spawn_point(team, slot))
+	return points
+
+
 func _build_ground() -> void:
 	var nx := int(LENGTH / CELL)
 	var nz := int(WIDTH / CELL)
@@ -88,13 +102,9 @@ func _build_ground() -> void:
 			vertices.append(Vector3(x, h, z))
 			var normal := Vector3(height_at(x - 1.0, z) - height_at(x + 1.0, z), 2.0, height_at(x, z - 1.0) - height_at(x, z + 1.0)).normalized()
 			normals.append(normal)
+			# The ground shader picks its colour from these per pixel.
 			var patch := noise.get_noise_2d(x * 3.0 + 500.0, z * 3.0)
-			var colour := GRASS if patch > 0.0 else GRASS_DARK
-			if normal.y < 0.82:
-				colour = ROCK
-			elif normal.y < 0.9:
-				colour = DIRT
-			colours.append(colour)
+			colours.append(Color(normal.y, patch * 0.5 + 0.5, 0.0))
 	for j in nz:
 		for i in nx:
 			var a := j * (nx + 1) + i
@@ -110,7 +120,12 @@ func _build_ground() -> void:
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	mesh.surface_set_material(0, Cel.material(Color.WHITE, 0.0, false, true))
+	var material := Cel.ground_material()
+	material.set_shader_parameter("grass", GRASS)
+	material.set_shader_parameter("grass_dark", GRASS_DARK)
+	material.set_shader_parameter("dirt", DIRT)
+	material.set_shader_parameter("rock", ROCK)
+	mesh.surface_set_material(0, material)
 
 	ground = StaticBody3D.new()
 	ground.name = "Ground"
@@ -151,19 +166,19 @@ func _build_props() -> void:
 	add_child(props)
 	# Ramps along the middle, angled to launch you towards the other base.
 	for k in 6:
-		var x := rng.randf_range(-100.0, 100.0)
-		var z := rng.randf_range(-55.0, 55.0)
+		var x := rng.randf_range(-140.0, 140.0)
+		var z := rng.randf_range(-60.0, 60.0)
 		var heading := rng.randf_range(0.0, TAU)
 		var tilt := deg_to_rad(rng.randf_range(14.0, 24.0))
 		var basis := Basis(Vector3.UP, heading) * Basis(Vector3.RIGHT, tilt)
 		_box(props, Vector3(6.0, 1.0, 14.0), Transform3D(basis, Vector3(x, height_at(x, z) + 1.0, z)), CONCRETE)
-	for k in 14:
-		var x := rng.randf_range(-125.0, 125.0)
-		var z := rng.randf_range(-70.0, 70.0)
+	for k in 18:
+		var x := rng.randf_range(-165.0, 165.0)
+		var z := rng.randf_range(-75.0, 75.0)
 		_rock(props, Vector3(x, height_at(x, z) - 0.5, z), rng.randf_range(2.0, 5.0))
-	for k in 6:
-		var x := rng.randf_range(-110.0, 110.0)
-		var z := rng.randf_range(-65.0, 65.0)
+	for k in 8:
+		var x := rng.randf_range(-150.0, 150.0)
+		var z := rng.randf_range(-70.0, 70.0)
 		var tall := rng.randf_range(8.0, 18.0)
 		_pillar(props, Vector3(x, height_at(x, z) - 1.0 + tall * 0.5, z), 1.6, tall)
 
@@ -172,9 +187,7 @@ func _box(parent: Node3D, size: Vector3, where: Transform3D, colour: Color) -> v
 	var body := StaticBody3D.new()
 	body.transform = where
 	var view := MeshInstance3D.new()
-	var mesh := BoxMesh.new()
-	mesh.size = size
-	view.mesh = mesh
+	view.mesh = Cel.box(size)
 	view.material_override = Cel.material(colour)
 	body.add_child(view)
 	var shape := CollisionShape3D.new()
@@ -189,13 +202,7 @@ func _pillar(parent: Node3D, at: Vector3, radius: float, tall: float) -> void:
 	var body := StaticBody3D.new()
 	body.position = at
 	var view := MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = radius * 0.8
-	mesh.bottom_radius = radius
-	mesh.height = tall
-	mesh.radial_segments = 8
-	mesh.rings = 1
-	view.mesh = mesh
+	view.mesh = Cel.cylinder(radius * 0.8, radius, tall)
 	view.material_override = Cel.material(ROCK.lightened(0.15))
 	body.add_child(view)
 	var shape := CollisionShape3D.new()
@@ -236,7 +243,7 @@ func _rock(parent: Node3D, at: Vector3, size: float) -> void:
 	body.position = at
 	body.rotation.y = rng.randf_range(0.0, TAU)
 	var view := MeshInstance3D.new()
-	view.mesh = tool.commit()
+	view.mesh = Cel.hull_mesh(tool.commit())
 	view.material_override = Cel.material(ROCK)
 	body.add_child(view)
 	var shape := CollisionShape3D.new()

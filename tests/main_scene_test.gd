@@ -2,7 +2,8 @@ extends SceneTree
 
 ## Runs the main scene for five seconds and checks the player is standing on
 ## its base, the touch controls show only after a touch, and the touch stick
-## and buttons, the SKI toggle too, end up in the player's commands.
+## and buttons, the SKI toggle and SWAP too, end up in the player's
+## commands, and the outline setting turns outlines on and off.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/main_scene_test.gd
 
 var checks := TestWorld.Checks.new()
@@ -20,11 +21,20 @@ func ticks(n: int) -> void:
 func _run() -> void:
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(main)
+	# The dummy's discs would knock the player about.
+	main.dummy.fire_enabled = false
 	await ticks(300)
 	var player: Soldier = main.player
 	checks.check(player.grounded, "the player is standing after five seconds")
 	checks.check(absf(player.global_position.y - (TestMap.BASE_HEIGHT + 2.0)) < 0.1, "on top of the base platform (y %.2f)" % player.global_position.y)
 	checks.check(main.game.entities.size() == 2, "the match has both soldiers")
+	checks.check(main.enemy.team != player.team and not main.enemy.dead, "the second soldier is an enemy")
+	var outlined := Cel.material(Color(0.5, 0.5, 0.5))
+	Settings.outlines = false
+	Cel.set_outlines(false)
+	var off := outlined.next_pass == null and Cel.material(Color(0.4, 0.5, 0.5)).next_pass == null
+	Cel.set_outlines(true)
+	checks.check(off and outlined.next_pass != null, "the outline setting takes outlines off and puts them back")
 	checks.check(not main.touch.visible, "no touch controls on a computer to start with")
 
 	var touch: TouchControls = main.touch
@@ -65,6 +75,18 @@ func _run() -> void:
 		Input.parse_input_event(tap)
 		await ticks(2)
 		checks.check(player.ski_held == on, "a tap on SKI turns skiing %s" % ("on" if on else "off"))
+
+	# SWAP switches to the next weapon once per tap.
+	var swap := InputEventScreenTouch.new()
+	swap.index = 3
+	swap.pressed = true
+	swap.position = to_window * touch.button_centre(4)
+	Input.parse_input_event(swap)
+	swap = swap.duplicate()
+	swap.pressed = false
+	Input.parse_input_event(swap)
+	await ticks(3)
+	checks.check(player.weapon == Weapon.CHAINGUN, "a tap on SWAP switches to the chaingun")
 
 	var key := InputEventKey.new()
 	key.physical_keycode = KEY_W

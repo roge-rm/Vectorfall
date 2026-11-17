@@ -75,3 +75,6 @@ extends Resource
 @export var height := 1.8
 @export var radius := 0.4
 @export var eye_height := 1.6
+## Splash impulses are in kg·m/s, so a heavier soldier is pushed less.
+@export var mass := 90.0
+@export var health_max := 100.0

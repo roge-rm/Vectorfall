@@ -80,6 +80,22 @@ deploy={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"device":-1,"physical_keycode":71), Object(InputEventJoypadButton,"device":-1,"button_index":3,"pressed":true)]
 }
+weapon_1={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"device":-1,"physical_keycode":49)]
+}
+weapon_2={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"device":-1,"physical_keycode":50)]
+}
+next_weapon={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"device":-1,"button_index":5,"pressed":true), Object(InputEventKey,"device":-1,"physical_keycode":81), Object(InputEventJoypadButton,"device":-1,"button_index":10,"pressed":true)]
+}
+prev_weapon={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"device":-1,"button_index":4,"pressed":true)]
+}
 pause={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"device":-1,"physical_keycode":4194305), Object(InputEventJoypadButton,"device":-1,"button_index":6,"pressed":true)]

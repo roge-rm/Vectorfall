@@ -37,7 +37,7 @@ func _init() -> void:
 	environment.fog_enabled = true
 	environment.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 	environment.fog_light_color = HORIZON
-	environment.fog_density = 0.0025
+	environment.fog_density = 0.0012
 	environment.fog_sky_affect = 0.0
 	var world := WorldEnvironment.new()
 	world.environment = environment

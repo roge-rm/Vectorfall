@@ -3,8 +3,8 @@ extends Control
 
 ## On-screen controls: a stick that appears where your left thumb lands, drag
 ## anywhere else on the right half to look, and round buttons for fire, jet and
-## jump, and a SKI button that turns skiing on and off. Sizes follow the
-## shorter side of the screen.
+## jump, a SKI button that turns skiing on and off and SWAP for the next
+## weapon. Sizes follow the shorter side of the screen.
 
 ## Left thumb movement in pixels for a full push, as a share of the short side.
 const STICK_REACH := 0.1
@@ -13,14 +13,19 @@ const BUTTONS := [
 	["JET", PlayerCommand.JET, Vector2(0.36, 0.15), 0.095],
 	["JUMP", PlayerCommand.JUMP, Vector2(0.13, 0.14), 0.075],
 	["SKI", PlayerCommand.SKI, Vector2(0.36, 0.36), 0.065],
+	["SWAP", PlayerCommand.NEXT_WEAPON, Vector2(0.14, 0.63), 0.06],
 ]
 ## Buttons that a tap turns on and off rather than being held.
 const TOGGLES := PlayerCommand.SKI
+## Buttons sent for one tick per tap.
+const PULSES := PlayerCommand.NEXT_WEAPON
 
 ## x is right and y is forward, like PlayerCommand.move.
 var stick := Vector2.ZERO
 var buttons := 0
 var _look := Vector2.ZERO
+## Taps on PULSES buttons not yet sent.
+var _pulses := 0
 ## Touch index to what it's doing: "stick", "look" or a button's bit.
 var _touches: Dictionary[int, Variant] = {}
 var _stick_origin := Vector2.ZERO
@@ -31,6 +36,13 @@ func _init() -> void:
 	name = "TouchControls"
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+## Taps on one-shot buttons since the last call.
+func take_pulses() -> int:
+	var taken := _pulses
+	_pulses = 0
+	return taken
 
 
 ## Look movement in pixels since the last call.
@@ -82,6 +94,9 @@ func _press(index: int, at: Vector2) -> void:
 			if bit & TOGGLES:
 				_touches[index] = "toggle"
 				buttons ^= bit
+			elif bit & PULSES:
+				_touches[index] = "pulse"
+				_pulses |= bit
 			else:
 				_touches[index] = bit
 				buttons |= bit

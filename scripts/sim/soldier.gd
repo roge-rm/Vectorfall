@@ -6,12 +6,20 @@ extends CharacterBody3D
 ## get_state(), so a copy given the same state and commands moves the same.
 
 const TEAM_COLOURS: Array[Color] = [Color(1.0, 0.45, 0.15), Color(0.2, 0.6, 1.0)]
+const TEAM_NAMES: Array[String] = ["Orange", "Blue"]
 const PITCH_LIMIT := 1.45
 ## Render layer for your own body, which your camera leaves out.
 const OWN_BODY_LAYER := 2
+## The gun's muzzle from the eye, in look space: right, down and ahead.
+const MUZZLE := Vector3(0.22, -0.2, -0.6)
+## Seconds after switching weapons before the new one can fire.
+const SWITCH_TIME := 0.3
 
 var entity_id := 0
 var team := 0
+var display_name := ""
+## The match this soldier is in, for firing and respawning.
+var game: Match
 var tuning := MovementTuning.new()
 var yaw := 0.0
 var pitch := 0.0
@@ -31,16 +39,36 @@ var skiing := false
 ## The ground's normal after the last tick, straight up in the air.
 var floor_normal := Vector3.UP
 
-var body_mesh: MeshInstance3D
+var health := 0.0
+var dead := false
+## Seconds left until a dead soldier respawns.
+var respawn_in := 0.0
+## Slot of the weapon in hand, an index into Weapon.all.
+var weapon := 0
+## Rounds left for each weapon slot.
+var ammo: Array[int] = []
+## Seconds until the weapon in hand can fire again.
+var cooldown := 0.0
+## How far a weapon that spins up has spun, 0 to 1.
+var spin := 0.0
+## Shots fired since the start, so the view model can kick on each one.
+var shots := 0
+
+var body: SoldierBody
 var blob: BlobShadow
 
 
 func _init() -> void:
 	energy = tuning.energy_max
 	since_jet = tuning.refill_delay
+	health = tuning.health_max
+	for w in Weapon.all:
+		ammo.append(w.ammo)
 	floor_snap_length = tuning.floor_snap
 	floor_max_angle = deg_to_rad(50.0)
 	floor_constant_speed = true
+	collision_layer = Match.SOLDIER_LAYER
+	collision_mask = Match.WORLD_LAYER | Match.SOLDIER_LAYER
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
 	capsule.radius = tuning.radius
@@ -49,17 +77,9 @@ func _init() -> void:
 	shape.position.y = tuning.height * 0.5
 	add_child(shape)
 
-	# A stand-in body until soldiers get real ones.
-	body_mesh = MeshInstance3D.new()
-	var body := CapsuleMesh.new()
-	body.radius = tuning.radius
-	body.height = tuning.height
-	body.radial_segments = 16
-	body.rings = 6
-	body_mesh.mesh = body
-	body_mesh.position.y = tuning.height * 0.5
-	body_mesh.material_override = Cel.material(Color(0.85, 0.85, 0.85), 0.8)
-	add_child(body_mesh)
+	body = SoldierBody.new()
+	body.soldier = self
+	add_child(body)
 
 	blob = BlobShadow.new()
 	add_child(blob)
@@ -71,12 +91,72 @@ func _ready() -> void:
 
 func set_team(value: int) -> void:
 	team = value
-	body_mesh.set_instance_shader_parameter("team_colour", TEAM_COLOURS[team % TEAM_COLOURS.size()])
+	body.set_team_colour(TEAM_COLOURS[team % TEAM_COLOURS.size()])
 
 
 ## Hides your own body from your camera.
 func set_first_person(on: bool) -> void:
-	body_mesh.layers = OWN_BODY_LAYER if on else 1
+	body.set_render_layer(OWN_BODY_LAYER if on else 1)
+
+
+## The middle of the body, where blasts push from.
+func centre() -> Vector3:
+	return global_position + Vector3.UP * tuning.height * 0.5
+
+
+## Distance from a point to the body's capsule, 0 inside it.
+func distance_to_body(point: Vector3) -> float:
+	var r := tuning.radius
+	var bottom := global_position + Vector3.UP * r
+	var top := global_position + Vector3.UP * (tuning.height - r)
+	var closest := Geometry3D.get_closest_point_to_segment(point, bottom, top)
+	return maxf(point.distance_to(closest) - r, 0.0)
+
+
+## A push in kg·m/s. One with enough lift takes you off the ground, so a
+## blast under your feet throws you up.
+func push(impulse: Vector3) -> void:
+	var change := impulse / tuning.mass
+	velocity += change
+	if change.y > 1.0:
+		grounded = false
+		floor_normal = Vector3.UP
+
+
+func die() -> void:
+	dead = true
+	health = 0.0
+	respawn_in = Match.RESPAWN_DELAY
+	jetting = false
+	skiing = false
+	spin = 0.0
+	_set_alive_layers(false)
+
+
+## Back to full health, energy and ammo at a spawn point.
+func revive(where: Transform3D) -> void:
+	dead = false
+	health = tuning.health_max
+	energy = tuning.energy_max
+	since_jet = tuning.refill_delay
+	for k in Weapon.all.size():
+		ammo[k] = Weapon.all[k].ammo
+	cooldown = 0.0
+	spin = 0.0
+	respawn_in = 0.0
+	global_position = where.origin
+	velocity = Vector3.ZERO
+	yaw = where.basis.get_euler().y
+	pitch = 0.0
+	rotation = Vector3(0.0, yaw, 0.0)
+	grounded = false
+	floor_normal = Vector3.UP
+	_set_alive_layers(true)
+
+
+func _set_alive_layers(alive: bool) -> void:
+	collision_layer = Match.SOLDIER_LAYER if alive else 0
+	collision_mask = Match.WORLD_LAYER | Match.SOLDIER_LAYER if alive else Match.WORLD_LAYER
 
 
 func eye_transform() -> Transform3D:
@@ -89,6 +169,12 @@ func horizontal_speed() -> float:
 
 
 func simulate(command: PlayerCommand, delta: float) -> void:
+	if dead:
+		# A body only falls and slides until it's time to respawn.
+		var still := PlayerCommand.new()
+		still.yaw = yaw
+		still.pitch = pitch
+		command = still
 	var t := tuning
 	yaw = wrapf(command.yaw, -PI, PI)
 	pitch = clampf(command.pitch, -PITCH_LIMIT, PITCH_LIMIT)
@@ -174,6 +260,39 @@ func simulate(command: PlayerCommand, delta: float) -> void:
 			velocity.x = kept.x
 			velocity.z = kept.z
 	blob.follow(self)
+	if dead:
+		respawn_in -= delta
+		if respawn_in <= 0.0 and game != null:
+			game.respawn(self)
+	else:
+		_use_weapon(command, delta)
+
+
+## Switching weapons and firing, after moving so a shot leaves from where you
+## are now with the speed you have now.
+func _use_weapon(command: PlayerCommand, delta: float) -> void:
+	var count := Weapon.all.size()
+	var wanted := weapon
+	if command.weapon >= 0 and command.weapon < count:
+		wanted = command.weapon
+	if command.has(PlayerCommand.NEXT_WEAPON):
+		wanted = (wanted + 1) % count
+	if command.has(PlayerCommand.PREV_WEAPON):
+		wanted = (wanted + count - 1) % count
+	if wanted != weapon:
+		weapon = wanted
+		spin = 0.0
+		cooldown = maxf(cooldown, SWITCH_TIME)
+	cooldown = maxf(cooldown - delta, 0.0)
+	var w := Weapon.all[weapon]
+	var trigger := command.has(PlayerCommand.FIRE) and ammo[weapon] > 0
+	if w.spin_up > 0.0:
+		spin = move_toward(spin, 1.0, delta / w.spin_up) if trigger else move_toward(spin, 0.0, delta / w.spin_down)
+	if trigger and cooldown <= 0.0 and spin >= w.spin_to_fire and game != null:
+		game.fire(self)
+		ammo[weapon] -= 1
+		shots += 1
+		cooldown = w.interval_at(spin)
 
 
 ## Skiing on the ground: speed along the slope only, gravity along the slope
@@ -232,6 +351,14 @@ func get_state() -> Dictionary:
 		"ski_held": ski_held,
 		"skiing": skiing,
 		"floor_normal": floor_normal,
+		"health": health,
+		"dead": dead,
+		"respawn_in": respawn_in,
+		"weapon": weapon,
+		"ammo": ammo.duplicate(),
+		"cooldown": cooldown,
+		"spin": spin,
+		"shots": shots,
 	}
 
 
@@ -252,3 +379,12 @@ func set_state(state: Dictionary) -> void:
 	ski_held = state.ski_held
 	skiing = state.skiing
 	floor_normal = state.floor_normal
+	health = state.health
+	dead = state.dead
+	respawn_in = state.respawn_in
+	weapon = state.weapon
+	ammo.assign(state.ammo)
+	cooldown = state.cooldown
+	spin = state.spin
+	shots = state.shots
+	_set_alive_layers(not dead)

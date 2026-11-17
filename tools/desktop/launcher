@@ -1,0 +1,3 @@
+#!/bin/sh
+# Vectorfall, from its Debian package.
+exec /usr/lib/vectorfall/vectorfall "$@"

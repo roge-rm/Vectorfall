@@ -1,0 +1,13 @@
+Package: vectorfall
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Vectorfall maintainers <14335001+roge-rm@users.noreply.github.com>
+Installed-Size: @SIZE@
+Depends: libc6, libegl1, libgl1, libx11-6, libxcursor1, libxi6, libxinerama1, libxrandr2, libxkbcommon0, libudev1
+Recommends: libpulse0, libasound2t64
+Section: games
+Priority: optional
+Description: team capture the flag shooter with jetpacks and skiing
+ Two teams fight over each other's flags on big hilly maps, skiing down
+ slopes and jetting over ridges. The desktop build of the Android game.
+ It needs OpenGL 3.3.

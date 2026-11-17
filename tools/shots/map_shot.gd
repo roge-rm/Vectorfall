@@ -1,7 +1,7 @@
 extends Node
 
-## Takes a picture of the test map from the player's spawn, looking across
-## the map, and quits. It needs a screen:
+## Takes a picture of the test map from just in front of the player's base,
+## looking down the valley to the other base, and quits. It needs a screen:
 ##   DISPLAY=:0 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/map_shot.tscn
 ## Saved as /srv/downloads/temp/debug/Vectorfall/map.png. Add "no-outlines"
 ## after -- for a picture without outlines.
@@ -16,10 +16,15 @@ func _ready() -> void:
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	Cel.set_outlines(outlines)
-	# Let the soldiers land, then look a little down across the map.
+	# Stand at the foot of the base's ramp, let the soldiers land, then look a
+	# little down across the map.
+	var map: TestMap = main.map
+	var x := map.base_x(0) + 24.0
+	main.player.global_position = Vector3(x, map.height_at(x, 0.0) + 0.5, 0.0)
+	main.dummy.fire_enabled = false
 	for i in 90:
 		await get_tree().physics_frame
-	main.input.source.pitch = -0.12
+	main.input.source.pitch = -0.1
 	for i in 30:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw

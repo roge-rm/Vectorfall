@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Vectorfall
+GenericName=Team shooter
+Comment=Capture the flag with jetpacks and skiing
+Exec=vectorfall
+Icon=vectorfall
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=shooter;jetpack;ski;capture the flag;
+StartupWMClass=Vectorfall
