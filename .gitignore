@@ -1,0 +1,19 @@
+# Godot
+/.godot
+/android/
+*.import.tmp
+
+# The Godot editor and export templates, kept locally
+/tools/godot/
+
+# Builds
+/build/
+*.apk
+*.aab
+*.idsig
+
+# Crash dumps. They're named core.<pid>, because a plain "core" pattern would
+# also hide real folders.
+core.[0-9]*
+
+__pycache__/
