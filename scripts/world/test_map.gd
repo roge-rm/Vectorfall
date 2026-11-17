@@ -12,14 +12,13 @@ const BASE_X := 200.0
 const BASE_HEIGHT := 6.0
 const BASE_SIZE := 24.0
 const MAP_SEED := 7
-## The ground falls from each base's ridge to a long valley in the middle,
-## about HILL_HEIGHT below, 70 to 90 m along its length. Skiing straight
-## down from a base reaches about 50 m/s; drag makes each extra m/s cost a
-## lot more height up there. A smaller wave keeps the first 60 m out of each
-## base gentle and makes the drop after it steeper, so a crest about 100 m
-## out throws you when you're fast.
-const HILL_HEIGHT := 78.0
-const SHELF_HEIGHT := 16.0
+const STAND_HEIGHT := 0.5
+## Three rolling hills between the bases, each about HILL_HEIGHT from ridge
+## to valley and a third of the way across, with the bases on the ridge tops
+## at each end. A soldier who skis down and jets up each one builds speed
+## over the run.
+const HILL_HEIGHT := 38.0
+const HILLS := 3
 
 const GRASS := Color(0.45, 0.62, 0.32)
 const GRASS_DARK := Color(0.36, 0.52, 0.28)
@@ -51,12 +50,12 @@ func _init() -> void:
 ## edges into a bowl.
 func height_at(x: float, z: float) -> float:
 	var bent := x + 14.0 * sin(z * 0.025)
-	var depth := HILL_HEIGHT * (1.0 + 0.15 * sin(z * 0.035 + 1.0))
-	var shelf := SHELF_HEIGHT * (1.0 + 0.3 * sin(z * 0.05 + 2.0))
-	# 1 at the bases and -1 in the middle, and a wave twice as fast.
-	var valley := -cos(TAU * bent / (BASE_X * 2.0))
-	var wave := cos(TAU * bent / BASE_X)
-	var h := BASE_HEIGHT + (valley - 1.0) * depth * 0.5 + (1.0 - wave) * shelf * 0.25 + noise.get_noise_2d(x, z) * 4.0
+	var depth := HILL_HEIGHT * (1.0 + 0.08 * sin(z * 0.035 + 1.0))
+	# 1 on a ridge top and -1 in a valley, with a ridge at each base.
+	var valley := cos(TAU * HILLS * (bent + BASE_X) / (BASE_X * 2.0))
+	# Broad ridge tops that don't throw you, and tighter valleys.
+	var ridge := 1.0 - pow(1.0 - (valley + 1.0) * 0.5, 1.5)
+	var h := BASE_HEIGHT + (ridge - 1.0) * depth + noise.get_noise_2d(x, z) * 3.0
 	for team in 2:
 		var d := Vector2(x - base_x(team), z).length()
 		var t := smoothstep(BASE_SIZE * 0.9, BASE_SIZE * 2.2, d)
@@ -77,6 +76,21 @@ func spawn_point(team: int, slot := 0) -> Transform3D:
 	var z := (slot - 3.5) * 2.5
 	var facing := -PI * 0.5 if team == 0 else PI * 0.5
 	return Transform3D(Basis(Vector3.UP, facing), Vector3(x, BASE_HEIGHT + 2.2, z))
+
+
+## The top of a team's flag stand, in the middle of its base deck.
+func stand_top(team: int) -> Vector3:
+	return Vector3(base_x(team), BASE_HEIGHT + 2.0 + STAND_HEIGHT, 0.0)
+
+
+## The spot a carrier touches to score.
+func stand_point(team: int) -> Vector3:
+	return stand_top(team) + Vector3.UP * 0.5
+
+
+## Where the team's flag rests, its middle, on the stand.
+func flag_rest(team: int) -> Vector3:
+	return stand_top(team) + Vector3.UP * (Flag.POLE * 0.5)
 
 
 ## Every place a team's soldiers respawn.
@@ -153,11 +167,35 @@ func _build_base(team: int) -> void:
 	var ramp_centre := Vector3(x + front * (BASE_SIZE * 0.5 + 7.0 * cos(tilt) - 0.5 * sin(tilt)), BASE_HEIGHT + 2.0 - 7.0 * sin(tilt) - 0.5 * cos(tilt), 0.0)
 	_box(base, Vector3(14.0, 1.0, 10.0), Transform3D(ramp_basis, ramp_centre), CONCRETE)
 	# A tower at the back with a deck on top, in the team's colour.
+	_build_stand(base, team)
 	var back := x - front * (BASE_SIZE * 0.5 - 4.0)
 	_box(base, Vector3(4.0, 14.0, 4.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 9.0, 0.0)), colour)
 	_box(base, Vector3(10.0, 1.0, 10.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 16.5, 0.0)), CONCRETE)
 	for side in [-1.0, 1.0]:
 		_box(base, Vector3(3.0, 4.0, 3.0), Transform3D(Basis.IDENTITY, Vector3(x, BASE_HEIGHT + 4.0, side * (BASE_SIZE * 0.5 - 2.0))), colour)
+
+
+## A round pad in the team's colour with a ring of light around it, for the
+## flag to stand on. It has no collision, so nothing catches on it.
+func _build_stand(base: Node3D, team: int) -> void:
+	var colour := Soldier.TEAM_COLOURS[team]
+	var top := stand_top(team)
+	var pad := MeshInstance3D.new()
+	pad.mesh = Cel.cylinder(2.0, 2.4, STAND_HEIGHT, 12)
+	pad.material_override = Cel.material(colour.darkened(0.2))
+	pad.position = top - Vector3.UP * STAND_HEIGHT * 0.5
+	base.add_child(pad)
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 2.5
+	torus.outer_radius = 3.0
+	torus.rings = 24
+	torus.ring_segments = 4
+	ring.mesh = torus
+	ring.material_override = Cel.glow(colour.lightened(0.3))
+	ring.scale = Vector3(1.0, 0.1, 1.0)
+	ring.position = top - Vector3.UP * (STAND_HEIGHT - 0.08)
+	base.add_child(ring)
 
 
 func _build_props() -> void:

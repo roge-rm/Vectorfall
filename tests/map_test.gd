@@ -1,7 +1,7 @@
 extends SceneTree
 
 ## Checks the test map: every spawn point is on its own team's base deck,
-## and skiing straight down from a base reaches about 50 m/s.
+## and skiing straight down from a base reaches about 30 m/s.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/map_test.gd
 
 var checks := TestWorld.Checks.new()
@@ -35,5 +35,5 @@ func _run() -> void:
 	for i in 600:
 		await physics_frame
 		top = maxf(top, soldier.velocity.length())
-	checks.check(top > 48.0, "skiing straight down from the base reaches %.1f m/s" % top)
+	checks.check(top > 25.0, "skiing straight down from the base reaches %.1f m/s" % top)
 	checks.finish(self)

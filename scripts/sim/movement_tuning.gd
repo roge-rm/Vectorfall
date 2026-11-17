@@ -38,10 +38,11 @@ extends Resource
 
 @export_group("Drag")
 ## Speed with no drag. Above it drag is drag * (speed - drag_free_speed)²,
-## which tops out at about 59 m/s on a 30° slope and 73 m/s falling or
-## skiing downhill with the jet.
-@export var drag_free_speed := 25.0
-@export var drag := 0.009
+## which would top out at 80 m/s on a 30° slope and past it falling, so the
+## hard limit is what stops you. Low enough that speed keeps building over
+## several hills.
+@export var drag_free_speed := 30.0
+@export var drag := 0.004
 ## Hard limit on speed, in case something adds more than drag can take off.
 @export var max_speed := 80.0
 

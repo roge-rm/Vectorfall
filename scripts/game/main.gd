@@ -1,7 +1,7 @@
 extends Node
 
-## Loads straight into the test map with you on team 0's base, and a dummy
-## enemy on team 1 posted down the slope in front of it, strafing and firing
+## Loads straight into the test map with you on team 0's base, a flag on each
+## base, and a dummy enemy on team 1 posted down the slope in front of it, strafing and firing
 ## discs now and then so there's something to shoot.
 
 var map: TestMap
@@ -23,7 +23,10 @@ func _ready() -> void:
 	game = Match.new(1)
 	for team in 2:
 		game.spawns[team] = map.spawn_points(team)
+	for team in 2:
+		game.add_flag(team, map.stand_point(team), map.flag_rest(team))
 	add_child(game)
+	game.match_over.connect(_on_match_over)
 	input = LocalInput.new()
 	add_child(input)
 	player = game.add_soldier(0, map.spawn_point(0, 3), input.source)
@@ -57,6 +60,7 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.soldier = player
 	hud.watch(game)
+	hud.restart_requested.connect(restart)
 	layer.add_child(hud)
 	touch = TouchControls.new()
 	layer.add_child(touch)
@@ -67,3 +71,18 @@ func _ready() -> void:
 
 func _on_device_changed(device: LocalInput.Device) -> void:
 	touch.visible = device == LocalInput.Device.TOUCH
+
+
+func _on_match_over(_winner: int) -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## Starts the match again from the beginning.
+func restart() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	get_tree().reload_current_scene()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if game.over and event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_R:
+		restart()

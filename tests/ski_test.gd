@@ -35,6 +35,8 @@ func _initialize() -> void:
 	root.add_child(wall)
 	var mesh := TestWorld.mesh_ground(root, 400.0)
 	mesh.position.z = -2000.0
+	var bumps := TestWorld.mesh_surface(root, _bump_height, -100.0, 800.0, 4.0)
+	bumps.position.z = 3000.0
 	game = Match.new(3)
 	root.add_child(game)
 	soldier = game.add_soldier(0, Transform3D(Basis.IDENTITY, on_slope(30.0) + Vector3.UP * 0.3), input)
@@ -107,13 +109,43 @@ func _run() -> void:
 		else:
 			checks.check(not flew, "skiing over a crest at %.0f m/s follows the ground" % pace)
 
+	# Four hills in a row, skiing down each and jetting up the next: the speed at
+	# each ridge top goes up, and passes 50 m/s.
+	input.command.buttons = PlayerCommand.SKI
+	input.command.yaw = -PI * 0.5
+	input.command.move = Vector2(0.0, 1.0)
+	soldier.set_state(_state_with(Vector3(0.0, _bump_height(0.0, 0.0) + 0.05, 3000.0), Vector3.ZERO))
+	# The fastest speed on each hill, counting the hill from one ridge top to the
+	# next.
+	var hill_tops: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var fastest := 0.0
+	for i in 3000:
+		# Jet when the ground ahead is higher, but not while high above it.
+		var ground := _bump_height(soldier.global_position.x, 0.0)
+		var x := soldier.global_position.x
+		var rising := _bump_height(x + 4.0, 0.0) > ground
+		# Jet on the way up a hill, and in the air when the ground ahead is about to meet the flight.
+		var climbing := rising and (soldier.global_position.y < ground + 3.0 or _bump_height(x + soldier.velocity.x * 0.5, 0.0) > soldier.global_position.y + soldier.velocity.y * 0.5 - 1.0)
+		input.command.buttons = PlayerCommand.SKI | (PlayerCommand.JET if climbing else 0)
+		await ticks(1)
+		if soldier.global_position.x >= 4.0 * HILL_PERIOD:
+			break
+		var hill := clampi(int(soldier.global_position.x / HILL_PERIOD), 0, 3)
+		hill_tops[hill] = maxf(hill_tops[hill], soldier.velocity.length())
+		fastest = maxf(fastest, soldier.velocity.length())
+	var tops := hill_tops.map(func(v: float) -> String: return "%.1f" % v)
+	checks.check(hill_tops[1] > hill_tops[0] + 8.0 and hill_tops[2] > hill_tops[0] + 6.0, "the top speed goes up from the first hill to the next (%s m/s)" % [tops])
+	checks.check(maxf(hill_tops[1], hill_tops[2]) > 45.0 and fastest <= 81.0, "and passes 45 m/s by the third hill (%.1f m/s)" % maxf(hill_tops[1], hill_tops[2]))
+	input.command.move = Vector2.ZERO
+	input.command.yaw = 0.0
+
 	# Skiing a long 30° slope tops out under the drag cap.
 	soldier.set_state(_state_with(Vector3(5.0, -5.0 * tan(deg_to_rad(30.0)) + 0.05, 1000.0), Vector3.ZERO))
 	var top := 0.0
 	for i in 20:
 		await ticks(60)
 		top = maxf(top, soldier.velocity.length())
-	checks.check(soldier.skiing and top > 50.0 and top < 65.0, "skiing a long 30° slope tops out at %.1f m/s" % top)
+	checks.check(soldier.skiing and top > 60.0 and top <= 81.0, "skiing a long 30° slope reaches %.1f m/s and the limit holds" % top)
 	# Falling from high up tops out too.
 	input.command.buttons = 0
 	soldier.set_state(_state_with(Vector3(0.0, 9000.0, 3000.0), Vector3.ZERO))
@@ -121,7 +153,7 @@ func _run() -> void:
 	for i in 10:
 		await ticks(60)
 		top = maxf(top, soldier.velocity.length())
-	checks.check(top > 60.0 and top < 75.0, "falling tops out at %.1f m/s" % top)
+	checks.check(top > 70.0 and top <= 81.0, "falling reaches %.1f m/s and the limit holds" % top)
 
 	# 75 m/s into a wall and into the ground, box and triangle mesh: nothing
 	# goes through.
@@ -140,6 +172,19 @@ func _run() -> void:
 	var surface := on_slope(soldier.global_position.x).y
 	checks.check(soldier.global_position.y > surface - 0.05, "diving into the slope stays on top (%.2f m above)" % (soldier.global_position.y - surface))
 	checks.finish(self)
+
+
+## Four hills 150 m apart and 38 m high along x, a ridge at x = 0.
+const HILL_PERIOD := 150.0
+const HILL_HEIGHT := 38.0
+
+
+func _bump_height(x: float, _z: float) -> float:
+	if x < 0.0:
+		return HILL_HEIGHT
+	# Broad ridge tops that don't throw you, and tighter valleys.
+	var t := (cos(TAU * x / HILL_PERIOD) + 1.0) * 0.5
+	return HILL_HEIGHT * (1.0 - pow(1.0 - t, 1.5))
 
 
 func _state_with(position: Vector3, velocity: Vector3) -> Dictionary:

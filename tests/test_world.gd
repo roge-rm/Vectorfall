@@ -58,6 +58,29 @@ static func mesh_ground(parent: Node, size: float) -> StaticBody3D:
 	return body
 
 
+## A strip of triangle mesh 100 m wide in z along x from x0 to x1, with its
+## height from a function of x and z.
+static func mesh_surface(parent: Node, height: Callable, x0: float, x1: float, step: float) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var faces := PackedVector3Array()
+	var x := x0
+	while x < x1:
+		for pair in [[-50.0, 50.0]]:
+			var a := Vector3(x, height.call(x, pair[0]), pair[0])
+			var b := Vector3(x + step, height.call(x + step, pair[0]), pair[0])
+			var c := Vector3(x, height.call(x, pair[1]), pair[1])
+			var d := Vector3(x + step, height.call(x + step, pair[1]), pair[1])
+			faces.append_array([a, b, c, b, d, c])
+		x += step
+	var mesh := ConcavePolygonShape3D.new()
+	mesh.set_faces(faces)
+	shape.shape = mesh
+	body.add_child(shape)
+	parent.add_child(body)
+	return body
+
+
 class Checks:
 	var failures := 0
 	var passes := 0

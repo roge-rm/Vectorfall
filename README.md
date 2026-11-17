@@ -1,6 +1,6 @@
 # Vectorfall
 
-Vectorfall is a team capture the flag shooter for Android with jetpacks and a cel shaded look. Two teams of 8 fight over each other's flags, on foot or in the air. It's early: for now there's a test map with a valley to ski down, two weapons and a stand-in enemy to shoot at.
+Vectorfall is a team capture the flag shooter for Android with jetpacks and a cel shaded look. Two teams of 8 fight over each other's flags, on foot or in the air. It's early: for now there's a test map with three hills to ski over, two weapons, a stand-in enemy to shoot at and a full capture the flag match you can play alone.
 
 ## Controls
 
@@ -25,6 +25,12 @@ Skiing makes you slide with next to no friction, so you speed up going downhill 
 The disc launcher fires slow discs that blow up with a big blast and push. Lead your shots, and aim at the ground by someone's feet. Fire one at your own feet while you jet for a disc jump; your own blasts hurt you a little. The chaingun takes a moment to spin up, then fires fast, spreading shots that do little damage each. Both carry some of your own speed, the disc most of it. When you die you're back on your base's deck after 4 seconds.
 
 The jetpack drains energy while you hold it, and the energy starts to refill a moment after you let go. You keep your speed in the air and when you land on a downhill.
+
+## Capture the flag
+
+Touch the enemy flag on its stand to pick it up, then run, ski or jet it to your own stand and touch that to score. Your own flag has to be home for a capture to count. You can still shoot and jet while you carry it. If you die it drops where you were and tumbles on with your speed. Touching your own dropped flag sends it home, and a dropped flag goes home by itself after 30 seconds. First to 5 captures wins, or whoever has most after 20 minutes, and the same score is a draw. The end screen has a restart button, or press R. The capture limit and time limit are in `scripts/sim/match_settings.gd`.
+
+The screen shows the score and time at the top, a compass strip below it, a message for each flag event, and a marker with the distance on each flag, with an arrow at the edge of the screen when it's out of view. A tall beam of light stands over each flag, wider when it's away from its stand.
 
 ## Building
 
@@ -51,6 +57,7 @@ To take pictures of the test map and of a soldier close up (they need a screen):
 ```sh
 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/map_shot.tscn
 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/combat_shot.tscn
+tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/flag_shot.tscn
 ```
 
 ## Testing
@@ -61,7 +68,7 @@ Run the headless tests on the computer:
 tools/run-tests.sh
 ```
 
-They check the jetpack, skiing, movement in the air, that soldiers move only from their commands, the touch controls, weapon damage, splash and disc jumps, that shots can't pass through walls, respawning, the test map's ski speed and saving and loading match state.
+They check the jetpack, skiing, movement in the air, that soldiers move only from their commands, the touch controls, weapon damage, splash and disc jumps, every capture the flag rule, that shots can't pass through walls, respawning, the test map's ski speed and saving and loading match state.
 
 ## Licence
 

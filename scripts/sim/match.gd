@@ -19,6 +19,15 @@ signal killed(victim_id: int, killer_id: int, weapon: int)
 ## A projectile hit something or blew up. normal is the surface's.
 signal impacted(weapon: int, position: Vector3, normal: Vector3)
 signal respawned(soldier_id: int)
+## Flag events. team is the flag's team, and soldier_id who took, dropped or
+## returned it, or 0 when it went home by itself.
+signal flag_taken(team: int, soldier_id: int)
+signal flag_dropped(team: int, soldier_id: int)
+signal flag_returned(team: int, soldier_id: int)
+## team is the team that scored, soldier_id the carrier.
+signal flag_captured(team: int, soldier_id: int)
+## winner is a team, or -1 for a draw.
+signal match_over(winner: int)
 
 var rng := RandomNumberGenerator.new()
 var seed_value := 0
@@ -34,11 +43,21 @@ var next_id := 1
 var projectiles: Array[Projectile] = []
 ## Team to the places its soldiers respawn. Set from the map.
 var spawns: Dictionary[int, Array] = {}
+var settings := MatchSettings.new()
+## Team to its flag, and to the spot on its stand a carrier touches to score.
+var flags: Dictionary[int, Flag] = {}
+var stands: Dictionary[int, Vector3] = {}
+var scores: Array[int] = [0, 0]
+var time_left := 0.0
+var over := false
+## The winning team, or -1 for a draw, once the match is over.
+var winner := -1
 
 
 func _init(match_seed := 1) -> void:
 	seed_value = match_seed
 	rng.seed = match_seed
+	time_left = settings.time_limit
 	name = "Match"
 
 
@@ -56,6 +75,127 @@ func step(delta: float) -> void:
 		var command := source.make_command(delta) if source != null else PlayerCommand.new()
 		entities[id].simulate(command, delta)
 	_step_projectiles(delta)
+	_step_flags(delta)
+
+
+## Puts a team's flag on its stand. stand is the spot a capturing carrier has to
+## touch, and the flag rests above it.
+func add_flag(team: int, stand: Vector3, rest: Vector3) -> Flag:
+	var flag := Flag.new()
+	flag.entity_id = next_id
+	next_id += 1
+	flag.team = team
+	flag.home = rest
+	flag.position = rest
+	add_child(flag)
+	flags[team] = flag
+	stands[team] = stand
+	return flag
+
+
+## Starts the match clock again with the time limit in the settings.
+func start_clock() -> void:
+	time_left = settings.time_limit
+
+
+func carried_flag(soldier_id: int) -> Flag:
+	for team in flags:
+		var flag := flags[team]
+		if flag.mode == Flag.Mode.CARRIED and flag.carrier_id == soldier_id:
+			return flag
+	return null
+
+
+func _touching(who: Soldier, point: Vector3, reach: float) -> bool:
+	return not who.dead and who.distance_to_body(point) <= reach
+
+
+func _step_flags(delta: float) -> void:
+	if over or flags.is_empty():
+		return
+	var ids := entities.keys()
+	ids.sort()
+	var teams := flags.keys()
+	teams.sort()
+	for team: int in teams:
+		var flag := flags[team]
+		match flag.mode:
+			Flag.Mode.CARRIED:
+				var carrier := soldier(flag.carrier_id)
+				if carrier == null or carrier.dead:
+					_drop_flag(flag, carrier)
+				else:
+					flag.hold_on(carrier)
+			Flag.Mode.DROPPED:
+				flag.return_in -= delta
+				if flag.return_in <= 0.0 or flag.global_position.y < -200.0:
+					_return_flag(flag, 0)
+		if flag.mode == Flag.Mode.CARRIED:
+			continue
+		# Touching it: enemies take it, its own team sends it home if it's lying
+		# about.
+		for id: int in ids:
+			var who := soldier(id)
+			if who == null or not _touching(who, flag.global_position, settings.flag_touch_range):
+				continue
+			if who.team != flag.team:
+				_take_flag(flag, who)
+				break
+			elif flag.mode == Flag.Mode.DROPPED:
+				_return_flag(flag, who.entity_id)
+				break
+	# A carrier touching its own stand scores if its own flag is home.
+	for team: int in teams:
+		var flag := flags[team]
+		if flag.mode != Flag.Mode.CARRIED:
+			continue
+		var carrier := soldier(flag.carrier_id)
+		var own: Flag = flags.get(carrier.team)
+		if own == null or own.mode != Flag.Mode.HOME:
+			continue
+		if _touching(carrier, stands[carrier.team], settings.stand_touch_range):
+			_capture(flag, carrier)
+			if over:
+				return
+	if not over:
+		time_left = maxf(time_left - delta, 0.0)
+		if time_left <= 0.0:
+			_end(-1 if scores[0] == scores[1] else (0 if scores[0] > scores[1] else 1))
+
+
+func _take_flag(flag: Flag, who: Soldier) -> void:
+	flag.mode = Flag.Mode.CARRIED
+	flag.carrier_id = who.entity_id
+	flag.return_in = 0.0
+	flag.hold_on(who)
+	flag_taken.emit(flag.team, who.entity_id)
+
+
+## The carrier lets go where it is, with its velocity.
+func _drop_flag(flag: Flag, carrier: Soldier) -> void:
+	var by := flag.carrier_id
+	var spin := Vector3(rng.randf_range(-3.0, 3.0), rng.randf_range(-3.0, 3.0), rng.randf_range(-3.0, 3.0))
+	flag.drop(carrier.velocity if carrier != null else Vector3.ZERO, spin, settings.flag_return_time)
+	flag_dropped.emit(flag.team, by)
+
+
+func _return_flag(flag: Flag, by: int) -> void:
+	flag.send_home()
+	flag_returned.emit(flag.team, by)
+
+
+func _capture(flag: Flag, carrier: Soldier) -> void:
+	flag.send_home()
+	scores[carrier.team] += 1
+	flag_captured.emit(carrier.team, carrier.entity_id)
+	if scores[carrier.team] >= settings.capture_limit:
+		_end(carrier.team)
+
+
+func _end(team: int) -> void:
+	over = true
+	winner = team
+	match_over.emit(team)
 
 
 func add_soldier(team: int, spawn: Transform3D, source: CommandSource = null) -> Soldier:
@@ -195,6 +335,9 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 	damaged.emit(victim.entity_id, attacker_id, amount, from)
 	if victim.health <= 0.0:
 		victim.die()
+		var held := carried_flag(victim.entity_id)
+		if held != null:
+			_drop_flag(held, victim)
 		killed.emit(victim.entity_id, attacker_id, weapon_slot)
 
 
@@ -220,7 +363,16 @@ func get_state() -> Dictionary:
 	var shots := []
 	for shot in projectiles:
 		shots.append(shot.get_state())
+	var flag_states := {}
+	for team in flags:
+		flag_states[team] = flags[team].get_state()
 	return {
+		"scores": scores.duplicate(),
+		"time_left": time_left,
+		"over": over,
+		"winner": winner,
+		"stands": stands.duplicate(),
+		"flags": flag_states,
 		"tick": tick,
 		"seed": seed_value,
 		"rng_state": rng.state,
@@ -250,6 +402,18 @@ func set_state(state: Dictionary) -> void:
 			entities[id] = made
 			sources[id] = CommandSource.new()
 		entities[id].set_state(entity_state)
+	scores.assign(state.scores)
+	time_left = state.time_left
+	over = state.over
+	winner = state.winner
+	for team: int in state.stands:
+		stands[team] = state.stands[team]
+	for team: int in state.flags:
+		var flag_state: Dictionary = state.flags[team]
+		if not flags.has(team):
+			add_flag(team, stands[team], flag_state.home)
+			flags[team].entity_id = flag_state.id
+		flags[team].set_state(flag_state)
 	projectiles.clear()
 	for shot_state: Dictionary in state.get("projectiles", []):
 		projectiles.append(Projectile.from_state(shot_state))
