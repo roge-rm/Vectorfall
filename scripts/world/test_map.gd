@@ -1,9 +1,9 @@
 class_name TestMap
 extends Node3D
 
-## A greybox map built in code: rolling ground from noise, ramps, rocks and
-## pillars, and a base platform with a tower at each end. Team 0's base is at
-## -x and team 1's at +x.
+## A greybox map built in code: smooth rolling hills to ski over, ramps, rocks
+## and pillars, and a base platform with a tower at each end. Team 0's base is
+## at -x and team 1's at +x.
 
 const LENGTH := 360.0
 const WIDTH := 180.0
@@ -12,6 +12,11 @@ const BASE_X := 150.0
 const BASE_HEIGHT := 6.0
 const BASE_SIZE := 24.0
 const MAP_SEED := 7
+## Distance from one ridge to the next along the map, and their height from
+## valley floor to top. Ridges sit at the bases and x = ±50, valleys at 0 and
+## ±100, so each base skis down, over a ridge and into the middle.
+const HILL_SPACING := 100.0
+const HILL_HEIGHT := 20.0
 
 const GRASS := Color(0.45, 0.62, 0.32)
 const GRASS_DARK := Color(0.36, 0.52, 0.28)
@@ -28,8 +33,8 @@ func _init() -> void:
 	name = "TestMap"
 	noise.seed = MAP_SEED
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-	noise.frequency = 0.007
-	noise.fractal_octaves = 3
+	noise.frequency = 0.006
+	noise.fractal_octaves = 2
 	rng.seed = MAP_SEED
 	add_child(Atmosphere.new())
 	_build_ground()
@@ -38,10 +43,14 @@ func _init() -> void:
 	_build_props()
 
 
-## Ground height from the noise, flattened around each base and raised at the
+## Ground height: long ridges across the map, bent and varied along z with a
+## little smooth noise on top, flattened around each base and raised at the
 ## edges into a bowl.
 func height_at(x: float, z: float) -> float:
-	var h := noise.get_noise_2d(x, z) * 16.0 + 4.0
+	var bent := x + 14.0 * sin(z * 0.025)
+	var amplitude := HILL_HEIGHT * 0.5 * (1.0 + 0.3 * sin(z * 0.035 + 1.0))
+	var ridges := cos(TAU * bent / HILL_SPACING + PI)
+	var h := BASE_HEIGHT - HILL_HEIGHT * 0.5 + ridges * amplitude + noise.get_noise_2d(x, z) * 4.0
 	for team in 2:
 		var d := Vector2(x - base_x(team), z).length()
 		var t := smoothstep(BASE_SIZE * 0.9, BASE_SIZE * 2.2, d)
@@ -123,8 +132,11 @@ func _build_base(team: int) -> void:
 	# The platform, a raised deck with a ramp up its front.
 	_box(base, Vector3(BASE_SIZE, 2.0, BASE_SIZE), Transform3D(Basis.IDENTITY, Vector3(x, BASE_HEIGHT + 1.0, 0.0)), CONCRETE)
 	var front := 1.0 if team == 0 else -1.0
-	var ramp_basis := Basis(Vector3.FORWARD, front * deg_to_rad(12.0))
-	_box(base, Vector3(14.0, 1.0, 10.0), Transform3D(ramp_basis, Vector3(x + front * (BASE_SIZE * 0.5 + 6.0), BASE_HEIGHT + 0.6, 0.0)), CONCRETE)
+	# Its top meets the deck's edge, with no lip to catch on.
+	var tilt := deg_to_rad(12.0)
+	var ramp_basis := Basis(Vector3.FORWARD, front * tilt)
+	var ramp_centre := Vector3(x + front * (BASE_SIZE * 0.5 + 7.0 * cos(tilt) - 0.5 * sin(tilt)), BASE_HEIGHT + 2.0 - 7.0 * sin(tilt) - 0.5 * cos(tilt), 0.0)
+	_box(base, Vector3(14.0, 1.0, 10.0), Transform3D(ramp_basis, ramp_centre), CONCRETE)
 	# A tower at the back with a deck on top, in the team's colour.
 	var back := x - front * (BASE_SIZE * 0.5 - 4.0)
 	_box(base, Vector3(4.0, 14.0, 4.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 9.0, 0.0)), colour)

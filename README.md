@@ -11,11 +11,14 @@ Vectorfall is a team capture the flag shooter for Android with jetpacks and a ce
 | Fire | Left click | Right trigger | FIRE |
 | Jetpack (hold) | Right click or Shift | Left trigger or left shoulder | JET |
 | Jump | Space | A | JUMP |
+| Ski (hold) | Space | A | SKI, tap to turn on and off |
 | Use | E | X | |
 | Deploy | G | Y | |
 | Let go of the mouse | Esc | | |
 
 Click in the window to capture the mouse. The touch controls show when you touch the screen and hide when you use a keyboard or gamepad.
+
+Skiing makes you slide with next to no friction, so you speed up going downhill and slow down going up. Hold Space to hop and then ski when you land, and jet to get up the next hill without losing your speed. The SKI light on the screen is bright while you're skiing on the ground.
 
 The jetpack drains energy while you hold it, and the energy starts to refill a moment after you let go. You keep your speed in the air and when you land on a downhill.
 
@@ -48,7 +51,7 @@ Run the headless tests on the computer:
 tools/run-tests.sh
 ```
 
-They check the jetpack, movement in the air, that soldiers move only from their commands, the touch controls and saving and loading match state.
+They check the jetpack, skiing, movement in the air, that soldiers move only from their commands, the touch controls and saving and loading match state.
 
 ## Licence
 

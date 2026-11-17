@@ -22,6 +22,14 @@ var since_jet := 0.0
 ## is_on_floor() so set_state() can restore it.
 var grounded := false
 var jetting := false
+## The jump button was held last tick, so holding it jumps only once.
+var jump_held := false
+## The ski button is held, on the ground or not.
+var ski_held := false
+## Skiing on the ground this tick.
+var skiing := false
+## The ground's normal after the last tick, straight up in the air.
+var floor_normal := Vector3.UP
 
 var body_mesh: MeshInstance3D
 var blob: BlobShadow
@@ -30,7 +38,7 @@ var blob: BlobShadow
 func _init() -> void:
 	energy = tuning.energy_max
 	since_jet = tuning.refill_delay
-	floor_snap_length = 0.35
+	floor_snap_length = tuning.floor_snap
 	floor_max_angle = deg_to_rad(50.0)
 	floor_constant_speed = true
 	var shape := CollisionShape3D.new()
@@ -90,9 +98,18 @@ func simulate(command: PlayerCommand, delta: float) -> void:
 	var wish_dir := wish.normalized() if wish.length() > 0.01 else Vector3.ZERO
 	var horizontal := Vector3(velocity.x, 0.0, velocity.z)
 	var v_y := velocity.y
+	var jump_pressed := command.has(PlayerCommand.JUMP) and not jump_held
+	jump_held = command.has(PlayerCommand.JUMP)
+	ski_held = command.has(PlayerCommand.SKI)
 
 	jetting = command.has(PlayerCommand.JET) and energy > 0.0
-	if grounded and not jetting:
+	skiing = grounded and ski_held and not jetting
+	if skiing:
+		_ski(wish_dir, delta)
+		if jump_pressed:
+			velocity = velocity.slide(floor_normal) + Vector3.UP * t.jump_speed
+			grounded = false
+	elif grounded and not jetting:
 		var speed := horizontal.length()
 		var target := wish * t.run_speed
 		if speed > t.run_speed + 0.01 and horizontal.dot(wish) >= 0.0:
@@ -102,9 +119,14 @@ func simulate(command: PlayerCommand, delta: float) -> void:
 		else:
 			var rate := t.ground_accel if wish_dir != Vector3.ZERO else t.ground_friction
 			horizontal = horizontal.move_toward(target, rate * delta)
-		if command.has(PlayerCommand.JUMP):
+		if jump_pressed:
 			v_y = t.jump_speed
 			grounded = false
+	elif jetting and (ski_held or horizontal.length() > t.jet_side_speed):
+		# At speed some of the jet pushes you forward, so you can climb the next
+		# hill without losing your speed.
+		var ahead := wish_dir if wish_dir != Vector3.ZERO else Basis(Vector3.UP, yaw) * Vector3.FORWARD
+		horizontal += ahead * t.jet_forward_accel * delta
 	elif wish_dir != Vector3.ZERO:
 		# In the air you keep your momentum and can only add a little speed
 		# towards where you steer, more while jetting.
@@ -124,21 +146,73 @@ func simulate(command: PlayerCommand, delta: float) -> void:
 		if since_jet >= t.refill_delay:
 			energy = minf(energy + t.energy_refill * delta, t.energy_max)
 
-	v_y -= t.gravity * delta
-	var before := Vector3(horizontal.x, v_y, horizontal.z)
-	velocity = before
+	if not skiing:
+		v_y -= t.gravity * delta
+		velocity = Vector3(horizontal.x, v_y, horizontal.z)
+	_drag(delta)
+	var before := velocity
 	var was_grounded := grounded
+	# Skiing fast barely holds on to the ground, so a crest throws you.
+	floor_snap_length = t.ski_snap if ski_held and before.length() > t.ski_launch_speed else t.floor_snap
+	floor_stop_on_slope = not skiing
+	floor_constant_speed = not skiing
 	move_and_slide()
 	grounded = is_on_floor()
-	if grounded and not was_grounded:
+	floor_normal = get_floor_normal() if grounded else Vector3.UP
+	if grounded and ski_held:
+		# move_and_slide() drops the vertical part of your speed on the floor,
+		# which would stop you skiing downhill, so keep the part along the slope.
+		# Landing this way only loses the part into the slope, so a downhill
+		# keeps or adds speed and flat ground loses the fall.
+		velocity = _along_ground(before)
+	elif grounded and not was_grounded:
 		# Landing on a slope turns the fall into speed along it, so landing on a
 		# downhill keeps your speed and can add to it.
-		var along := before.slide(get_floor_normal())
+		var along := before.slide(floor_normal)
 		var kept := Vector3(along.x, 0.0, along.z)
 		if kept.length() > horizontal_speed():
 			velocity.x = kept.x
 			velocity.z = kept.z
 	blob.follow(self)
+
+
+## Skiing on the ground: speed along the slope only, gravity along the slope
+## speeds you up or slows you down, little friction, and pushing only steers.
+func _ski(wish_dir: Vector3, delta: float) -> void:
+	var t := tuning
+	var n := floor_normal
+	var v := velocity.slide(n)
+	v += Vector3.DOWN.slide(n) * t.gravity * delta
+	var speed := v.length()
+	if speed > 0.0:
+		v *= maxf(speed - t.ski_friction * delta, 0.0) / speed
+	if wish_dir != Vector3.ZERO:
+		var dir := wish_dir.slide(n).normalized()
+		var add := clampf(t.ski_steer_speed - v.dot(dir), 0.0, t.ski_steer_accel * delta)
+		v += dir * add
+	velocity = v - n * t.ski_press
+
+
+## A velocity from before the move, slid along the floor and off any walls
+## the move hit.
+func _along_ground(v: Vector3) -> Vector3:
+	v = v.slide(floor_normal)
+	for k in get_slide_collision_count():
+		var normal := get_slide_collision(k).get_normal()
+		if normal.angle_to(up_direction) > floor_max_angle + 0.01 and v.dot(normal) < 0.0:
+			v = v.slide(normal)
+	return v
+
+
+## Drag that grows with the square of speed above drag_free_speed.
+func _drag(delta: float) -> void:
+	var t := tuning
+	var speed := velocity.length()
+	if speed <= t.drag_free_speed:
+		return
+	var over := speed - t.drag_free_speed
+	var slowed := minf(maxf(speed - t.drag * over * over * delta, t.drag_free_speed), t.max_speed)
+	velocity *= slowed / speed
 
 
 func get_state() -> Dictionary:
@@ -154,6 +228,10 @@ func get_state() -> Dictionary:
 		"since_jet": since_jet,
 		"grounded": grounded,
 		"jetting": jetting,
+		"jump_held": jump_held,
+		"ski_held": ski_held,
+		"skiing": skiing,
+		"floor_normal": floor_normal,
 	}
 
 
@@ -170,3 +248,7 @@ func set_state(state: Dictionary) -> void:
 	since_jet = state.since_jet
 	grounded = state.grounded
 	jetting = state.jetting
+	jump_held = state.jump_held
+	ski_held = state.ski_held
+	skiing = state.skiing
+	floor_normal = state.floor_normal

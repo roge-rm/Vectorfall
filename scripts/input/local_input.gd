@@ -94,7 +94,7 @@ func make_command(delta: float) -> PlayerCommand:
 			command.buttons = touch.buttons
 		return command
 	command.move = Input.get_vector("move_left", "move_right", "move_back", "move_forward")
-	for pair: Array in [["fire", PlayerCommand.FIRE], ["jump", PlayerCommand.JUMP], ["jet", PlayerCommand.JET], ["use", PlayerCommand.USE], ["deploy", PlayerCommand.DEPLOY]]:
+	for pair: Array in [["fire", PlayerCommand.FIRE], ["jump", PlayerCommand.JUMP], ["jet", PlayerCommand.JET], ["use", PlayerCommand.USE], ["deploy", PlayerCommand.DEPLOY], ["ski", PlayerCommand.SKI]]:
 		if Input.is_action_pressed(pair[0]):
 			command.buttons |= pair[1]
 	return command

@@ -68,6 +68,10 @@ jump={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"device":-1,"physical_keycode":32), Object(InputEventJoypadButton,"device":-1,"button_index":0,"pressed":true)]
 }
+ski={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"device":-1,"physical_keycode":32), Object(InputEventJoypadButton,"device":-1,"button_index":0,"pressed":true)]
+}
 use={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"device":-1,"physical_keycode":69), Object(InputEventJoypadButton,"device":-1,"button_index":2,"pressed":true)]

@@ -1,11 +1,12 @@
 class_name Hud
 extends Control
 
-## Crosshair, jet energy bar and speed readout for one soldier. It only reads
-## the soldier.
+## Crosshair, jet energy bar, speed readout and ski light for one soldier.
+## It only reads the soldier.
 
 var soldier: Soldier
 var _speed_label: Label
+var _ski_label: Label
 
 
 func _init() -> void:
@@ -17,6 +18,12 @@ func _init() -> void:
 	_speed_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	_speed_label.add_theme_constant_override("outline_size", 6)
 	add_child(_speed_label)
+	_ski_label = Label.new()
+	_ski_label.text = "SKI"
+	_ski_label.add_theme_font_size_override("font_size", 22)
+	_ski_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	_ski_label.add_theme_constant_override("outline_size", 6)
+	add_child(_ski_label)
 
 
 func _process(_delta: float) -> void:
@@ -25,6 +32,10 @@ func _process(_delta: float) -> void:
 	_speed_label.text = "%d km/h" % roundi(soldier.horizontal_speed() * 3.6)
 	var short := minf(size.x, size.y)
 	_speed_label.position = Vector2(size.x * 0.5 - _speed_label.size.x * 0.5, size.y - short * 0.16 - _speed_label.size.y)
+	# Bright while skiing on the ground, dim while held in the air.
+	_ski_label.visible = soldier.ski_held
+	_ski_label.modulate = Color(0.55, 1.0, 0.85) if soldier.skiing else Color(1, 1, 1, 0.45)
+	_ski_label.position = Vector2(size.x * 0.5 + short * 0.25, size.y - short * 0.1 - _ski_label.size.y * 0.3)
 	queue_redraw()
 
 

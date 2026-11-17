@@ -1,0 +1,151 @@
+extends SceneTree
+
+## Checks skiing on built-in slopes: skiing downhill gains speed past run
+## speed, uphill loses it, standing on a slope without skiing stays put,
+## landing on a downhill keeps the speed, drag tops speed out, the jet helps
+## you up a hill, and top speed into a wall or the ground doesn't go through.
+##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/ski_test.gd
+
+const ANGLE := 25.0
+
+var checks := TestWorld.Checks.new()
+var game: Match
+var input := TestWorld.Scripted.new()
+var soldier: Soldier
+
+
+func _initialize() -> void:
+	# A 25° slope down towards +x from the origin, a long 30° one at z = 1000,
+	# a wall on flat ground at z = -1000 and triangle mesh ground at z = -2000.
+	TestWorld.slope(root, ANGLE)
+	# Flat ground before the slope's top edge, making a crest at x = 0.
+	var deck := TestWorld.slope(root, 0.0, 100.0)
+	deck.position.x = -100.0
+	var long := TestWorld.slope(root, 30.0, 4000.0)
+	long.position.z = 1000.0
+	var flat := TestWorld.flat_ground(root)
+	flat.position = Vector3(0.0, 0.0, -1000.0)
+	var wall := StaticBody3D.new()
+	var wall_shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(1.0, 10.0, 20.0)
+	wall_shape.shape = box
+	wall.add_child(wall_shape)
+	wall.position = Vector3(20.5, 5.0, -1000.0)
+	root.add_child(wall)
+	var mesh := TestWorld.mesh_ground(root, 400.0)
+	mesh.position.z = -2000.0
+	game = Match.new(3)
+	root.add_child(game)
+	soldier = game.add_soldier(0, Transform3D(Basis.IDENTITY, on_slope(30.0) + Vector3.UP * 0.3), input)
+	_run.call_deferred()
+
+
+func ticks(n: int) -> void:
+	for i in n:
+		await physics_frame
+
+
+## A point on the 25° slope, x metres from its top edge.
+func on_slope(x: float) -> Vector3:
+	return Vector3(x, -x * tan(deg_to_rad(ANGLE)), 0.0)
+
+
+func _run() -> void:
+	var t := soldier.tuning
+	await ticks(60)
+	checks.check(soldier.grounded, "the soldier stands on the slope")
+	var rest := soldier.global_position
+	await ticks(120)
+	checks.check(soldier.global_position.distance_to(rest) < 0.05, "standing on a slope without skiing stays put (moved %.3f m)" % soldier.global_position.distance_to(rest))
+
+	input.command.buttons = PlayerCommand.SKI
+	await ticks(120)
+	var speed := soldier.velocity.length()
+	checks.check(speed > t.run_speed + 4.0, "skiing down a slope for 2 s passes run speed (%.1f m/s)" % speed)
+	checks.check(soldier.skiing and soldier.velocity.x > 0.0, "and is skiing downhill")
+
+	# Skiing uphill at 25 m/s, with and without the jet.
+	var uphill := Vector3(-cos(deg_to_rad(ANGLE)), sin(deg_to_rad(ANGLE)), 0.0) * 25.0
+	soldier.set_state(_state_with(on_slope(150.0) + Vector3.UP * 0.05, uphill))
+	await ticks(60)
+	var slowed := soldier.velocity.length()
+	checks.check(slowed < 25.0 - 5.0 and soldier.velocity.x < 0.0, "skiing uphill loses speed (25 to %.1f m/s)" % slowed)
+	input.command.buttons = PlayerCommand.SKI | PlayerCommand.JET
+	input.command.yaw = PI * 0.5
+	soldier.set_state(_state_with(on_slope(150.0) + Vector3.UP * 0.05, uphill))
+	await ticks(60)
+	var jetted := soldier.horizontal_speed()
+	checks.check(jetted > 25.0 * cos(deg_to_rad(ANGLE)), "jetting while skiing uphill keeps your speed (%.1f m/s)" % jetted)
+	input.command.buttons = PlayerCommand.SKI
+	input.command.yaw = 0.0
+
+	# Landing on the downhill while skiing keeps nearly all the speed.
+	var falling := Vector3(20.0, -10.0, 0.0)
+	soldier.set_state(_state_with(on_slope(60.0) + Vector3.UP * 3.0, falling))
+	while not soldier.grounded:
+		await ticks(1)
+	speed = soldier.velocity.length()
+	checks.check(speed > falling.length() * 0.95, "landing on a downhill while skiing keeps the speed (%.1f of %.1f m/s)" % [speed, falling.length()])
+	# Landing on flat ground loses only the fall.
+	soldier.set_state(_state_with(Vector3(0.0, 3.0, -1000.0), falling))
+	while not soldier.grounded:
+		await ticks(1)
+	speed = soldier.horizontal_speed()
+	checks.check(speed > 19.5 and absf(soldier.velocity.y) < 1.0, "landing flat while skiing loses only the fall (%.1f m/s)" % speed)
+
+	# Over the crest at 40 m/s you fly; at a slow ski you follow the ground.
+	for pace: float in [40.0, 6.0]:
+		soldier.set_state(_state_with(Vector3(-30.0, 0.05, 0.0), Vector3(pace, 0.0, 0.0)))
+		var flew := false
+		while soldier.global_position.x < 3.0:
+			await ticks(1)
+			if soldier.global_position.x > 0.5 and not soldier.grounded:
+				flew = true
+		if pace > 20.0:
+			checks.check(flew, "skiing over a crest at %.0f m/s launches you" % pace)
+		else:
+			checks.check(not flew, "skiing over a crest at %.0f m/s follows the ground" % pace)
+
+	# Skiing a long 30° slope tops out under the drag cap.
+	soldier.set_state(_state_with(Vector3(5.0, -5.0 * tan(deg_to_rad(30.0)) + 0.05, 1000.0), Vector3.ZERO))
+	var top := 0.0
+	for i in 20:
+		await ticks(60)
+		top = maxf(top, soldier.velocity.length())
+	checks.check(soldier.skiing and top > 50.0 and top < 65.0, "skiing a long 30° slope tops out at %.1f m/s" % top)
+	# Falling from high up tops out too.
+	input.command.buttons = 0
+	soldier.set_state(_state_with(Vector3(0.0, 9000.0, 3000.0), Vector3.ZERO))
+	top = 0.0
+	for i in 10:
+		await ticks(60)
+		top = maxf(top, soldier.velocity.length())
+	checks.check(top > 60.0 and top < 75.0, "falling tops out at %.1f m/s" % top)
+
+	# 75 m/s into a wall and into the ground, box and triangle mesh: nothing
+	# goes through.
+	input.command.buttons = PlayerCommand.SKI
+	soldier.set_state(_state_with(Vector3(0.0, 0.05, -1000.0), Vector3(75.0, 0.0, 0.0)))
+	await ticks(30)
+	checks.check(soldier.global_position.x < 20.0 - t.radius + 0.05, "skiing at top speed into a wall stops at it (x %.2f)" % soldier.global_position.x)
+	soldier.set_state(_state_with(Vector3(-100.0, 30.0, -1000.0), Vector3(50.0, -55.0, 0.0)))
+	await ticks(60)
+	checks.check(soldier.global_position.y > -0.05, "75 m/s into box ground stays on top (y %.2f)" % soldier.global_position.y)
+	soldier.set_state(_state_with(Vector3(-100.0, 30.0, -2000.0), Vector3(50.0, -55.0, 0.0)))
+	await ticks(60)
+	checks.check(soldier.global_position.y > -0.05, "75 m/s into mesh ground stays on top (y %.2f)" % soldier.global_position.y)
+	soldier.set_state(_state_with(on_slope(10.0) + Vector3(0.0, 40.0, 0.0), Vector3(20.0, -70.0, 0.0)))
+	await ticks(60)
+	var surface := on_slope(soldier.global_position.x).y
+	checks.check(soldier.global_position.y > surface - 0.05, "diving into the slope stays on top (%.2f m above)" % (soldier.global_position.y - surface))
+	checks.finish(self)
+
+
+func _state_with(position: Vector3, velocity: Vector3) -> Dictionary:
+	var state := soldier.get_state()
+	state.position = position
+	state.velocity = velocity
+	state.grounded = false
+	state.energy = soldier.tuning.energy_max
+	return state

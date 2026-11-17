@@ -2,7 +2,7 @@ extends SceneTree
 
 ## Runs the main scene for five seconds and checks the player is standing on
 ## its base, the touch controls show only after a touch, and the touch stick
-## and buttons end up in the player's commands.
+## and buttons, the SKI toggle too, end up in the player's commands.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/main_scene_test.gd
 
 var checks := TestWorld.Checks.new()
@@ -52,6 +52,19 @@ func _run() -> void:
 	checks.check(touch.stick.y > 0.99 and touch.buttons == PlayerCommand.JET, "the stick and jet button register")
 	checks.check(player.global_position.y > start.y + 0.5, "the jet button lifts the player")
 	checks.check((player.global_position - start).x > 0.5, "the stick pushes the player forward, towards the other base")
+
+	# SKI is a toggle: one tap turns it on, the next turns it off.
+	for on: bool in [true, false]:
+		var tap := InputEventScreenTouch.new()
+		tap.index = 2
+		tap.pressed = true
+		tap.position = to_window * touch.button_centre(3)
+		Input.parse_input_event(tap)
+		tap = tap.duplicate()
+		tap.pressed = false
+		Input.parse_input_event(tap)
+		await ticks(2)
+		checks.check(player.ski_held == on, "a tap on SKI turns skiing %s" % ("on" if on else "off"))
 
 	var key := InputEventKey.new()
 	key.physical_keycode = KEY_W

@@ -9,6 +9,8 @@ const JUMP := 2
 const JET := 4
 const USE := 8
 const DEPLOY := 16
+## Held to ski: next to no friction on the ground, so slopes speed you up.
+const SKI := 32
 
 ## x is right and y is forward, length at most 1.
 var move := Vector2.ZERO

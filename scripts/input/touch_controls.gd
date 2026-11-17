@@ -3,7 +3,8 @@ extends Control
 
 ## On-screen controls: a stick that appears where your left thumb lands, drag
 ## anywhere else on the right half to look, and round buttons for fire, jet and
-## jump. Sizes follow the shorter side of the screen.
+## jump, and a SKI button that turns skiing on and off. Sizes follow the
+## shorter side of the screen.
 
 ## Left thumb movement in pixels for a full push, as a share of the short side.
 const STICK_REACH := 0.1
@@ -11,7 +12,10 @@ const BUTTONS := [
 	["FIRE", PlayerCommand.FIRE, Vector2(0.15, 0.4), 0.1],
 	["JET", PlayerCommand.JET, Vector2(0.36, 0.15), 0.095],
 	["JUMP", PlayerCommand.JUMP, Vector2(0.13, 0.14), 0.075],
+	["SKI", PlayerCommand.SKI, Vector2(0.36, 0.36), 0.065],
 ]
+## Buttons that a tap turns on and off rather than being held.
+const TOGGLES := PlayerCommand.SKI
 
 ## x is right and y is forward, like PlayerCommand.move.
 var stick := Vector2.ZERO
@@ -74,8 +78,13 @@ func _input(event: InputEvent) -> void:
 func _press(index: int, at: Vector2) -> void:
 	for k in BUTTONS.size():
 		if at.distance_to(button_centre(k)) < button_radius(k) * 1.2:
-			_touches[index] = BUTTONS[k][1]
-			buttons |= BUTTONS[k][1]
+			var bit: int = BUTTONS[k][1]
+			if bit & TOGGLES:
+				_touches[index] = "toggle"
+				buttons ^= bit
+			else:
+				_touches[index] = bit
+				buttons |= bit
 			return
 	if at.x < size.x * 0.45:
 		_touches[index] = "stick"
