@@ -1,6 +1,6 @@
 extends SceneTree
 
-## Runs the main scene for five seconds and checks the bots have set off,
+## Runs the main scene for five seconds and checks the bots but defence have set off,
 ## the player is standing on its base, the touch controls show only after a
 ## touch, and the touch stick and buttons, the SKI toggle and SWAP too, end
 ## up in the player's commands, and the outline setting turns outlines on and
@@ -29,10 +29,14 @@ func _run() -> void:
 	checks.check(main.game.entities.size() == 1 + main.OWN_BOTS + main.ENEMY_BOTS, "the match has you and the bots")
 	checks.check(main.enemy.team != player.team and not main.enemy.dead, "the enemy bots are on the other team")
 	var moving := 0
+	var leaving := 0
 	for brain: BotBrain in main.bots.brains:
+		if brain.role == BotBrain.Role.DEFENCE:
+			continue
+		leaving += 1
 		if brain.soldier.global_position.distance_to(brain.soldier.game.spawns[brain.soldier.team][0].origin) > 15.0:
 			moving += 1
-	checks.check(moving == main.bots.brains.size(), "every bot has set off from its base")
+	checks.check(leaving > 0 and moving == leaving, "every bot but defence has set off from its base (%d of %d)" % [moving, leaving])
 	checks.check(not main.overlay.visible, "the bot overlay starts hidden")
 	var outlined := Cel.material(Color(0.5, 0.5, 0.5))
 	Settings.outlines = false

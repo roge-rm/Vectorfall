@@ -4,7 +4,8 @@ extends Node3D
 ## The bots' debug overlay, shown and hidden with F3: the route graph (run
 ## links white, ski blue, jet orange, walls red, points of interest yellow
 ## posts), each bot's planned route in its team's colour, and a label over
-## each bot with its goal, what it's doing, its speed and energy.
+## each bot with its role, goal, what it's doing, who it's fighting, its
+## speed, energy and health.
 
 const LIFT := 0.4
 const KIND_COLOURS: Array[Color] = [Color(0.9, 0.9, 0.9, 0.5), Color(0.3, 0.8, 1.0, 0.7), Color(1.0, 0.65, 0.2, 0.7)]
@@ -62,13 +63,20 @@ func _process(_delta: float) -> void:
 		label.visible = not s.dead
 		label.position = s.global_position + Vector3.UP * 2.6
 		label.text = brain.describe()
-		if s.dead or brain.path.is_empty():
+		if s.dead or (brain.path.is_empty() and not brain.direct):
 			continue
 		if not drew:
 			_routes.surface_begin(Mesh.PRIMITIVE_LINES)
 			drew = true
 		var colour := Soldier.TEAM_COLOURS[s.team].lightened(0.3)
 		var last := s.global_position + Vector3.UP
+		if brain.direct:
+			# Straight for the goal, off the graph.
+			_routes.surface_set_color(colour)
+			_routes.surface_add_vertex(last)
+			_routes.surface_set_color(colour)
+			_routes.surface_add_vertex(brain.goal_target + Vector3.UP)
+			continue
 		for k in range(brain.path_index, brain.path.size()):
 			var next := graph.points[brain.path[k]] + Vector3.UP
 			_routes.surface_set_color(colour)

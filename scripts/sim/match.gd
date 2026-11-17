@@ -15,6 +15,8 @@ const RESPAWN_DELAY := 4.0
 signal fired(soldier_id: int, weapon: int)
 ## A soldier took damage. from is where it came from: the blast or the shooter.
 signal damaged(victim_id: int, attacker_id: int, amount: float, from: Vector3)
+## A soldier's weapon hurt an enemy, for stats.
+signal hit(attacker_id: int, victim_id: int, weapon: int)
 signal killed(victim_id: int, killer_id: int, weapon: int)
 ## A projectile hit something or blew up. normal is the surface's.
 signal impacted(weapon: int, position: Vector3, normal: Vector3)
@@ -332,6 +334,8 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 	elif attacker != null and attacker.team == victim.team:
 		return
 	victim.health = maxf(victim.health - amount, 0.0)
+	if attacker != null and attacker.team != victim.team:
+		hit.emit(attacker_id, victim.entity_id, weapon_slot)
 	damaged.emit(victim.entity_id, attacker_id, amount, from)
 	if victim.health <= 0.0:
 		victim.die()

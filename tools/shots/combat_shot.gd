@@ -4,9 +4,9 @@ extends Node
 ##   DISPLAY=:0 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/combat_shot.tscn
 ## soldier.png: the enemy close up, jetting, with a disc blast beside it.
 ## soldier-run.png: the enemy running past, and a disc in flight.
-## Both go in /srv/downloads/temp/debug/Vectorfall.
+## Both go in /srv/downloads/temp/debug/vectorfall.
 
-const FOLDER := "/srv/downloads/temp/debug/Vectorfall"
+const FOLDER := "/srv/downloads/temp/debug/vectorfall"
 
 
 ## Drives the enemy for the pictures.

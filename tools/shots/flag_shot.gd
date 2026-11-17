@@ -4,9 +4,9 @@ extends Node
 ## the HUD, and quits. It needs a screen:
 ##   DISPLAY=:0 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/flag_shot.tscn
 ## flag.png is from your own base, flag-near.png from the middle ridge near the enemy base, and
-## flag-dropped.png with the flag dropped and carried. In /srv/downloads/temp/debug/Vectorfall.
+## flag-dropped.png with the flag dropped and carried. In /srv/downloads/temp/debug/vectorfall.
 
-const FOLDER := "/srv/downloads/temp/debug/Vectorfall"
+const FOLDER := "/srv/downloads/temp/debug/vectorfall"
 
 
 func _ready() -> void:

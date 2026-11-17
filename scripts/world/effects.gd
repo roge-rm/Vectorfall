@@ -94,7 +94,9 @@ func _start(made: Blast, at: Vector3, normal: Vector3, radius: float) -> void:
 	made.radius = radius
 	made.time = 0.0
 	made.root.visible = true
-	_pose(made, 0.0)
+	# Sparks have no ring and are sized in _process().
+	if made.ring != null:
+		_pose(made, 0.0)
 
 
 func _process(delta: float) -> void:

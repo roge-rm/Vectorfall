@@ -20,6 +20,9 @@ const CLIMB_SPEED := 18.0
 const CLIMB_RESERVE := 30.0
 ## Energy a bot waits for when it's out below a climb it can't run up.
 const REST_UNTIL := 95.0
+## Ground flatter than this, as the floor normal's height, is good to stand
+## on and wait for energy, about 30°.
+const FLAT_ENOUGH := 0.86
 ## Ticks of jetting to get over something in the way, and the energy it
 ## needs to start.
 const HOP_TICKS := 40
@@ -58,13 +61,14 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 	var dir := flat.normalized() if flat.length() > 0.1 else -s.transform.basis.z
 	var target := brain.target()
 	var link := brain.current_link()
-	var last := brain.path_index == brain.path.size() - 1
+	var last := brain.is_last()
 
 	# How fast to go: slow enough to stop at the goal and to make the next turn.
 	var limit := t.max_speed
 	var to_target := Vector2(target.x - pos.x, target.z - pos.z).length()
 	if last:
-		limit = sqrt(ARRIVE_SPEED * ARRIVE_SPEED + 2.0 * BRAKE * to_target)
+		if brain.slow_at_end():
+			limit = sqrt(ARRIVE_SPEED * ARRIVE_SPEED + 2.0 * BRAKE * to_target)
 	else:
 		var after := brain.director.graph.points[brain.path[brain.path_index + 1]]
 		var into := Vector2(target.x - pos.x, target.z - pos.z)
@@ -111,6 +115,10 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 		jump = s.grounded
 		if s.energy > HOP_ENERGY:
 			hop_ticks = HOP_TICKS
+	# Energy the steep part of this leg needs on top of what the speed gives.
+	var steep_need := 0.0
+	if link != null and link.steep > 0.0 and target.y > pos.y + 3.0:
+		steep_need = minf(maxf(link.steep - carries, 0.0) * RouteGraph.ENERGY_PER_METRE + 10.0, REST_UNTIL)
 	if resting:
 		# Out of energy below a climb it can't run up: wait for a tank.
 		resting = s.energy < REST_UNTIL and s.grounded
@@ -119,8 +127,12 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 		# Only once in a place: if a full tank didn't get it moving, it's stuck.
 		resting = true
 		rest_spot = pos
+	elif s.grounded and speed < 6.0 and not climbing and s.energy < steep_need and pos.distance_to(rest_spot) > 5.0:
+		# Saves up before a steep climb instead of sliding back from half way.
+		resting = true
+		rest_spot = pos
 	if resting:
-		wish = Vector3.ZERO
+		wish = rest_wish(s)
 		ski = false
 		brain.no_progress = 0.0
 		doing = "wait for energy"
@@ -176,6 +188,15 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 	if jump:
 		command.buttons |= PlayerCommand.JUMP
 	return command
+
+
+## Where to walk while waiting for energy: down to flatter ground if it's
+## standing on a slope it would slide on, else nowhere.
+static func rest_wish(s: Soldier) -> Vector3:
+	if not s.grounded or s.floor_normal.y >= FLAT_ENOUGH:
+		return Vector3.ZERO
+	var down := Vector3(s.floor_normal.x, 0.0, s.floor_normal.z)
+	return down.normalized() if down.length() > 0.01 else Vector3.ZERO
 
 
 ## True if the soldier ran into a wall last tick while heading into it.

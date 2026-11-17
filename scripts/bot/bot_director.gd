@@ -3,7 +3,8 @@ extends Node
 
 ## Looks after a match's bots: adds them, shares the route graph and planner,
 ## spreads their thinking over the ticks, hands out the ray cast budget and
-## collects the sounds they can hear. Later the team brains sit here too. It
+## collects the sounds they can hear. It hands out roles with TeamRoles, and
+## keeps each bot's tally of shots, hits, kills and flags for the reports. It
 ## adds itself under the match, and goes with it.
 
 ## Line of sight ray casts all the bots may make in one tick.
@@ -38,6 +39,12 @@ func _init(match_node: Match, route_graph: RouteGraph) -> void:
 	game.add_child(self)
 	game.fired.connect(_on_fired)
 	game.impacted.connect(_on_impacted)
+	game.damaged.connect(_on_damaged)
+	game.hit.connect(_on_hit)
+	game.killed.connect(_on_killed)
+	game.flag_taken.connect(_on_flag_taken)
+	game.flag_returned.connect(_on_flag_returned)
+	game.flag_captured.connect(_on_flag_captured)
 
 
 ## Adds a bot soldier to the match at a spawn point. skill is 0 for a
@@ -47,14 +54,25 @@ func add_bot(team: int, spawn: Transform3D, skill := 0.5) -> BotBrain:
 	brain.director = self
 	brain.game = game
 	brain.skill = skill
-	brain.perception.reaction_time = lerpf(0.7, 0.15, skill)
+	brain.perception.reaction_time = BotPerception.reaction_for(skill)
 	# Every 7th tick in turn spreads them evenly over THINK_TICKS.
 	brain.think_offset = (brains.size() * 7) % THINK_TICKS
 	brain.soldier = game.add_soldier(team, spawn, brain)
 	brain.soldier.display_name = "Bot %d" % brain.soldier.entity_id
 	brain.reset()
 	brains.append(brain)
+	assign_roles()
 	return brain
+
+
+## Hands out roles on both teams again, counting every soldier, people too.
+func assign_roles() -> void:
+	TeamRoles.assign(game, brains)
+
+
+func brain_of(id: int) -> BotBrain:
+	var source: CommandSource = game.sources.get(id)
+	return source as BotBrain
 
 
 ## Plans a route over the graph. Speed, energy and heading are rounded so
@@ -102,10 +120,56 @@ func _add_sound(at: Vector3, source: int, reach: float) -> void:
 		sounds.pop_front()
 
 
-func _on_fired(soldier_id: int, _weapon: int) -> void:
+func _on_fired(soldier_id: int, weapon: int) -> void:
 	var shooter := game.soldier(soldier_id)
 	if shooter != null:
 		_add_sound(shooter.eye_transform().origin, soldier_id, SHOT_RANGE)
+	var brain := brain_of(soldier_id)
+	if brain != null:
+		brain.stats.shots[weapon] += 1
+
+
+func _on_damaged(victim_id: int, attacker_id: int, _amount: float, _from: Vector3) -> void:
+	var victim := brain_of(victim_id)
+	var attacker := game.soldier(attacker_id)
+	if victim != null and attacker != null and attacker.team != victim.soldier.team:
+		# Being hit tells you roughly where from, like a player's hit marker.
+		victim.combat.hurt(attacker_id, game.tick)
+		victim.perception.hear(attacker_id, attacker.global_position, attacker.velocity, game.tick)
+
+
+func _on_hit(attacker_id: int, _victim_id: int, weapon: int) -> void:
+	var brain := brain_of(attacker_id)
+	if brain != null:
+		brain.stats.hits[weapon] += 1
+
+
+func _on_killed(victim_id: int, killer_id: int, _weapon: int) -> void:
+	var victim := brain_of(victim_id)
+	if victim != null:
+		victim.stats.deaths += 1
+	var killer := brain_of(killer_id)
+	var dead := game.soldier(victim_id)
+	if killer != null and killer_id != victim_id and dead != null and dead.team != killer.soldier.team:
+		killer.stats.kills += 1
+
+
+func _on_flag_taken(_team: int, soldier_id: int) -> void:
+	var brain := brain_of(soldier_id)
+	if brain != null:
+		brain.stats.grabs += 1
+
+
+func _on_flag_returned(_team: int, soldier_id: int) -> void:
+	var brain := brain_of(soldier_id)
+	if brain != null:
+		brain.stats.returns += 1
+
+
+func _on_flag_captured(_team: int, soldier_id: int) -> void:
+	var brain := brain_of(soldier_id)
+	if brain != null:
+		brain.stats.captures += 1
 
 
 func _on_impacted(weapon: int, at: Vector3, _normal: Vector3) -> void:

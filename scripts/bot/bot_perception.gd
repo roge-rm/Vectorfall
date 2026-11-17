@@ -111,6 +111,17 @@ func _see(other: Soldier, now: int) -> void:
 		contact.noticed = true
 
 
+## Reaction time at a skill from 0 for a beginner to 1 for an expert, in
+## seconds.
+static func reaction_for(skill: float) -> float:
+	return lerpf(0.7, 0.15, skill)
+
+
+## Learns where a soldier is from a sound or a hit.
+func hear(id: int, at: Vector3, velocity: Vector3, tick: int) -> void:
+	_hear(id, at, velocity, tick)
+
+
 func _hear(id: int, at: Vector3, velocity: Vector3, tick: int) -> void:
 	var contact: Dictionary = contacts.get(id, {})
 	if not contact.is_empty() and contact.visible:

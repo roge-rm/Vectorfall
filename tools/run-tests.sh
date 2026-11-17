@@ -10,7 +10,7 @@ GODOT="tools/godot/Godot_v4.7.2-stable_linux.x86_64"
 "$GODOT" --headless --path . --import > /dev/null 2>&1
 
 status=0
-for test in "-s tests/jetpack_test.gd" "-s tests/ski_test.gd" "-s tests/command_test.gd" "-s tests/weapon_test.gd" "-s tests/flag_test.gd" "-s tests/map_test.gd" "-s tests/route_test.gd" "-s tests/perception_test.gd" "-s tests/bot_move_test.gd" "-s tests/main_scene_test.gd"; do
+for test in "-s tests/jetpack_test.gd" "-s tests/ski_test.gd" "-s tests/command_test.gd" "-s tests/weapon_test.gd" "-s tests/flag_test.gd" "-s tests/map_test.gd" "-s tests/route_test.gd" "-s tests/perception_test.gd" "-s tests/bot_move_test.gd" "-s tests/bot_fight_test.gd" "-s tests/main_scene_test.gd"; do
 	echo "== $test"
 	# shellcheck disable=SC2086
 	out=$(timeout 600 "$GODOT" --headless --fixed-fps 60 --path . $test 2>&1)

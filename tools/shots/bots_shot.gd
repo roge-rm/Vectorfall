@@ -4,10 +4,10 @@ extends Node
 ## high above team 0's base looking along the map, and quits. It needs a
 ## screen:
 ##   DISPLAY=:0 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/bots_shot.tscn
-## Saved as /srv/downloads/temp/debug/Vectorfall/bots.png. A number after --
+## Saved as /srv/downloads/temp/debug/vectorfall/bots.png. A number after --
 ## is the seconds to let the bots run first (12).
 
-const FOLDER := "/srv/downloads/temp/debug/Vectorfall"
+const FOLDER := "/srv/downloads/temp/debug/vectorfall"
 
 
 func _ready() -> void:

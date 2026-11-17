@@ -17,7 +17,7 @@ if [ "${1:-}" = "--emulator" ]; then
 	PRESET="Android emulator"
 	APK="$BUILD/vectorfall-emulator-debug.apk"
 fi
-DROP=/srv/downloads/temp/debug/Vectorfall
+DROP=/srv/downloads/temp/debug/vectorfall
 ADB="${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb"
 # Our own adb server (see ~/.claude/resources.md), so the Godot export never
 # starts or stops the shared one on 5037. It's left running, so start it

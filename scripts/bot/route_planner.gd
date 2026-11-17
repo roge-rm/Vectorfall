@@ -11,6 +11,10 @@ extends RefCounted
 const CRUISE_SPEED := 20.0
 ## Share of the speed from a drop that's kept, after steering and crests.
 const DROP_KEEP := 0.85
+## Share of the speed counted on to carry the bot up a steep stretch. Bots
+## reach the bottom of a climb slower than the drop before it suggests, after
+## turns and crests, and sliding back down costs far more than a short wait.
+const STEEP_CARRY := 0.6
 ## Seconds for a link too steep to get up at the speed you'd have, so it's
 ## only taken when there's no other way.
 const TOO_STEEP := 600.0
@@ -39,7 +43,8 @@ func cross(link: RouteGraph.Link, v0: float, e0: float) -> Vector3:
 	var wait := 0.0
 	if link.steep > 0.0:
 		# The steep part needs speed or the jet, or the bot waits for energy.
-		var need := maxf(link.steep - v0 * v0 / (2.0 * g), 0.0) * RouteGraph.ENERGY_PER_METRE
+		var carry := v0 * STEEP_CARRY
+		var need := maxf(link.steep - carry * carry / (2.0 * g), 0.0) * RouteGraph.ENERGY_PER_METRE
 		if need > t.energy_max:
 			# More than a tank: you'd slide back down from part way.
 			return Vector3(TOO_STEEP, run, 0.0)

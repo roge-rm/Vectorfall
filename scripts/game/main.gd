@@ -1,8 +1,8 @@
 extends Node
 
 ## Loads straight into the test map with you on team 0's base, a flag on each
-## base, and bots on both teams skiing and jetting between the flag stands.
-## They don't fight or take flags yet. F3 shows what the bots are doing.
+## base, and bots on both teams playing capture the flag with you, as
+## offence, defence or midfield. F3 shows what the bots are doing.
 
 ## Bots on your team, and on the other.
 const OWN_BOTS := 3
