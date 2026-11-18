@@ -28,6 +28,11 @@ const FLAT_ENOUGH := 0.86
 const HOP_TICKS := 40
 const HOP_ENERGY := 15.0
 
+## Running in to their flag, the bot jets ahead while slower than this, in
+## m/s, and with more energy than this.
+const JET_IN_SPEED := 30.0
+const JET_IN_ENERGY := 40.0
+
 ## Waiting for energy below a climb.
 var resting := false
 ## Where it last waited for energy.
@@ -162,6 +167,11 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 		# Falling short of a point above.
 		jet = true
 		doing = "jet gap"
+	elif not braking and speed < JET_IN_SPEED and s.energy > JET_IN_ENERGY and s.velocity.y < 4.0 and brain.wants_jet_in():
+		# Builds speed on the run in to their flag.
+		jet = true
+		ski = true
+		doing = "jet in"
 	else:
 		climbing = false
 		doing = "brake" if braking else ("ski" if ski else "run")

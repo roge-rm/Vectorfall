@@ -45,6 +45,12 @@ const COMMITTED_AHEAD := 150.0
 ## Metres of route a carrier going home by a lane is worth for each share of
 ## the enemy carriers seen to use it.
 const ESCAPE_WEIGHT := 400.0
+## Our carrier waits this far from our stand while our flag is out, in metres.
+const HIDE_NEAR := 40.0
+const HIDE_FAR := 120.0
+## An enemy carrier this close to its stand is home, waiting for its flag,
+## and every chaser goes for it, in metres.
+const CARRIER_HOME := 150.0
 ## Seconds between role count samples for the report.
 const HISTORY_GAP := 10.0
 ## Decisions kept for the report and overlay.
@@ -633,8 +639,11 @@ func chase_point(slot: int, from: Vector3) -> Array:
 	var trail := at + (carrier.velocity * lead if carrier != null else Vector3.ZERO)
 	if slot == 0 or escape_order.is_empty() or from.distance_to(at) < 60.0 or slot > escape_order.size() + 1:
 		return [trail, false]
-	# Their stand's route graph point, so the way there goes up the ramp.
+	# Home or standing still, it's waiting for its own flag: everyone goes for it.
 	var home: Vector3 = game.stands[1 - team]
+	if at.distance_to(home) < CARRIER_HOME or (carrier != null and carrier.horizontal_speed() < 6.0):
+		return [trail, false]
+	# Their stand's route graph point, so the way there goes up the ramp.
 	var stands := director.graph.interest_points(RouteGraph.FLAG_STAND, 1 - team)
 	if not stands.is_empty():
 		home = director.graph.points[stands[0]]
@@ -667,6 +676,57 @@ func main_threat_lane() -> int:
 	for k in attack_lanes.size():
 		if attack_lanes[k] > attack_lanes[best]:
 			best = k
+	return best
+
+
+## Route graph points within reach of an enemy the team knows of, in point
+## order, for a carrier's way home to go round.
+func points_near_enemies(reach: float) -> Array[int]:
+	var found: Array[int] = []
+	var spots: Array[Vector3] = []
+	var ids := known.keys()
+	ids.sort()
+	for id: int in ids:
+		spots.append(known_position(id))
+	if spots.is_empty():
+		return found
+	var points := director.graph.points
+	for k in points.size():
+		for at in spots:
+			if points[k].distance_squared_to(at) < reach * reach:
+				found.append(k)
+				break
+	return found
+
+
+## Where our carrier waits while our flag is carried off: the route graph
+## point HIDE_NEAR to HIDE_FAR metres from our stand furthest from the enemies
+## the team knows of, nearer the stand on a tie.
+func hide_point() -> Vector3:
+	var stand: Vector3 = game.stands[team]
+	var graph := director.graph
+	var spots: Array[Vector3] = []
+	var ids := known.keys()
+	ids.sort()
+	for id: int in ids:
+		spots.append(known_position(id))
+	var own: Flag = game.flags[team]
+	if own.mode == Flag.Mode.CARRIED:
+		spots.append(own.global_position)
+	var best := stand
+	var best_score := -INF
+	for k in graph.points.size():
+		var p := graph.points[k]
+		var d := p.distance_to(stand)
+		if d < HIDE_NEAR or d > HIDE_FAR:
+			continue
+		var clear := 200.0
+		for at in spots:
+			clear = minf(clear, p.distance_to(at))
+		var score := clear - d * 0.1
+		if score > best_score:
+			best_score = score
+			best = p
 	return best
 
 

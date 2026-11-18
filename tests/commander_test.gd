@@ -185,10 +185,18 @@ func _learns_lanes() -> void:
 	boss._plan_chase()
 	checks.check(not boss.escape_order.is_empty() and boss.escape_order[0] == 2, "the chase expects the lane enemy carriers used before (%s)" % str(boss.escape_order))
 	var far := Vector3(-300.0, 20.0, 0.0)
+	# On its way home.
+	thief.velocity = Vector3(20.0, 0.0, 0.0)
 	var cut1: Array = boss.chase_point(1, far)
 	var cut2: Array = boss.chase_point(2, far)
 	var trail: Array = boss.chase_point(0, far)
 	checks.check(cut1[1] and cut2[1] and not trail[1] and cut1[0].distance_to(cut2[0]) > 50.0, "chasers split: one trails and two cut off different lanes")
+	# Home and waiting for its own flag: everyone goes for it.
+	var home: Vector3 = game.stands[1]
+	thief.global_position = home + Vector3(60.0, 1.0, 30.0)
+	flag.global_position = thief.global_position
+	thief.velocity = Vector3.ZERO
+	checks.check(not boss.chase_point(1, far)[1] and not boss.chase_point(2, far)[1], "a carrier waiting at home has every chaser go for it")
 	await _done(setup)
 
 

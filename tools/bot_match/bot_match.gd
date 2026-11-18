@@ -8,8 +8,8 @@ extends Node
 ##   --seed N      the match seed (1)
 ##   --minutes N   simulated minutes (5)
 ##   --map NAME    ochre_fold or test (ochre_fold)
-##   --check       exit with an error if the bots stopped playing: fewer than
-##                 2 grabs, no returns, or over 60 s stuck
+##   --check       print a CHECK line for tools/bot-check.sh, and exit with an
+##                 error if the bots stopped moving: 60 s or more stuck
 ## The capture limit is off, so the match runs the whole time. The report has
 ## each team's roles every 10 s and its commander's decisions.
 
@@ -84,7 +84,19 @@ func _on_flag_event(team: int, soldier_id: int, event: String) -> void:
 		"soldier": soldier_id,
 		"health": snappedf(s.health, 1.0) if s != null else 0.0,
 		"position": [snappedf(at.x, 0.1), snappedf(at.y, 0.1), snappedf(at.z, 0.1)],
+		"speed": snappedf(s.velocity.length(), 0.1) if s != null else 0.0,
+		"near": _near_counts(s) if s != null else [0, 0],
 	})
+
+
+## Living soldiers within 60 m of s, as [its team, the other team], s left out.
+func _near_counts(s: Soldier) -> Array:
+	var counts := [0, 0]
+	for id: int in game.entities:
+		var other := game.soldier(id)
+		if other != null and other != s and not other.dead and other.global_position.distance_to(s.global_position) < 60.0:
+			counts[0 if other.team == s.team else 1] += 1
+	return counts
 
 
 func _run() -> void:
@@ -103,7 +115,7 @@ func _run() -> void:
 	_print_summary(report, path)
 	if check:
 		var totals: Dictionary = report.totals
-		var ok: bool = totals.grabs >= 2 and totals.returns >= 1 and totals.time_stuck < 60.0
+		var ok: bool = totals.time_stuck < 60.0
 		print("CHECK %s seed %d: %d captures, %d grabs, %d returns, %.1f s stuck" % ["ok" if ok else "FAIL", seed_value, totals.captures, totals.grabs, totals.returns, totals.time_stuck])
 		get_tree().quit(0 if ok else 1)
 		return

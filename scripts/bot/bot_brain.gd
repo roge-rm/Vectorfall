@@ -12,8 +12,8 @@ extends CommandSource
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
 ## goal_target.
-enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF }
-const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off"]
+enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE }
+const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide"]
 ## OFFENCE goes for the enemy flag and carries it, DEFENCE holds by the flag,
 ## LIGHT_DEFENCE watches the way enemies come in and chases carriers, ESCORT
 ## goes with a carrier or a person heading for the flag, CHASE goes after the
@@ -68,6 +68,23 @@ const CARRIER_KEEP_OFF := 12.0
 const CARRIER_AVOID_COST := 8.0
 ## Energy an escape jet needs to start; below it the bot stands and refills.
 const ESCAPE_ENERGY := 25.0
+## A carrier this close to home waits somewhere out of the way while its own
+## flag is carried off, in metres.
+const HIDE_RANGE := 200.0
+## A carrier plans its way home again this often, round the enemies its team
+## knows of, in seconds.
+const CARRIER_REPLAN := 1.5
+## Seconds a carrier's route pays for each point this close to a known enemy,
+## in metres.
+const ENEMY_COST := 8.0
+const ENEMY_REACH := 45.0
+## Offence jets in towards their flag at home between these distances from
+## it, flat, to take it at speed, in metres.
+const JET_IN_FAR := 150.0
+const JET_IN_NEAR := 45.0
+## Light defence goes out to meet our carrier once it's this close to home, in
+## metres.
+const MEET_RANGE := 450.0
 
 var director: BotDirector
 var game: Match
@@ -256,7 +273,11 @@ func _think_ctf() -> void:
 		replan()
 	else:
 		goal_target = where
-		if moved and not direct:
+		# Only with enemies known and while it's getting on, so the stuck check
+		# still sees a bad climb.
+		var boss := director.commander(soldier.team)
+		var carrier_due := goal == Goal.CAPTURE and (game.tick - planned_tick) / 60.0 >= CARRIER_REPLAN and no_progress < 0.5 and escape_ticks == 0 and not steering.resting and not steering.climbing and boss != null and not boss.known.is_empty()
+		if (moved or carrier_due) and not direct:
 			replan()
 	var pos := soldier.global_position
 	var to := goal_target - pos
@@ -289,6 +310,9 @@ func _choose_goal() -> Array:
 	if theirs != null and theirs.mode == Flag.Mode.CARRIED and theirs.carrier_id == me:
 		if own != null and own.mode == Flag.Mode.DROPPED and own.global_position.distance_to(pos) < 60.0:
 			return [Goal.RETURN_FLAG, own.global_position]
+		if own != null and own.mode == Flag.Mode.CARRIED and pos.distance_to(game.stands[team]) < HIDE_RANGE and boss != null:
+			# It can't score until our flag is back, so it waits out of the way.
+			return [Goal.HIDE, boss.hide_point()]
 		return [Goal.CAPTURE, game.stands[team] + Vector3.DOWN * 0.5]
 	# Sent by the commander to a dropped flag: ours to send home, theirs to
 	# carry on with.
@@ -322,9 +346,12 @@ func _choose_goal() -> Array:
 	# Midfield backs off to defend when hurt. Offence keeps going, since
 	# health doesn't come back and turning round wastes the run.
 	var low := soldier.health < BotCombat.LOW_HEALTH and role == Role.MIDFIELD
-	if holding_theirs and role != Role.DEFENCE and role != Role.LIGHT_DEFENCE:
+	if holding_theirs and role != Role.DEFENCE:
 		var carrier := game.soldier(theirs.carrier_id)
-		if carrier != null and carrier.global_position.distance_to(pos) < ESCORT_RANGE_FAR:
+		if carrier != null and role == Role.LIGHT_DEFENCE and carrier.global_position.distance_to(game.stands[team]) < MEET_RANGE:
+			# Out to meet it on the way in, clearing whoever waits for it.
+			return [Goal.ESCORT, _escort_spot(carrier)]
+		if carrier != null and role != Role.LIGHT_DEFENCE and carrier.global_position.distance_to(pos) < ESCORT_RANGE_FAR:
 			return [Goal.ESCORT, _escort_spot(carrier)]
 	if low:
 		return [Goal.RETREAT, _defence_spot(role_slot + 1)]
@@ -437,7 +464,7 @@ func _midfield_spot() -> Vector3:
 ## Goals the bot stops and stands guard at, and how close counts.
 func _hold_range() -> float:
 	match goal:
-		Goal.DEFEND, Goal.MIDFIELD, Goal.RETREAT:
+		Goal.DEFEND, Goal.MIDFIELD, Goal.RETREAT, Goal.HIDE:
 			return ARRIVE_RANGE
 		Goal.CUT_OFF:
 			return 12.0
@@ -448,6 +475,19 @@ func _hold_range() -> float:
 		Goal.CAPTURE:
 			return 1.0
 	return -1.0
+
+
+## True when the steering should jet ahead for speed: going for their flag
+## at home on the last stretch.
+func wants_jet_in() -> bool:
+	if goal != Goal.TAKE_FLAG:
+		return false
+	var theirs: Flag = game.flags.get(1 - soldier.team)
+	if theirs == null or theirs.mode != Flag.Mode.HOME:
+		return false
+	var to := goal_target - soldier.global_position
+	var flat := Vector2(to.x, to.z).length()
+	return flat < JET_IN_FAR and flat > JET_IN_NEAR
 
 
 ## Slows to a stop at the end of the route, where a flag goal runs through.
@@ -552,6 +592,10 @@ func replan() -> void:
 			var costs := boss.carry_costs()
 			for link: RouteGraph.Link in costs:
 				avoid_links[link] = float(avoid_links.get(link, 0.0)) + costs[link]
+			# And round the enemies the team knows of.
+			for point in boss.points_near_enemies(ENEMY_REACH):
+				for link: RouteGraph.Link in graph.out_links[point]:
+					avoid_links[link] = float(avoid_links.get(link, 0.0)) + ENEMY_COST
 	var start := graph.start_point(soldier.global_position, soldier.velocity)
 	path = director.plan(start, goal_point, soldier.velocity, soldier.energy, avoid_links)
 	path_start = soldier.global_position
