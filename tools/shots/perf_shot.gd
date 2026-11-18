@@ -57,6 +57,7 @@ func _ready() -> void:
 			var cpu := 0.0
 			var gpu := 0.0
 			var calls := 0
+			var triangles := 0
 			var frames := 200
 			var started := Time.get_ticks_usec()
 			for i in frames:
@@ -64,5 +65,6 @@ func _ready() -> void:
 				cpu += RenderingServer.viewport_get_measured_render_time_cpu(viewport)
 				gpu += RenderingServer.viewport_get_measured_render_time_gpu(viewport)
 				calls = RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
-			print("outlines %s hatching %s: %d draw calls, render cpu %.2f ms, gpu %.2f ms, frame %.2f ms" % [outlines, hatching, calls, cpu / frames, gpu / frames, (Time.get_ticks_usec() - started) / 1000.0 / frames])
+				triangles = RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)
+			print("outlines %s hatching %s: %d draw calls, %d triangles, render cpu %.2f ms, gpu %.2f ms, frame %.2f ms" % [outlines, hatching, calls, triangles, cpu / frames, gpu / frames, (Time.get_ticks_usec() - started) / 1000.0 / frames])
 	get_tree().quit()

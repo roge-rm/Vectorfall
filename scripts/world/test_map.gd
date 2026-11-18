@@ -45,7 +45,7 @@ var _obstacle_cells := {}
 
 func _init(colours: Palette = null) -> void:
 	name = "TestMap"
-	palette = colours if colours != null else Palette.desert()
+	palette = colours if colours != null else Palette.paperback()
 	noise.seed = MAP_SEED
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	noise.frequency = 0.006

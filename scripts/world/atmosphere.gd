@@ -14,7 +14,7 @@ var sky_material: ShaderMaterial
 
 func _init(from: Palette = null) -> void:
 	name = "Atmosphere"
-	palette = from if from != null else Palette.desert()
+	palette = from if from != null else Palette.paperback()
 	sun = DirectionalLight3D.new()
 	sun.light_energy = 1.0
 	sun.shadow_enabled = false

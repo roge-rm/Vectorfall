@@ -13,6 +13,10 @@ uniform vec4 colour : source_color = vec4(0.07, 0.05, 0.04, 1.0);
 uniform float width = 0.0055;
 uniform float min_distance = 2.0;
 uniform float max_distance = 70.0;
+// Past max_distance the line thins further, to thin_to of its width by
+// thin_distance. Off when thin_distance is 0.
+uniform float thin_distance = 0.0;
+uniform float thin_to = 1.0;
 uniform vec3 sun_direction = vec3(-0.369, 0.766, 0.527);
 // How much wider the line gets on the shadow side, 0 for an even line.
 uniform float shadow_weight = 0.9;
@@ -32,6 +36,9 @@ void vertex() {
 	// Scaled meshes keep the same line width.
 	vec3 view_normal = (MODELVIEW_MATRIX * vec4(hull, 0.0)).xyz / length(MODEL_MATRIX[0].xyz);
 	float distance = clamp(-view_position.z, min_distance, max_distance);
+	if (thin_distance > max_distance) {
+		distance *= mix(1.0, thin_to, smoothstep(max_distance, thin_distance, -view_position.z));
+	}
 	view_position.xyz += view_normal * width * weight * distance;
 	POSITION = PROJECTION_MATRIX * view_position;
 }

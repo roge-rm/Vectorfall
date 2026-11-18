@@ -80,8 +80,8 @@ func _write(image: Image, file: String) -> void:
 
 ## Both guns in your hands for both teams, set up as ViewModel does at the
 ## game's field of view: the lower right of four frames side by side, disc
-## launcher on top, orange on the left.
-func _weapons() -> void:
+## launcher on top, team 0 on the left.
+func _weapons(file := "style-weapons.png") -> void:
 	_camera.fov = 75.0
 	_camera.near = 0.05
 	_camera.look_at_from_position(Vector3(0.0, 1.7, 9.0), Vector3(2.0, 1.2, -12.0))
@@ -99,7 +99,7 @@ func _weapons() -> void:
 			frame.convert(Image.FORMAT_RGBA8)
 			sheet.blit_rect(frame, Rect2i(480, 270, 800, 450), Vector2i(team * 800, slot * 450))
 			gun.queue_free()
-	_write(sheet, "style-weapons.png")
+	_write(sheet, file)
 	_camera.fov = 62.0
 
 

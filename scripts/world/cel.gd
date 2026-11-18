@@ -270,6 +270,7 @@ static func merged(parts: Array, for_glow := false) -> ArrayMesh:
 				tool.set_color(colour)
 				tool.set_normal((normal_basis * normals[index]).normalized())
 				tool.add_vertex(where * points[index])
+	tool.index()
 	return hull_mesh(tool.commit())
 
 
@@ -306,6 +307,132 @@ static func sphere(radius: float, height: float, sides := 12) -> ArrayMesh:
 		made.rings = maxi(sides / 2, 3)
 		_meshes[key] = hull_mesh(made)
 	return _meshes[key]
+
+
+## A box with its edges and corners cut at 45 degrees, bevel metres in,
+## so it catches a light band along each edge. Shared by size.
+static func bevel_box(size: Vector3, bevel := 0.02) -> ArrayMesh:
+	var half := size * 0.5
+	var b := minf(bevel, minf(half.x, minf(half.y, half.z)) * 0.45)
+	var key := "bevel/%s/%s" % [size, b]
+	if _meshes.has(key):
+		return _meshes[key]
+	# A corner point with the axis "full" at the box face and the other two
+	# pulled in by the bevel.
+	var corner := func(full: int, signs: Vector3) -> Vector3:
+		var p := half * signs
+		for a in 3:
+			if a != full:
+				p[a] -= signs[a] * b
+		return p
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for a in 3:
+		var u := (a + 1) % 3
+		var v := (a + 2) % 3
+		for s: float in [1.0, -1.0]:
+			# The face itself.
+			var quad: Array[Vector3] = []
+			for uv: Vector2 in [Vector2(1, 1), Vector2(1, -1), Vector2(-1, -1), Vector2(-1, 1)]:
+				var signs := Vector3.ZERO
+				signs[a] = s
+				signs[u] = uv.x
+				signs[v] = uv.y
+				quad.append(corner.call(a, signs))
+			var normal := Vector3.ZERO
+			normal[a] = s
+			_quad(tool, quad, normal)
+			# The edge between this face and the next axis's, along the third.
+			for t: float in [1.0, -1.0]:
+				var edge: Array[Vector3] = []
+				for k in 4:
+					var signs := Vector3.ZERO
+					signs[a] = s
+					signs[u] = t
+					signs[v] = 1.0 if k == 0 or k == 3 else -1.0
+					edge.append(corner.call(a if k < 2 else u, signs))
+				var edge_normal := Vector3.ZERO
+				edge_normal[a] = s
+				edge_normal[u] = t
+				_quad(tool, edge, edge_normal.normalized())
+	for x: float in [1.0, -1.0]:
+		for y: float in [1.0, -1.0]:
+			for z: float in [1.0, -1.0]:
+				var signs := Vector3(x, y, z)
+				_triangle(tool, corner.call(0, signs), corner.call(1, signs), corner.call(2, signs), signs.normalized())
+	tool.index()
+	_meshes[key] = hull_mesh(tool.commit())
+	return _meshes[key]
+
+
+## A round shape turned from a profile of (radius, height) points from the
+## bottom up, smooth around and with a hard edge at each profile point, and
+## flat caps where the profile ends off the axis. Shared by profile.
+static func lathe(profile: PackedVector2Array, sides := 10) -> ArrayMesh:
+	var key := "lathe/%s/%d" % [profile, sides]
+	if _meshes.has(key):
+		return _meshes[key]
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in profile.size() - 1:
+		var p0 := profile[i]
+		var p1 := profile[i + 1]
+		var along := (p1 - p0).normalized()
+		var out := Vector2(along.y, -along.x)
+		for j in sides:
+			var a0 := TAU * j / sides
+			var a1 := TAU * (j + 1) / sides
+			var n0 := Vector3(out.x * cos(a0), out.y, out.x * sin(a0))
+			var n1 := Vector3(out.x * cos(a1), out.y, out.x * sin(a1))
+			var v00 := Vector3(p0.x * cos(a0), p0.y, p0.x * sin(a0))
+			var v01 := Vector3(p0.x * cos(a1), p0.y, p0.x * sin(a1))
+			var v10 := Vector3(p1.x * cos(a0), p1.y, p1.x * sin(a0))
+			var v11 := Vector3(p1.x * cos(a1), p1.y, p1.x * sin(a1))
+			var facing := (n0 + n1).normalized()
+			if p0.x > 0.0001:
+				_triangle(tool, v00, v01, v11, facing, [n0, n1, n1])
+			if p1.x > 0.0001:
+				_triangle(tool, v00, v11, v10, facing, [n0, n1, n0])
+	for end in [0, profile.size() - 1]:
+		var p := profile[end]
+		if p.x <= 0.0001:
+			continue
+		var normal := Vector3.DOWN if end == 0 else Vector3.UP
+		for j in sides:
+			var a0 := TAU * j / sides
+			var a1 := TAU * (j + 1) / sides
+			_triangle(tool, Vector3(0.0, p.y, 0.0), Vector3(p.x * cos(a0), p.y, p.x * sin(a0)), Vector3(p.x * cos(a1), p.y, p.x * sin(a1)), normal)
+	tool.index()
+	_meshes[key] = hull_mesh(tool.commit())
+	return _meshes[key]
+
+
+## A lathe profile for a short cylinder of this radius and height, centred,
+## with its rims cut in by bevel.
+static func bevel_cylinder(radius: float, height: float, bevel := 0.015, sides := 10) -> ArrayMesh:
+	var b := minf(bevel, minf(radius, height * 0.5) * 0.45)
+	var h := height * 0.5
+	return lathe(PackedVector2Array([Vector2(radius - b, -h), Vector2(radius, -h + b), Vector2(radius, h - b), Vector2(radius - b, h)]), sides)
+
+
+static func _quad(tool: SurfaceTool, corners: Array[Vector3], normal: Vector3) -> void:
+	_triangle(tool, corners[0], corners[1], corners[2], normal)
+	_triangle(tool, corners[0], corners[2], corners[3], normal)
+
+
+## One triangle facing along normal, wound as Godot's front faces
+## (clockwise seen from the front), with its own or per corner normals.
+static func _triangle(tool: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, normal: Vector3, normals := []) -> void:
+	if (b - a).cross(c - a).length_squared() < 1e-12:
+		return
+	var order := [a, b, c]
+	var order_normals: Array = normals if not normals.is_empty() else [normal, normal, normal]
+	if (b - a).cross(c - a).dot(normal) > 0.0:
+		order = [a, c, b]
+		order_normals = [order_normals[0], order_normals[2], order_normals[1]]
+	for k in 3:
+		tool.set_normal(order_normals[k])
+		tool.add_vertex(order[k])
 
 
 ## A copy of a mesh with outline normals in CUSTOM0: at each corner, the sum
@@ -375,14 +502,18 @@ static func near_outline() -> ShaderMaterial:
 	return _near_outline
 
 
-## The outline pass for soldiers and flags: the same line up close, but it
-## stops growing at 22 m so at 50 m it's about a pixel and the shape shows,
-## and it's less heavy on the shadow side.
+## The outline pass for soldiers and flags: a quarter thinner than the
+## world's, so their detail doesn't fill with ink. It stops growing at 18 m
+## and thins to half by 50 m, so at 50 m it's under a pixel and the team
+## colour shows, and it's less heavy on the shadow side.
 static func figure_outline() -> ShaderMaterial:
 	if _figure_outline == null:
 		_figure_outline = ShaderMaterial.new()
 		_figure_outline.shader = OUTLINE
-		_figure_outline.set_shader_parameter("max_distance", 22.0)
+		_figure_outline.set_shader_parameter("width", 0.0042)
+		_figure_outline.set_shader_parameter("max_distance", 18.0)
+		_figure_outline.set_shader_parameter("thin_distance", 50.0)
+		_figure_outline.set_shader_parameter("thin_to", 0.5)
 		_figure_outline.set_shader_parameter("shadow_weight", 0.4)
 	return _figure_outline
 
