@@ -9,7 +9,8 @@ extends Control
 ## also holds whichever of the three it's sliding over, so one thumb can jet
 ## and fire or ski and jet. A touch that starts on a FIRE button also looks
 ## when dragged, and doesn't slide onto other buttons. ORDERS, above the
-## right FIRE, opens the order menu, and while it's open a tap on it picks.
+## right FIRE, opens the order menu, and while it's open a tap on it picks;
+## the menu sits clear of the stick's half and the buttons.
 ## Sizes follow the shorter side of the screen.
 
 ## Left thumb movement in pixels for a full push, as a share of the short side.
@@ -133,11 +134,13 @@ func _slide_bits(start: int, at: Vector2) -> int:
 
 
 func _press(index: int, at: Vector2) -> void:
-	if menu != null and menu.covers(at):
+	# Buttons come first, then the open menu, so a tap meant for a button
+	# never picks an order.
+	var k := _button_at(at, START_REACH)
+	if k < 0 and menu != null and menu.covers(at):
 		_touches[index] = "menu"
 		menu.pick(menu.item_at(at))
 		return
-	var k := _button_at(at, START_REACH)
 	if k == ORDERS_BUTTON:
 		_touches[index] = "menu"
 		if menu != null:

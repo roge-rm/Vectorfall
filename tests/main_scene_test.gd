@@ -3,7 +3,8 @@ extends SceneTree
 ## Runs the main scene for five seconds and checks the bots but defence have set off,
 ## the player is standing on its base, the touch controls show only after a
 ## touch, and the touch stick and buttons, holding JUMP to ski, FIRE and SWAP too, end
-## up in the player's commands, and the outline setting turns outlines on and
+## up in the player's commands, the left FIRE fires with the order menu open,
+## and the outline setting turns outlines on and
 ## off.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/main_scene_test.gd
 
@@ -108,6 +109,24 @@ func _run() -> void:
 	Input.parse_input_event(fire)
 	await ticks(2)
 	checks.check(touch.buttons & PlayerCommand.FIRE == 0 and touch.buttons & PlayerCommand.JET != 0, "letting go of FIRE leaves JET held")
+
+	# With the order menu open, the left FIRE still fires and picks no order,
+	# and the stick still moves.
+	main.menu.open()
+	var fire_open := InputEventScreenTouch.new()
+	fire_open.index = 5
+	fire_open.pressed = true
+	fire_open.position = to_window * touch.button_centre(3)
+	Input.parse_input_event(fire_open)
+	await ticks(2)
+	var no_order: bool = main.input._order == 0 and not main.bots.commander(0).decisions.any(func(d: Dictionary) -> bool: return d.text.contains("orders"))
+	checks.check(touch.buttons & PlayerCommand.FIRE != 0 and no_order and main.menu.visible, "with the order menu open, the left FIRE fires and sends no order")
+	checks.check(not main.menu.covers(touch.button_centre(3)) and not main.menu.covers(Vector2(touch.size.x * 0.44, touch.size.y * 0.5)), "the menu keeps clear of the left FIRE and the stick's half")
+	fire_open = fire_open.duplicate()
+	fire_open.pressed = false
+	Input.parse_input_event(fire_open)
+	main.menu.close()
+	await ticks(2)
 
 	# One thumb slides between JET, JUMP and the right FIRE.
 	var lift := jet.duplicate()

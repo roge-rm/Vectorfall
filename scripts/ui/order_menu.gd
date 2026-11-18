@@ -1,8 +1,8 @@
 class_name OrderMenu
 extends Control
 
-## The order menu: a short numbered list of orders for your team's bots on
-## the left of the screen. V, the D-pad up or the ORDERS button opens it. Pick
+## The order menu: a short numbered list of orders for your team's bots, at
+## the top of the screen right of middle. V, the D-pad up or the ORDERS button opens it. Pick
 ## with the number keys, the D-pad (up and down, right to pick, left to go
 ## back) or a tap. With commander mode on, its last entry hands out roles:
 ## pick a bot, then a role. It only makes the order; LocalInput sends it in the
@@ -21,8 +21,6 @@ var soldier: Soldier
 var commander_mode := false
 ## The bot picked on the bots page, or 0 for the nearest.
 var _bot_pick := 0
-## Each entry's box on screen, for taps.
-var _rects: Array[Rect2] = []
 
 
 func _init() -> void:
@@ -133,21 +131,38 @@ func move(step: int) -> void:
 	queue_redraw()
 
 
+## Where the panel goes: right of the touch stick's half (the left 45% of
+## the screen) and clear of the right hand buttons, below the score. Returns
+## [panel, row height, font size, entry boxes].
+func layout() -> Array:
+	var short := minf(size.x, size.y)
+	var count := entries().size()
+	var left := size.x * 0.45 + short * 0.03
+	var width := minf(short * 0.62, size.x - short * 0.25 - left)
+	var scale := clampf(width / (short * 0.62), 0.6, 1.0)
+	var row := short * 0.065 * scale
+	var top := Vector2(left, short * 0.12)
+	var panel := Rect2(top, Vector2(width, row * (count + 1) + short * 0.02))
+	var boxes: Array[Rect2] = []
+	for k in count:
+		boxes.append(Rect2(top + Vector2(0.0, row * (k + 1)), Vector2(width, row)))
+	return [panel, row, roundi(short * 0.04 * scale), boxes]
+
+
 ## The entry under a point on screen, or -1.
 func item_at(at: Vector2) -> int:
 	if not visible:
 		return -1
-	for k in _rects.size():
-		if _rects[k].has_point(at):
+	var boxes: Array[Rect2] = layout()[3]
+	for k in boxes.size():
+		if boxes[k].has_point(at):
 			return k
 	return -1
 
 
 ## True if a point is on the menu's panel.
 func covers(at: Vector2) -> bool:
-	if not visible or _rects.is_empty():
-		return false
-	return _rects[0].merge(_rects[_rects.size() - 1]).grow(minf(size.x, size.y) * 0.04).has_point(at)
+	return visible and (layout()[0] as Rect2).has_point(at)
 
 
 func _process(_delta: float) -> void:
@@ -157,17 +172,16 @@ func _process(_delta: float) -> void:
 
 func _draw() -> void:
 	var short := minf(size.x, size.y)
-	var font_size := roundi(short * 0.04)
-	var row := short * 0.065
-	var width := short * 0.62
+	var parts := layout()
+	var panel: Rect2 = parts[0]
+	var row: float = parts[1]
+	var font_size: int = parts[2]
+	var boxes: Array[Rect2] = parts[3]
 	var list := entries()
-	var top := Vector2(short * 0.04, short * 0.16)
-	_rects.clear()
-	InkUi.panel(self, Rect2(top, Vector2(width, row * (list.size() + 1) + short * 0.02)), Color(InkUi.INK, 0.72), short)
-	InkUi.text(self, top + Vector2(short * 0.02, row * 0.7), title(), font_size, Color(0.95, 0.72, 0.3), HORIZONTAL_ALIGNMENT_LEFT)
-	for k in list.size():
-		var box := Rect2(top + Vector2(0.0, row * (k + 1)), Vector2(width, row))
-		_rects.append(box)
+	InkUi.panel(self, panel, Color(InkUi.INK, 0.72), short)
+	InkUi.text(self, panel.position + Vector2(short * 0.02, row * 0.7), title(), font_size, Color(0.95, 0.72, 0.3), HORIZONTAL_ALIGNMENT_LEFT)
+	for k in boxes.size():
+		var box := boxes[k]
 		if k == selected:
 			draw_rect(box.grow(-short * 0.006), Color(InkUi.PAPER, 0.22))
 		InkUi.text(self, box.position + Vector2(short * 0.02, row * 0.68), "%d  %s" % [k + 1, list[k]], font_size, InkUi.PAPER, HORIZONTAL_ALIGNMENT_LEFT)

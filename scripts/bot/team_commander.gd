@@ -258,6 +258,10 @@ func threats(reach: float) -> Array:
 ## seconds. A new reading has to hold PERSON_SETTLE seconds, except carrying
 ## the flag, which counts at once.
 func _read_people() -> void:
+	# People who left the match are forgotten.
+	for id: int in people.keys():
+		if game.soldier(id) == null:
+			people.erase(id)
 	for s in members():
 		var id := s.entity_id
 		if not is_person(id):
@@ -1093,8 +1097,12 @@ func _on_ordered(soldier_id: int, kind: int, arg: int) -> void:
 			# Stand-in until there's a base to repair: one bot home on defence.
 			_send(game.stands[team], 1, BotBrain.Role.DEFENCE, 0, until, kind, soldier_id, BotLines.Line.REPAIR_YES, [BotBrain.Role.DEFENCE])
 		Orders.Kind.ESCORT_ME:
+			if person.dead:
+				return
 			_send(pos, ORDER_ESCORTS, BotBrain.Role.ESCORT, soldier_id, until, kind, soldier_id, BotLines.Line.ESCORT_YES, [])
 		Orders.Kind.COVER_ME:
+			if person.dead:
+				return
 			_send(pos, 1, BotBrain.Role.ESCORT, soldier_id, until, kind, soldier_id, BotLines.Line.COVER_YES, [])
 		Orders.Kind.ATTACK_GENERATOR:
 			# Stand-in until there are generators: bots on offence.
@@ -1177,7 +1185,7 @@ func _lock(brain: BotBrain, role: int, target: int, until: int, kind: int, by: i
 
 
 ## Drops orders that have run out or are done: their time is up, or the
-## person to escort or cover is dead.
+## person to escort or cover is dead or gone.
 func _check_orders() -> void:
 	var ids := order_locks.keys()
 	ids.sort()
@@ -1186,9 +1194,11 @@ func _check_orders() -> void:
 		var gone := director.brain_of(id) == null
 		if lock.until >= 0 and game.tick >= lock.until:
 			gone = true
-		if lock.target != 0 and lock.until >= 0:
+		if lock.target != 0:
+			# Timed orders end when the person dies; a commander mode escort
+			# only when they've left the match.
 			var who := game.soldier(lock.target)
-			if who == null or who.dead:
+			if who == null or (lock.until >= 0 and who.dead):
 				gone = true
 		if gone:
 			order_locks.erase(id)

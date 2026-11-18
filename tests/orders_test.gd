@@ -5,7 +5,9 @@ extends SceneTree
 ## and a match with orders replays the same from the same seed; the right
 ## lines are said when our flag is taken and returned and when an enemy comes
 ## up behind a person, and reports keep their gaps; a role a person hands out
-## in commander mode stays while the rest are planned round it; an expert
+## in commander mode stays while the rest are planned round it, an escort
+## lock goes with its person, and escort or cover orders from the dead do
+## nothing; an expert
 ## lands more discs than a beginner on the same target.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/orders_test.gd
 
@@ -280,6 +282,25 @@ func _commander_locks() -> void:
 		if closest == null or brain.soldier.global_position.distance_to(me.global_position) < closest.soldier.global_position.distance_to(me.global_position):
 			closest = brain
 	checks.check(boss.order_locks.has(closest.soldier.entity_id) and closest.role == R.MIDFIELD, "\"nearest bot\" gives the role to the bot nearest the person")
+	# A commander mode escort of someone who leaves the match is let go.
+	var guard := closest.soldier.entity_id
+	orderer.orders = { game.tick + 2: [Orders.Kind.SET_ROLE, Orders.role_arg(guard, R.ESCORT)] }
+	await ticks(4)
+	var held: bool = boss.order_locks.has(guard) and boss.order_locks[guard].target == me.entity_id
+	game.entities.erase(me.entity_id)
+	game.sources.erase(me.entity_id)
+	boss.think()
+	checks.check(held and not boss.order_locks.has(guard), "an escort lock goes when the person it escorts leaves the match")
+	game.entities[me.entity_id] = me
+	game.sources[me.entity_id] = orderer
+	# Escort me and cover me from a dead person do nothing.
+	var said_before := boss.chat.size()
+	var locks_before := boss.order_locks.size()
+	me.health = 0.0
+	me.die()
+	boss._on_ordered(me.entity_id, Orders.Kind.ESCORT_ME, 0)
+	boss._on_ordered(me.entity_id, Orders.Kind.COVER_ME, 0)
+	checks.check(boss.chat.size() == said_before and boss.order_locks.size() == locks_before, "escort me and cover me from a dead person send no one and get no answer")
 	await _done(setup)
 
 
