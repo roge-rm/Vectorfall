@@ -61,6 +61,7 @@ func apply(value: Palette) -> void:
 	environment.ambient_light_energy = palette.ambient_energy
 	environment.fog_light_color = palette.fog_colour
 	environment.fog_density = palette.fog_density
+	Palette.teams = palette.team_colours.duplicate()
 	Cel.set_palette(palette)
 	BlobShadow.set_palette(palette)
 

@@ -5,6 +5,8 @@ extends CharacterBody3D
 ## tick. Its origin is at its feet. Everything simulate() reads is in
 ## get_state(), so a copy given the same state and commands moves the same.
 
+## The usual team colours. A map's palette can set its own, read through
+## Palette.team().
 const TEAM_COLOURS: Array[Color] = [Color(1.0, 0.45, 0.15), Color(0.2, 0.6, 1.0)]
 const TEAM_NAMES: Array[String] = ["Orange", "Blue"]
 const PITCH_LIMIT := 1.45

@@ -6,7 +6,12 @@ extends Resource
 ## map script picks one and Atmosphere puts it on the scene. All of them keep
 ## the world's colours below the team colours, which are the strongest.
 
+## The team colours in use, set by Atmosphere from its palette.
+static var teams: Array[Color] = Soldier.TEAM_COLOURS.duplicate()
+
 @export var title := ""
+## Team 0 and team 1, which every team coloured thing reads through team().
+@export var team_colours: Array[Color] = Soldier.TEAM_COLOURS.duplicate()
 @export var zenith := Color(0.5, 0.47, 0.42)
 @export var horizon := Color(0.86, 0.77, 0.6)
 ## The sky below the horizon.
@@ -111,6 +116,11 @@ extends Resource
 @export var far_range_height := 0.12
 @export var near_range := Color(0.0, 0.0, 0.0, 0.0)
 @export var near_range_height := 0.07
+
+
+## A team's colour in the palette in use.
+static func team(index: int) -> Color:
+	return teams[index % teams.size()]
 
 
 ## Dry red rock: gold sand in the valleys, rose dust with sage scrub on the
@@ -301,6 +311,8 @@ static func sun_and_shade() -> Palette:
 static func paperback() -> Palette:
 	var made := Palette.new()
 	made.title = "Retro sci-fi paperback"
+	# Lime and azure: orange would sink into the sand.
+	made.team_colours = [Color("a0ff40"), Color("2f6bff")]
 	made.zenith = Color(0.26, 0.1, 0.42)
 	made.horizon = Color(1.0, 0.62, 0.28)
 	made.sky_middle = Color(0.92, 0.24, 0.52, 1.0)

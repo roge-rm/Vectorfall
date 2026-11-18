@@ -306,7 +306,7 @@ func _build_base(team: int) -> void:
 	_box(base, Vector3(14.0, 1.0, 10.0), Transform3D(ramp_basis, ramp_centre), Cel.material(palette.structure))
 	# A tower at the back with a deck on top, in a dark team colour so the
 	# flag in front stands out from it.
-	var team_wall := Cel.team_material(Soldier.TEAM_COLOURS[team].lerp(palette.structure, 0.35).darkened(0.3))
+	var team_wall := Cel.team_material(Palette.team(team).lerp(palette.structure, 0.35).darkened(0.3))
 	_build_stand(base, team)
 	var back := x - front * (BASE_SIZE * 0.5 - 4.0)
 	_box(base, Vector3(4.0, 14.0, 4.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 9.0, 0.0)), team_wall)
@@ -320,7 +320,7 @@ func _build_base(team: int) -> void:
 ## A round pad in the team's colour with a ring of light around it, for the
 ## flag to stand on. It has no collision, so nothing catches on it.
 func _build_stand(base: Node3D, team: int) -> void:
-	var colour := Soldier.TEAM_COLOURS[team]
+	var colour := Palette.team(team)
 	var top := stand_top(team)
 	var pad := MeshInstance3D.new()
 	pad.mesh = Cel.cylinder(2.0, 2.4, STAND_HEIGHT, 12)

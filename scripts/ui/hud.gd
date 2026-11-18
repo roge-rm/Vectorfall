@@ -149,7 +149,7 @@ func _on_match_over(team: int) -> void:
 		_end_title.text = "Draw"
 	else:
 		_end_title.text = "%s team wins" % Soldier.TEAM_NAMES[team]
-		_end_title.add_theme_color_override("font_color", Soldier.TEAM_COLOURS[team].lightened(0.2))
+		_end_title.add_theme_color_override("font_color", Palette.team(team).lightened(0.2))
 	_end_score.text = "%s %d : %d %s" % [Soldier.TEAM_NAMES[0], game.scores[0], game.scores[1], Soldier.TEAM_NAMES[1]]
 
 
@@ -198,7 +198,7 @@ func _name(who: Soldier) -> String:
 	if who == null:
 		return "?"
 	var shown := "You" if who == soldier else who.display_name
-	return "[color=#%s]%s[/color]" % [Soldier.TEAM_COLOURS[who.team].lightened(0.25).to_html(false), shown]
+	return "[color=#%s]%s[/color]" % [Palette.team(who.team).lightened(0.25).to_html(false), shown]
 
 
 func _process(delta: float) -> void:
@@ -321,9 +321,9 @@ func _clock_text() -> String:
 func _draw_match(short: float) -> void:
 	var y := short * 0.06
 	var font := roundi(short * 0.05)
-	_text(Vector2(size.x * 0.5 - short * 0.2, y), "%d" % game.scores[0], font, Soldier.TEAM_COLOURS[0].lightened(0.15))
+	_text(Vector2(size.x * 0.5 - short * 0.2, y), "%d" % game.scores[0], font, Palette.team(0).lightened(0.15))
 	_text(Vector2(size.x * 0.5, y), _clock_text(), font)
-	_text(Vector2(size.x * 0.5 + short * 0.2, y), "%d" % game.scores[1], font, Soldier.TEAM_COLOURS[1].lightened(0.15))
+	_text(Vector2(size.x * 0.5 + short * 0.2, y), "%d" % game.scores[1], font, Palette.team(1).lightened(0.15))
 	if _message_left > 0.0:
 		var colour := Color(InkUi.PAPER, clampf(_message_left, 0.0, 1.0))
 		_text(Vector2(size.x * 0.5, size.y * 0.3), _message, roundi(short * 0.055), colour)
@@ -359,7 +359,7 @@ func _draw_compass(short: float) -> void:
 	for team in game.flags:
 		var flag := game.flags[team]
 		var rel := clampf(_heading_to(flag.global_position), -span, span)
-		var colour := Soldier.TEAM_COLOURS[team].lightened(0.2)
+		var colour := Palette.team(team).lightened(0.2)
 		_diamond(Vector2(size.x * 0.5 + rel / span * width * 0.5, y + height * 0.5), height * 0.55, colour)
 
 
@@ -375,7 +375,7 @@ func _draw_flag_markers(short: float) -> void:
 		var point := flag.global_position + Vector3.UP * 3.0
 		var local := inverse * point
 		var behind := local.z > -0.05
-		var colour := Soldier.TEAM_COLOURS[team].lightened(0.2)
+		var colour := Palette.team(team).lightened(0.2)
 		var screen := Vector2(-1000.0, -1000.0) if behind else camera.unproject_position(point)
 		var inside := not behind and Rect2(Vector2.ZERO, size).grow(-margin).has_point(screen)
 		var at := screen

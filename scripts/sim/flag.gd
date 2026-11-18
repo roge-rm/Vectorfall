@@ -47,7 +47,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	name = "Flag%d" % entity_id
-	var colour := Soldier.TEAM_COLOURS[team % Soldier.TEAM_COLOURS.size()]
+	var colour := Palette.team(team)
 	# Pole, cloth in the full team colour with a pale band across it, and a
 	# ball on top, as one mesh. The band keeps it clear of its own base.
 	var cloth_at := Vector3(CLOTH.x * 0.5 + 0.05, POLE * 0.5 - CLOTH.y * 0.5 - 0.1, 0.0)

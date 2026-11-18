@@ -94,7 +94,7 @@ func _weapons() -> void:
 			gun.rotation = Vector3(ViewModel.TIP, ViewModel.TURN, 0.0)
 			_camera.add_child(gun)
 			for view in gun.find_children("*", "GeometryInstance3D", true, false):
-				Cel.set_team(view as GeometryInstance3D, Soldier.TEAM_COLOURS[team])
+				Cel.set_team(view as GeometryInstance3D, Palette.team(team))
 			var frame := await _grab()
 			frame.convert(Image.FORMAT_RGBA8)
 			sheet.blit_rect(frame, Rect2i(480, 270, 800, 450), Vector2i(team * 800, slot * 450))
@@ -194,7 +194,7 @@ func _box(size: Vector3, at: Vector3, material: Material, turn := 0.0) -> void:
 ## A corner of the orange base: deck, ramp, tower and roof in the dark team
 ## colour, the flag on its pad, and rocks.
 func _build_base(palette: Palette) -> void:
-	var orange := Soldier.TEAM_COLOURS[0]
+	var orange := Palette.team(0)
 	var deck := Cel.material(palette.structure)
 	var wall := Cel.team_material(orange.lerp(palette.structure, 0.35).darkened(0.3))
 	_box(Vector3(16.0, 2.0, 14.0), Vector3(-18.0, 1.0, -22.0), deck)

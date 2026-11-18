@@ -169,7 +169,7 @@ func _build_world() -> void:
 	# and the flag on its stand.
 	_concrete = Cel.material(Color(0.7, 0.7, 0.69))
 	_rock = Cel.material(Color(0.5, 0.48, 0.46))
-	var orange := Soldier.TEAM_COLOURS[0]
+	var orange := Palette.team(0)
 	_box(Vector3(16.0, 2.0, 14.0), Vector3(-16.0, 1.0, -24.0), _concrete)
 	_box(Vector3(3.5, 12.0, 3.5), Vector3(-20.0, 8.0, -28.0), Cel.material(orange))
 	_box(Vector3(8.0, 0.8, 8.0), Vector3(-20.0, 14.4, -28.0), _concrete)

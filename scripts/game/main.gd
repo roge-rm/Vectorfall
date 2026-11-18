@@ -58,7 +58,7 @@ func _ready() -> void:
 
 	camera = FirstPersonCamera.new()
 	camera.soldier = player
-	camera.view_model.set_team_colour(Soldier.TEAM_COLOURS[player.team])
+	camera.view_model.set_team_colour(Palette.team(player.team))
 	add_child(camera)
 	camera.make_current()
 

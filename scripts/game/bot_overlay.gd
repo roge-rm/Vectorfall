@@ -57,7 +57,7 @@ func _process(_delta: float) -> void:
 			label.pixel_size = 0.0012
 			label.font_size = 28
 			label.outline_size = 8
-			label.modulate = Soldier.TEAM_COLOURS[s.team].lightened(0.4)
+			label.modulate = Palette.team(s.team).lightened(0.4)
 			add_child(label)
 			_labels[brain] = label
 		label.visible = not s.dead
@@ -68,7 +68,7 @@ func _process(_delta: float) -> void:
 		if not drew:
 			_routes.surface_begin(Mesh.PRIMITIVE_LINES)
 			drew = true
-		var colour := Soldier.TEAM_COLOURS[s.team].lightened(0.3)
+		var colour := Palette.team(s.team).lightened(0.3)
 		var last := s.global_position + Vector3.UP
 		if brain.direct:
 			# Straight for the goal, off the graph.

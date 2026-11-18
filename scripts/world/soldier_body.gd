@@ -142,7 +142,7 @@ func set_look(new_team: int, new_armour: Armour) -> void:
 	for part: String in _views:
 		for view: MeshInstance3D in _views[part]:
 			view.mesh = mesh(part, team, armour)
-	set_team_colour(Soldier.TEAM_COLOURS[team % Soldier.TEAM_COLOURS.size()])
+	set_team_colour(Palette.team(team))
 	set_render_layer(_layer)
 
 
