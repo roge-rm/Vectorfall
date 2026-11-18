@@ -11,6 +11,9 @@ signal restart_requested
 
 const FEED_LINES := 5
 const FEED_TIME := 6.0
+## What your team's bots say: lines kept and seconds shown.
+const CHAT_LINES := 4
+const CHAT_TIME := 7.0
 const HIT_TIME := 0.25
 const HURT_TIME := 1.5
 const MESSAGE_TIME := 3.5
@@ -22,6 +25,7 @@ var _ski_label: Label
 var _respawn_label: Label
 var _weapon_labels: Array[Label] = []
 var _feed: VBoxContainer
+var _chat: VBoxContainer
 ## Seconds left on the hit marker, and whether the hit killed.
 var _hit_left := 0.0
 var _hit_killed := false
@@ -50,6 +54,9 @@ func _init() -> void:
 	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_feed.alignment = BoxContainer.ALIGNMENT_BEGIN
 	add_child(_feed)
+	_chat = VBoxContainer.new()
+	_chat.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_chat)
 	_make_end_panel()
 
 
@@ -194,6 +201,27 @@ func _on_killed(victim_id: int, killer_id: int, weapon_slot: int) -> void:
 		oldest.queue_free()
 
 
+## A line a bot on your team said, under the weapons on the left, with the
+## bot's name in its team colour.
+func add_chat(speaker: Soldier, text: String) -> void:
+	var line := RichTextLabel.new()
+	line.bbcode_enabled = true
+	line.fit_content = true
+	line.scroll_active = false
+	line.autowrap_mode = TextServer.AUTOWRAP_OFF
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_theme_font_size_override("normal_font_size", 20)
+	line.add_theme_color_override("font_outline_color", InkUi.INK)
+	line.add_theme_constant_override("outline_size", 5)
+	line.text = "%s: %s" % [_name(speaker), text]
+	line.set_meta("left", CHAT_TIME)
+	_chat.add_child(line)
+	while _chat.get_child_count() > CHAT_LINES:
+		var oldest := _chat.get_child(0)
+		_chat.remove_child(oldest)
+		oldest.queue_free()
+
+
 func _name(who: Soldier) -> String:
 	if who == null:
 		return "?"
@@ -223,6 +251,14 @@ func _process(delta: float) -> void:
 		label.modulate = Color.WHITE if k == soldier.weapon else Color(1, 1, 1, 0.45)
 		label.position = Vector2(short * 0.04, y)
 		y += label.size.y
+	_chat.position = Vector2(short * 0.04, y + short * 0.02)
+	_chat.size = Vector2(short * 1.0, 0.0)
+	for line in _chat.get_children():
+		var left: float = line.get_meta("left") - delta
+		line.set_meta("left", left)
+		line.modulate.a = clampf(left, 0.0, 1.0)
+		if left <= 0.0:
+			line.queue_free()
 	_feed.position = Vector2(size.x - _feed.size.x - short * 0.03, short * 0.03)
 	_feed.size = Vector2(short * 0.9, 0.0)
 	for line in _feed.get_children():

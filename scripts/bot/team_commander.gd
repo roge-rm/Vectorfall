@@ -60,9 +60,23 @@ const FILL_ORDER: Array[int] = [BotBrain.Role.CHASE, BotBrain.Role.ESCORT, BotBr
 ## Roles a bot can be pulled from at once when the flags call for it.
 const URGENT_ROLES: Array[int] = [BotBrain.Role.CHASE, BotBrain.Role.ESCORT]
 
-## Sent when a bot sees an enemy coming up behind a person on its team. The
-## text and voice that tell the person come later.
+## Seconds an order from a person lasts, unless it's done sooner.
+const ORDER_TIME := 50.0
+## Bots an order sends: to defence, to escort, to attack.
+const ORDER_DEFENDERS := 2
+const ORDER_ESCORTS := 2
+const ORDER_ATTACKERS := 2
+## Seconds between reports to the team, and before the same report again.
+## Answers to orders and warnings don't wait for the first.
+const REPORT_GAP := 3.0
+const REPEAT_GAP := 15.0
+## Lines kept for the report and tests.
+const CHAT_KEPT := 100
+
+## Sent when a bot sees an enemy coming up behind a person on its team.
 signal warned(team: int, person_id: int, enemy_id: int)
+## A bot says a line (BotLines.Line) to its team, as text and later voice.
+signal said(team: int, speaker_id: int, line: int, text: String)
 
 var team := 0
 var director: BotDirector
@@ -99,6 +113,19 @@ var threat_until := -1
 var decisions: Array[Dictionary] = []
 var history: Array[Dictionary] = []
 var _history_tick := -1000000
+## Bot id to a role a person gave it: { role, target, until, order, by }.
+## until is a tick, or -1 for a role from a person in commander mode, kept
+## until they change it. The commander plans the rest round these.
+var order_locks := {}
+## Offence goes for their flag without waiting for the others until this tick.
+var urgent_until := -1
+## Lines said: the last report's tick, the tick each line and subject was last
+## said, and the last CHAT_KEPT as { seconds, speaker, line, text }.
+var report_tick := -1000000
+var said_ticks := {}
+var chat: Array[Dictionary] = []
+## The lane last reported for the enemy carrier of our flag, or -1.
+var reported_lane := -1
 
 
 func _init(on_team: int, bots: BotDirector) -> void:
@@ -114,6 +141,8 @@ func watch() -> void:
 	game.flag_taken.connect(_on_flag_taken)
 	game.flag_dropped.connect(_on_flag_dropped)
 	game.flag_captured.connect(_on_flag_captured)
+	game.flag_returned.connect(_on_flag_returned)
+	game.ordered.connect(_on_ordered)
 
 
 func _lanes() -> Lanes:
@@ -142,6 +171,8 @@ func think(force := false) -> void:
 	if not game.flags.is_empty():
 		_learn()
 		_plan_chase()
+		_report_carrier()
+	_check_orders()
 	_assign(force)
 	_assign_pickups()
 	_help_people()
@@ -399,6 +430,7 @@ func _fitness(brain: BotBrain, role: int) -> float:
 	var penalty := 500.0 if s.dead else 0.0
 	if game.flags.is_empty():
 		return penalty
+	penalty += _leaning(brain, role)
 	var own: Flag = game.flags[team]
 	match role:
 		BotBrain.Role.DEFENCE, BotBrain.Role.LIGHT_DEFENCE:
@@ -411,6 +443,24 @@ func _fitness(brain: BotBrain, role: int) -> float:
 		BotBrain.Role.OFFENCE:
 			return penalty + at.distance_to(game.stands[1 - team])
 	return penalty
+
+
+## Metres a bot's personality takes off its fitness for a role it likes, or
+## adds for one it doesn't: careful bots like defence, snipers the middle.
+func _leaning(brain: BotBrain, role: int) -> float:
+	match brain.personality:
+		BotBrain.Personality.CAREFUL:
+			if role == BotBrain.Role.DEFENCE or role == BotBrain.Role.LIGHT_DEFENCE:
+				return -60.0
+			if role == BotBrain.Role.OFFENCE:
+				return 60.0
+		BotBrain.Personality.SNIPER:
+			if role == BotBrain.Role.MIDFIELD:
+				return -80.0
+		BotBrain.Personality.AGGRESSIVE:
+			if role == BotBrain.Role.OFFENCE or role == BotBrain.Role.CHASE:
+				return -30.0
+	return 0.0
 
 
 ## Who escorts go with: our carrier, or else a person heading for their flag,
@@ -468,6 +518,12 @@ func _assign(force: bool) -> void:
 		if brain.soldier.entity_id == carrier:
 			next[brain] = BotBrain.Role.OFFENCE
 			want[BotBrain.Role.OFFENCE] = maxi(want[BotBrain.Role.OFFENCE] - 1, 0)
+	# Bots a person gave a role keep it, and fill its places first.
+	for brain in team_brains:
+		var lock: Dictionary = order_locks.get(brain.soldier.entity_id, {})
+		if not lock.is_empty() and not next.has(brain):
+			next[brain] = lock.role
+			want[lock.role] = maxi(want[lock.role] - 1, 0)
 	# Keep the best placed in each role up to its count.
 	for role in BotBrain.ROLE_NAMES.size():
 		var in_role: Array[BotBrain] = []
@@ -494,6 +550,8 @@ func _assign(force: bool) -> void:
 				for brain in team_brains:
 					var current: int = next.get(brain, -1)
 					if current == BotBrain.Role.OFFENCE and brain.soldier.entity_id == carrier:
+						continue
+					if order_locks.has(brain.soldier.entity_id):
 						continue
 					if current in [BotBrain.Role.OFFENCE, BotBrain.Role.MIDFIELD, BotBrain.Role.LIGHT_DEFENCE] and (pick == null or _better(brain, pick, role)):
 						pick = brain
@@ -532,6 +590,9 @@ func _assign(force: bool) -> void:
 		brain.role_slot = slots.get(role, 0)
 		slots[role] = brain.role_slot + 1
 		brain.role_target = escort_of if role == BotBrain.Role.ESCORT else (enemy_carrier if role == BotBrain.Role.CHASE else 0)
+		var lock: Dictionary = order_locks.get(id, {})
+		if not lock.is_empty() and lock.role == role and lock.target != 0:
+			brain.role_target = lock.target
 	var text := _describe_plan(situation)
 	if text != plan_text:
 		plan_text = text
@@ -789,6 +850,11 @@ func _help_people() -> void:
 				best = brain
 		if best != null:
 			covers[best.soldier.entity_id] = id
+		var lock_ids := order_locks.keys()
+		lock_ids.sort()
+		for bot_id: int in lock_ids:
+			if order_locks[bot_id].order == Orders.Kind.COVER_ME and order_locks[bot_id].target == id:
+				covers[bot_id] = id
 		if game.tick - int(warn_ticks.get(id, -1000000)) < int(WARN_GAP * 60.0):
 			continue
 		var facing := Vector3(-sin(person.yaw), 0.0, -cos(person.yaw))
@@ -803,10 +869,32 @@ func _help_people() -> void:
 				warn_ticks[id] = game.tick
 				_decide("warn %s of %s behind" % [person.display_name, game.soldier(enemy_id).display_name])
 				warned.emit(team, id, enemy_id)
+				var speaker := _nearest_bot(pos)
+				if speaker != null:
+					say(speaker.soldier.entity_id, BotLines.Line.BEHIND_YOU, "", true, str(id))
 				break
 
 
 func _on_flag_taken(flag_team: int, soldier_id: int) -> void:
+	var taker := game.soldier(soldier_id)
+	if flag_team == team:
+		var speaker := _nearest_bot(game.stands.get(team, Vector3.ZERO))
+		if speaker != null:
+			say(speaker.soldier.entity_id, BotLines.Line.FLAG_TAKEN)
+		reported_lane = -1
+	elif taker != null and taker.team == team:
+		var speaker := director.brain_of(soldier_id)
+		if speaker == null:
+			speaker = _nearest_bot(taker.global_position)
+		if speaker != null:
+			say(speaker.soldier.entity_id, BotLines.Line.WE_HAVE_FLAG)
+		# Their flag is taken: an order to take it is done.
+		var ids := order_locks.keys()
+		ids.sort()
+		for bot_id: int in ids:
+			if order_locks[bot_id].order == Orders.Kind.TAKE_FLAG:
+				order_locks.erase(bot_id)
+		urgent_until = -1
 	if flag_team != team or lanes == null:
 		return
 	var entry: Dictionary = known.get(soldier_id, {})
@@ -883,6 +971,12 @@ func get_state() -> Dictionary:
 		"decisions": decisions.duplicate(true),
 		"history": history.duplicate(true),
 		"history_tick": _history_tick,
+		"order_locks": order_locks.duplicate(true),
+		"urgent_until": urgent_until,
+		"report_tick": report_tick,
+		"said_ticks": said_ticks.duplicate(),
+		"chat": chat.duplicate(true),
+		"reported_lane": reported_lane,
 	}
 
 
@@ -907,3 +1001,201 @@ func set_state(state: Dictionary) -> void:
 	decisions.assign(state.decisions.duplicate(true))
 	history.assign(state.history.duplicate(true))
 	_history_tick = state.history_tick
+	order_locks = state.order_locks.duplicate(true)
+	urgent_until = state.urgent_until
+	report_tick = state.report_tick
+	said_ticks = state.said_ticks.duplicate()
+	chat.assign(state.chat.duplicate(true))
+	reported_lane = state.reported_lane
+
+
+func _on_flag_returned(flag_team: int, _soldier_id: int) -> void:
+	if flag_team != team:
+		return
+	reported_lane = -1
+	var speaker := _nearest_bot(game.stands.get(team, Vector3.ZERO))
+	if speaker != null:
+		say(speaker.soldier.entity_id, BotLines.Line.FLAG_RETURNED)
+
+
+## Tells the team which lane the enemy carrier of our flag is heading for: the
+## one it's in out in the middle, or the likeliest way home while it's still in
+## our base. Once for each lane it goes to.
+func _report_carrier() -> void:
+	var own: Flag = game.flags[team]
+	if own.mode != Flag.Mode.CARRIED or lanes == null or lanes.count == 0:
+		return
+	var at := own.global_position
+	var lane := lanes.lane_of(at) if lanes.in_lanes(at) else (escape_order[0] if not escape_order.is_empty() else -1)
+	if lane < 0 or lane == reported_lane:
+		return
+	var speaker := _nearest_bot(at)
+	if speaker != null and say(speaker.soldier.entity_id, BotLines.Line.CARRIER_LANE, lanes.title_of(lane)):
+		reported_lane = lane
+
+
+## The living bot nearest a spot, lower id on a tie, or null.
+func _nearest_bot(at: Vector3) -> BotBrain:
+	var best: BotBrain = null
+	var best_d := INF
+	for brain in brains():
+		if brain.soldier.dead:
+			continue
+		var d := brain.soldier.global_position.distance_to(at)
+		if d < best_d:
+			best_d = d
+			best = brain
+	return best
+
+
+## A bot says a line to its team, unless it's too soon: a report waits
+## REPORT_GAP after the last one, and the same line about the same thing
+## REPEAT_GAP. Warnings (now) skip the first wait. key tells apart lines with
+## no subject, such as warnings to different people. True if said.
+func say(speaker_id: int, line: int, subject := "", now := false, key := "") -> bool:
+	var tag := "%d:%s:%s" % [line, subject, key]
+	if not now and game.tick - report_tick < int(REPORT_GAP * 60.0):
+		return false
+	if game.tick - int(said_ticks.get(tag, -1000000)) < int(REPEAT_GAP * 60.0):
+		return false
+	said_ticks[tag] = game.tick
+	if not now:
+		report_tick = game.tick
+	_speak(speaker_id, line, subject)
+	return true
+
+
+## An answer to a person's order: said at once, always.
+func _answer(speaker_id: int, line: int, subject := "") -> void:
+	_speak(speaker_id, line, subject)
+
+
+func _speak(speaker_id: int, line: int, subject: String) -> void:
+	var text := BotLines.text(line, subject)
+	chat.append({ "seconds": snappedf(game.tick / 60.0, 0.1), "speaker": speaker_id, "line": line, "text": text })
+	if chat.size() > CHAT_KEPT:
+		chat.pop_front()
+	said.emit(team, speaker_id, line, text)
+
+
+## A person on this team gave an order in their command this tick.
+func _on_ordered(soldier_id: int, kind: int, arg: int) -> void:
+	var person := game.soldier(soldier_id)
+	if person == null or person.team != team or game.flags.is_empty():
+		return
+	var pos := person.global_position
+	var until := game.tick + int(ORDER_TIME * 60.0)
+	_decide("%s orders %s" % [person.display_name, Orders.NAMES[kind] if kind > 0 and kind < Orders.NAMES.size() else "?"])
+	match kind:
+		Orders.Kind.DEFEND_FLAG:
+			_send(game.stands[team], ORDER_DEFENDERS, BotBrain.Role.DEFENCE, 0, until, kind, soldier_id, BotLines.Line.DEFENCE_YES, [BotBrain.Role.DEFENCE])
+		Orders.Kind.REPAIR_BASE:
+			# Stand-in until there's a base to repair: one bot home on defence.
+			_send(game.stands[team], 1, BotBrain.Role.DEFENCE, 0, until, kind, soldier_id, BotLines.Line.REPAIR_YES, [BotBrain.Role.DEFENCE])
+		Orders.Kind.ESCORT_ME:
+			_send(pos, ORDER_ESCORTS, BotBrain.Role.ESCORT, soldier_id, until, kind, soldier_id, BotLines.Line.ESCORT_YES, [])
+		Orders.Kind.COVER_ME:
+			_send(pos, 1, BotBrain.Role.ESCORT, soldier_id, until, kind, soldier_id, BotLines.Line.COVER_YES, [])
+		Orders.Kind.ATTACK_GENERATOR:
+			# Stand-in until there are generators: bots on offence.
+			_send(game.stands[1 - team], ORDER_ATTACKERS, BotBrain.Role.OFFENCE, 0, until, kind, soldier_id, BotLines.Line.ATTACK_YES, [BotBrain.Role.OFFENCE])
+		Orders.Kind.TAKE_FLAG:
+			_send(game.stands[1 - team], 1, BotBrain.Role.OFFENCE, 0, until, kind, soldier_id, BotLines.Line.TAKE_YES, [BotBrain.Role.OFFENCE])
+			urgent_until = until
+		Orders.Kind.SET_ROLE:
+			_set_role(person, Orders.arg_bot(arg), Orders.arg_role(arg))
+
+
+## Sends the count bots nearest a spot, leaving out those already in a role
+## in skip and those on another order, to a role for an order, and has the
+## first answer. A carrier can't go, and says so if it's the nearest.
+func _send(at: Vector3, count: int, role: int, target: int, until: int, kind: int, by: int, line: int, skip: Array) -> void:
+	var ranked: Array[BotBrain] = []
+	for brain in brains():
+		var id := brain.soldier.entity_id
+		var lock: Dictionary = order_locks.get(id, {})
+		if not lock.is_empty() and lock.order != kind:
+			continue
+		if not skip.has(brain.role) and id != target:
+			ranked.append(brain)
+	ranked.sort_custom(func(a: BotBrain, b: BotBrain) -> bool:
+		var da := a.soldier.global_position.distance_to(at) + (500.0 if a.soldier.dead else 0.0)
+		var db := b.soldier.global_position.distance_to(at) + (500.0 if b.soldier.dead else 0.0)
+		return da < db or (da == db and a.soldier.entity_id < b.soldier.entity_id))
+	var sent := 0
+	for brain in ranked:
+		if sent >= count:
+			break
+		var id := brain.soldier.entity_id
+		if game.carried_flag(id) != null:
+			if sent == 0:
+				_answer(id, BotLines.Line.CANT_CARRYING)
+			continue
+		_lock(brain, role, target, until, kind, by)
+		if sent == 0:
+			_answer(id, line)
+		sent += 1
+
+
+## Commander mode: a person gives a bot (0 for the nearest) a role to keep, or
+## gives it back to the commander with Orders.AUTO.
+func _set_role(person: Soldier, bot_id: int, role: int) -> void:
+	var brain: BotBrain = director.brain_of(bot_id) if bot_id != 0 else null
+	if bot_id == 0:
+		var best_d := INF
+		for b in brains():
+			var d := b.soldier.global_position.distance_to(person.global_position) + (500.0 if b.soldier.dead else 0.0)
+			if d < best_d:
+				best_d = d
+				brain = b
+	if brain == null or brain.soldier.team != team:
+		return
+	var id := brain.soldier.entity_id
+	if role == Orders.AUTO:
+		order_locks.erase(id)
+		_answer(id, BotLines.Line.AUTO_YES)
+		return
+	if role < 0 or role >= BotBrain.ROLE_NAMES.size():
+		return
+	if game.carried_flag(id) != null and role != BotBrain.Role.OFFENCE:
+		_answer(id, BotLines.Line.CANT_CARRYING)
+		return
+	_lock(brain, role, person.entity_id if role == BotBrain.Role.ESCORT else 0, -1, Orders.Kind.SET_ROLE, person.entity_id)
+	_answer(id, BotLines.Line.ROLE_YES, BotBrain.ROLE_NAMES[role])
+
+
+## Puts a bot in a role for an order now, and keeps it there.
+func _lock(brain: BotBrain, role: int, target: int, until: int, kind: int, by: int) -> void:
+	var id := brain.soldier.entity_id
+	order_locks[id] = { "role": role, "target": target, "until": until, "order": kind, "by": by }
+	if brain.role != role:
+		_decide("%s %s to %s by order" % [brain.soldier.display_name, BotBrain.ROLE_NAMES[brain.role], BotBrain.ROLE_NAMES[role]])
+		brain.role = role
+	role_since[id] = game.tick
+	brain.role_target = target
+	brain.role_slot = 0
+
+
+## Drops orders that have run out or are done: their time is up, or the
+## person to escort or cover is dead.
+func _check_orders() -> void:
+	var ids := order_locks.keys()
+	ids.sort()
+	for id: int in ids:
+		var lock: Dictionary = order_locks[id]
+		var gone := director.brain_of(id) == null
+		if lock.until >= 0 and game.tick >= lock.until:
+			gone = true
+		if lock.target != 0 and lock.until >= 0:
+			var who := game.soldier(lock.target)
+			if who == null or who.dead:
+				gone = true
+		if gone:
+			order_locks.erase(id)
+			var who_name := game.soldier(id).display_name if game.soldier(id) != null else str(id)
+			_decide("%s's order to play %s is over" % [who_name, BotBrain.ROLE_NAMES[lock.role]])
+
+
+## Offence goes for their flag at once, after an order to take it.
+func attack_now() -> bool:
+	return game.tick < urgent_until

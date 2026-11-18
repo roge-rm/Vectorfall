@@ -16,6 +16,9 @@ var middles := PackedFloat32Array()
 var approaches := {}
 var stands := {}
 var names: Array[String] = []
+## What bots call each lane when they talk: the map's own names if its route
+## graph has one for each lane, or "north lane" and the like.
+var titles: Array[String] = []
 ## Each lane's route graph links, those with their middle away from the bases.
 var lane_links: Array[Array] = []
 
@@ -51,6 +54,10 @@ func _init(graph: RouteGraph, stand_points: Dictionary) -> void:
 			z += approaches[team][k].z / teams.size()
 		middles[k] = z
 	names.assign(["north", "middle", "south"] if count == 3 else range(count).map(func(k: int) -> String: return "lane %d" % k))
+	if graph.lane_titles.size() == count:
+		titles.assign(graph.lane_titles)
+	else:
+		titles.assign(names.map(func(n: String) -> String: return n if n.begins_with("lane") else n + " lane"))
 	for k in count:
 		lane_links.append([])
 	for link: RouteGraph.Link in graph.links:
@@ -87,3 +94,7 @@ func approach(team: int, lane: int) -> Vector3:
 
 func name_of(lane: int) -> String:
 	return names[lane] if lane >= 0 and lane < names.size() else "?"
+
+
+func title_of(lane: int) -> String:
+	return titles[lane] if lane >= 0 and lane < titles.size() else "?"

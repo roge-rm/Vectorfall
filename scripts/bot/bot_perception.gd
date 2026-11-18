@@ -24,6 +24,8 @@ const PREDICT_LIMIT := 2.0
 
 ## Seconds from a soldier coming into view to the bot noticing it.
 var reaction_time := 0.4
+## How far the bot sees, in metres, from its skill.
+var view_range := VIEW_RANGE
 ## Soldier id to { position, velocity, tick, visible, since, noticed, heard }.
 ## tick is when it was last seen or heard, since when it came into view, or -1
 ## while it's out of view.
@@ -56,7 +58,7 @@ func update(me: Soldier, game: Match, director: BotDirector) -> void:
 		var other := enemies[(cursor + k) % count]
 		var to := other.global_position + Vector3.UP * 1.2 - eye.origin
 		var distance := to.length()
-		var in_view := distance < NEAR_SENSE or (distance < VIEW_RANGE and forward.angle_to(to) < VIEW_HALF_ANGLE)
+		var in_view := distance < NEAR_SENSE or (distance < view_range and forward.angle_to(to) < VIEW_HALF_ANGLE)
 		if in_view:
 			if not director.take_ray():
 				break
@@ -107,6 +109,12 @@ func _see(other: Soldier, now: int) -> void:
 	contact.heard = false
 	if (now - contact.since) / 60.0 >= reaction_time:
 		contact.noticed = true
+
+
+## How far a bot sees at a skill from 0 to 1: three quarters of VIEW_RANGE
+## for a beginner, all of it at normal (0.5) and a quarter more for an expert.
+static func view_range_for(skill: float) -> float:
+	return VIEW_RANGE * (0.75 + 0.5 * skill)
 
 
 ## Reaction time at a skill from 0 for a beginner to 1 for an expert, in
@@ -177,6 +185,7 @@ func get_state() -> Dictionary:
 		"danger_at": danger_at,
 		"danger_tick": danger_tick,
 		"reaction_time": reaction_time,
+		"view_range": view_range,
 	}
 
 
@@ -187,3 +196,4 @@ func set_state(state: Dictionary) -> void:
 	danger_at = state.danger_at
 	danger_tick = state.danger_tick
 	reaction_time = state.reaction_time
+	view_range = state.get("view_range", VIEW_RANGE)

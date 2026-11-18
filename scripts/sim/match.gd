@@ -30,6 +30,9 @@ signal flag_returned(team: int, soldier_id: int)
 signal flag_captured(team: int, soldier_id: int)
 ## winner is a team, or -1 for a draw.
 signal match_over(winner: int)
+## A soldier gave its team's bots an order (Orders.Kind) in its command this
+## tick, sent before it moves.
+signal ordered(soldier_id: int, order: int, arg: int)
 
 var rng := RandomNumberGenerator.new()
 var seed_value := 0
@@ -81,6 +84,8 @@ func step(delta: float) -> void:
 	for id: int in ids:
 		var source: CommandSource = sources.get(id)
 		var command := source.make_command(delta) if source != null else PlayerCommand.new()
+		if command.order != 0:
+			ordered.emit(id, command.order, command.order_arg)
 		entities[id].simulate(command, delta)
 	_step_projectiles(delta)
 	_step_flags(delta)

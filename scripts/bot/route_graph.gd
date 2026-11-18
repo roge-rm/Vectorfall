@@ -41,6 +41,11 @@ const JET_SLOPE := 0.35
 const SKI_SLOPE := -0.08
 
 
+## What bots call the map's lanes, one per flag approach from north to south,
+## or empty for "north lane" and the like.
+var lane_titles: Array[String] = []
+
+
 class Link:
 	extends RefCounted
 	var from := 0

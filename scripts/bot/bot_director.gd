@@ -13,6 +13,12 @@ const RAYS_PER_TICK := 8
 const THINK_TICKS := 15
 ## Seconds a sound is kept for bots to hear.
 const SOUND_TIME := 1.0
+## Bot skill for each level, beginner to expert, and the levels' names.
+const SKILLS: Array[float] = [0.0, 0.25, 0.5, 0.75, 1.0]
+const SKILL_NAMES: Array[String] = ["beginner", "easy", "normal", "hard", "expert"]
+const NORMAL := 2
+## Personalities handed out round a team, from a place picked by the seed.
+const PERSONALITY_ROUND: Array[int] = [BotBrain.Personality.DEFAULT, BotBrain.Personality.AGGRESSIVE, BotBrain.Personality.CAREFUL, BotBrain.Personality.SNIPER, BotBrain.Personality.DEFAULT, BotBrain.Personality.AGGRESSIVE, BotBrain.Personality.CAREFUL, BotBrain.Personality.DEFAULT]
 ## How far shots and blasts are heard, in metres.
 const SHOT_RANGE := 120.0
 const BLAST_RANGE := 160.0
@@ -20,6 +26,10 @@ const BLAST_RANGE := 160.0
 var game: Match
 var graph: RouteGraph
 var planner := RoutePlanner.new()
+## Each team's skill level, an index into SKILLS, for bots added without one.
+var skill_levels: Array[int] = [NORMAL, NORMAL]
+## Bots get personalities; off, they're all the default.
+var personalities := true
 var brains: Array[BotBrain] = []
 ## Recent sounds, each { seq, tick, position, source, range }. source is the
 ## shooter's id, or 0 for a blast.
@@ -32,6 +42,8 @@ var _rays_left := 0
 var _plans := {}
 ## Per team, the links ending near its spawn points, found once.
 var _spawn_links := {}
+## Per team, the sniper perches its snipers hold, found once.
+var _perches := {}
 ## Team to its commander, made with the team's first bot.
 var commanders := {}
 var _lanes: Lanes
@@ -55,13 +67,22 @@ func _init(match_node: Match, route_graph: RouteGraph) -> void:
 
 
 ## Adds a bot soldier to the match at a spawn point. skill is 0 for a
-## beginner to 1 for an expert.
-func add_bot(team: int, spawn: Transform3D, skill := 0.5) -> BotBrain:
+## beginner to 1 for an expert, or below 0 for its team's skill level.
+func add_bot(team: int, spawn: Transform3D, skill := -1.0) -> BotBrain:
 	var brain := BotBrain.new()
 	brain.director = self
 	brain.game = game
+	if skill < 0.0:
+		skill = SKILLS[clampi(skill_levels[team], 0, SKILLS.size() - 1)]
 	brain.skill = skill
 	brain.perception.reaction_time = BotPerception.reaction_for(skill)
+	brain.perception.view_range = BotPerception.view_range_for(skill)
+	if personalities:
+		var on_team := 0
+		for other in brains:
+			if other.soldier.team == team:
+				on_team += 1
+		brain.personality = personality_for(game.seed_value, team, on_team)
 	# Every 7th tick in turn spreads them evenly over THINK_TICKS.
 	brain.think_offset = (brains.size() * 7) % THINK_TICKS
 	brain.soldier = game.add_soldier(team, spawn, brain)
@@ -73,6 +94,17 @@ func add_bot(team: int, spawn: Transform3D, skill := 0.5) -> BotBrain:
 		commanders[team].watch()
 	assign_roles()
 	return brain
+
+
+## The personality of a team's nth bot in a match with this seed.
+static func personality_for(match_seed: int, team: int, nth: int) -> int:
+	var start := posmod(match_seed * 5 + team * 3, PERSONALITY_ROUND.size())
+	return PERSONALITY_ROUND[(start + nth) % PERSONALITY_ROUND.size()]
+
+
+## The skill level nearest a skill from 0 to 1.
+static func skill_level(skill: float) -> int:
+	return clampi(roundi(skill * (SKILLS.size() - 1)), 0, SKILLS.size() - 1)
 
 
 ## Has both commanders hand out roles again at once, counting every soldier,
@@ -210,6 +242,24 @@ func _on_flag_captured(_team: int, soldier_id: int) -> void:
 func _on_impacted(weapon: int, at: Vector3, _normal: Vector3) -> void:
 	if Weapon.all[weapon].splash_radius > 0.0:
 		_add_sound(at, 0, BLAST_RANGE)
+
+
+## Sniper perches on a team's half, short of its base, that a link leads to
+## without a must-jet climb, found once.
+func perches(team: int) -> Array[int]:
+	if not _perches.has(team):
+		var found: Array[int] = []
+		var home_x: float = game.stands[team].x
+		var reachable := {}
+		for link: RouteGraph.Link in graph.links:
+			if not link.must_jet:
+				reachable[link.to] = true
+		for point in graph.interest_points(RouteGraph.SNIPER, -1):
+			var p := graph.points[point]
+			if reachable.has(point) and signf(p.x) == signf(home_x) and absf(p.x) < absf(home_x) - 30.0:
+				found.append(point)
+		_perches[team] = found
+	return _perches[team]
 
 
 ## The links ending within reach of a team's spawn points, once per spawn

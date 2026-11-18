@@ -304,6 +304,7 @@ func _needs_sides(a: Vector3, b: Vector3) -> bool:
 ## away.
 func build_route_graph() -> RouteGraph:
 	var graph := RouteGraph.new()
+	graph.lane_titles.assign(["north canyon", "middle", "south spine"])
 	var reach_x := int(PLAY_X / LATTICE)
 	var reach_z := int(PLAY_Z / LATTICE)
 	for i in range(-reach_x, reach_x + 1):

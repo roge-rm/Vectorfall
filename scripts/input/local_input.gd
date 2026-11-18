@@ -19,11 +19,16 @@ signal device_changed(device: Device)
 var device := Device.KEYBOARD
 var source := Source.new()
 var touch: TouchControls
+## The order menu, which the number keys and D-pad drive while it's open.
+var menu: OrderMenu
 var _mouse_look := Vector2.ZERO
 ## Weapon switches pressed since the last command, sent one tick each.
 var _next_presses := 0
 var _prev_presses := 0
 var _slot_wanted := -1
+## An order picked from the menu, sent in the next command.
+var _order := 0
+var _order_arg := 0
 
 
 ## The CommandSource the match asks each tick.
@@ -60,7 +65,57 @@ func _input(event: InputEvent) -> void:
 		set_device(used)
 
 
+## Sends an order to your team's bots with the next command.
+func queue_order(order: int, arg: int) -> void:
+	_order = order
+	_order_arg = arg
+
+
+## V and the D-pad up open the menu; while it's open the number keys pick from
+## it and the D-pad moves through it. True if the event was the menu's.
+func _menu_input(event: InputEvent) -> bool:
+	if menu == null:
+		return false
+	var pad := event as InputEventJoypadButton
+	if pad != null and pad.pressed:
+		if not menu.visible:
+			if pad.button_index == JOY_BUTTON_DPAD_UP:
+				menu.open()
+				return true
+			return false
+		match pad.button_index:
+			JOY_BUTTON_DPAD_UP:
+				menu.move(-1)
+			JOY_BUTTON_DPAD_DOWN:
+				menu.move(1)
+			JOY_BUTTON_DPAD_RIGHT:
+				menu.pick_selected()
+			JOY_BUTTON_DPAD_LEFT:
+				menu.back()
+			_:
+				return false
+		return true
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return false
+	if key.physical_keycode == KEY_V:
+		menu.toggle()
+		return true
+	if not menu.visible:
+		return false
+	if key.physical_keycode >= KEY_1 and key.physical_keycode <= KEY_9:
+		menu.pick(key.physical_keycode - KEY_1)
+		return true
+	if key.physical_keycode == KEY_ESCAPE or key.physical_keycode == KEY_BACKSPACE:
+		menu.back()
+		return true
+	return false
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if _menu_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("next_weapon"):
 		_next_presses += 1
 	elif event.is_action_pressed("prev_weapon"):
@@ -98,6 +153,10 @@ func make_command(delta: float) -> PlayerCommand:
 	source.pitch = clampf(source.pitch + look.y, -Soldier.PITCH_LIMIT, Soldier.PITCH_LIMIT)
 	command.yaw = source.yaw
 	command.pitch = source.pitch
+	command.order = _order
+	command.order_arg = _order_arg
+	_order = 0
+	_order_arg = 0
 
 	if device == Device.TOUCH:
 		# Touches also make pretend mouse clicks, which mustn't fire.

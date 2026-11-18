@@ -8,7 +8,8 @@ extends Control
 ## A touch that starts on JUMP or JET holds that button until it lifts, and
 ## also holds whichever of the three it's sliding over, so one thumb can jet
 ## and fire or ski and jet. A touch that starts on a FIRE button also looks
-## when dragged, and doesn't slide onto other buttons.
+## when dragged, and doesn't slide onto other buttons. ORDERS, above the
+## right FIRE, opens the order menu, and while it's open a tap on it picks.
 ## Sizes follow the shorter side of the screen.
 
 ## Left thumb movement in pixels for a full push, as a share of the short side.
@@ -21,7 +22,10 @@ const BUTTONS := [
 	["JUMP", PlayerCommand.JUMP, Vector2(0.32, 0.115), 0.075, false],
 	["FIRE", PlayerCommand.FIRE, Vector2(0.4, 0.4), 0.065, true],
 	["SWAP", PlayerCommand.NEXT_WEAPON, Vector2(0.48, 0.1), 0.06, false],
+	["ORDERS", 0, Vector2(0.1, 0.6), 0.07, false],
 ]
+## The ORDERS button's index in BUTTONS.
+const ORDERS_BUTTON := 5
 ## BUTTONS indexes a touch can slide between, once it started on JET or JUMP.
 const SLIDE_GROUP := [0, 1, 2]
 ## How far past its edge a button still counts: where a touch starts, and for
@@ -42,6 +46,8 @@ var _pulses := 0
 var _touches: Dictionary[int, Variant] = {}
 var _stick_origin := Vector2.ZERO
 var _stick_at := Vector2.ZERO
+## The order menu, opened by ORDERS and picked from by taps.
+var menu: OrderMenu
 
 
 func _init() -> void:
@@ -127,7 +133,16 @@ func _slide_bits(start: int, at: Vector2) -> int:
 
 
 func _press(index: int, at: Vector2) -> void:
+	if menu != null and menu.covers(at):
+		_touches[index] = "menu"
+		menu.pick(menu.item_at(at))
+		return
 	var k := _button_at(at, START_REACH)
+	if k == ORDERS_BUTTON:
+		_touches[index] = "menu"
+		if menu != null:
+			menu.toggle()
+		return
 	if k >= 0:
 		var bit: int = BUTTONS[k][1]
 		if bit & PULSES:
@@ -183,17 +198,22 @@ func _draw() -> void:
 	for k in BUTTONS.size():
 		var centre := button_centre(k)
 		var radius := button_radius(k)
-		var held: bool = buttons & BUTTONS[k][1] != 0
+		var held: bool = buttons & BUTTONS[k][1] != 0 or (k == ORDERS_BUTTON and menu != null and menu.visible)
 		# Ink rings round a pale fill, solid ink while held.
 		draw_circle(centre + Vector2(line, line), radius + line, Color(InkUi.INK, 0.35))
 		draw_circle(centre, radius, Color(InkUi.INK, 0.55) if held else Color(InkUi.PAPER, 0.18))
 		draw_arc(centre, radius, 0.0, TAU, 40, Color(InkUi.INK, 0.8), line * 2.0, true)
 		draw_arc(centre, radius - line * 1.5, 0.0, TAU, 40, Color(InkUi.PAPER, 0.6), line * 0.6, true)
 		var label: String = BUTTONS[k][0]
-		var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		var at := centre + Vector2(-width * 0.5, font_size * 0.35)
-		draw_string_outline(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, maxi(4, font_size / 4), Color(InkUi.INK, 0.85))
-		draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(InkUi.PAPER, 0.9))
+		var label_size := font_size
+		var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+		if width > radius * 1.7:
+			# Long labels shrink to fit inside the ring.
+			label_size = int(label_size * radius * 1.7 / width)
+			width = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
+		var at := centre + Vector2(-width * 0.5, label_size * 0.35)
+		draw_string_outline(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, maxi(4, label_size / 4), Color(InkUi.INK, 0.85))
+		draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(InkUi.PAPER, 0.9))
 	var reach := STICK_REACH * s
 	var origin := _stick_origin
 	var knob := _stick_at

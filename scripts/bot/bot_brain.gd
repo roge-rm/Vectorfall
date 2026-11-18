@@ -21,6 +21,11 @@ const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point",
 ## milestones and play midfield for now.
 enum Role { OFFENCE, DEFENCE, MIDFIELD, ESCORT, LIGHT_DEFENCE, CHASE, REPAIR, SNIPER, GENERATOR }
 const ROLE_NAMES: Array[String] = ["offence", "defence", "midfield", "escort", "light defence", "chase", "repair", "sniper", "generator"]
+## Variety within a team. AGGRESSIVE closes in on enemies and chases them
+## longer, CAREFUL backs off sooner and leans to defence, SNIPER holds high
+## ground, sniper perches if the map has them, and shoots from further out.
+enum Personality { DEFAULT, AGGRESSIVE, CAREFUL, SNIPER }
+const PERSONALITY_NAMES: Array[String] = ["default", "aggressive", "careful", "sniper"]
 enum Escape { NONE, JET, BACK_OFF, OTHER_WAY }
 const ESCAPE_NAMES: Array[String] = ["", "jet out", "back off", "other way"]
 
@@ -68,6 +73,14 @@ const CARRIER_KEEP_OFF := 12.0
 const CARRIER_AVOID_COST := 8.0
 ## Energy an escape jet needs to start; below it the bot stands and refills.
 const ESCAPE_ENERGY := 25.0
+## An aggressive bot holding the middle goes after an enemy it's fighting
+## this close, and one on defence meets enemies this much further out, in
+## metres and as a share of GUARD_RANGE.
+const PRESS_RANGE := 80.0
+const PRESS_GUARD := 1.5
+## Health below which a careful bot backs off, and an aggressive one.
+const CAREFUL_HEALTH := 55.0
+const AGGRESSIVE_HEALTH := 20.0
 ## A carrier this close to home waits somewhere out of the way while its own
 ## flag is carried off, in metres.
 const HIDE_RANGE := 200.0
@@ -91,6 +104,7 @@ var game: Match
 var soldier: Soldier
 ## 0 for a beginner to 1 for an expert.
 var skill := 0.5
+var personality := Personality.DEFAULT
 ## Which tick of every BotDirector.THINK_TICKS this bot thinks on.
 var think_offset := 0
 var perception := BotPerception.new()
@@ -343,9 +357,11 @@ func _choose_goal() -> Array:
 		var runner := game.soldier(role_target)
 		if runner != null and not runner.dead:
 			return [Goal.ESCORT, _escort_spot(runner)]
-	# Midfield backs off to defend when hurt. Offence keeps going, since
-	# health doesn't come back and turning round wastes the run.
-	var low := soldier.health < BotCombat.LOW_HEALTH and role == Role.MIDFIELD
+	# Midfield backs off to defend when hurt, and careful light defence and
+	# escorts too. Offence keeps going, since health doesn't come back and
+	# turning round wastes the run.
+	var backs_off := role == Role.MIDFIELD or (personality == Personality.CAREFUL and role in [Role.LIGHT_DEFENCE, Role.ESCORT])
+	var low := soldier.health < low_health() and backs_off
 	if holding_theirs and role != Role.DEFENCE:
 		var carrier := game.soldier(theirs.carrier_id)
 		if carrier != null and role == Role.LIGHT_DEFENCE and carrier.global_position.distance_to(game.stands[team]) < MEET_RANGE:
@@ -366,12 +382,13 @@ func _choose_goal() -> Array:
 		# Anyone coming for the flag gets met: what this bot knows close in,
 		# and what the team knows further out for light defence.
 		var stand := game.stands[team]
+		var guard := GUARD_RANGE * (PRESS_GUARD if personality == Personality.AGGRESSIVE else 1.0)
 		var ids := perception.contacts.keys()
 		ids.sort()
 		for id: int in ids:
 			if perception.knows(id):
 				var guess := perception.guess_position(id, game.tick)
-				if guess.distance_to(stand) < GUARD_RANGE:
+				if guess.distance_to(stand) < guard:
 					return [Goal.CHASE, guess]
 		if role == Role.LIGHT_DEFENCE and boss != null:
 			var threats := boss.threats(WATCH_RANGE)
@@ -379,8 +396,23 @@ func _choose_goal() -> Array:
 				return [Goal.CHASE, threats[0][1]]
 			return [Goal.DEFEND, boss.watch_point(role_slot)]
 		return [Goal.DEFEND, _defence_spot(role_slot)]
-	# Midfield, and the roles for later milestones, hold the middle.
+	# Midfield, and the roles for later milestones, hold the middle. An
+	# aggressive one goes after whoever it's fighting nearby.
+	if personality == Personality.AGGRESSIVE and combat.target_id != 0 and perception.knows(combat.target_id):
+		var guess := perception.guess_position(combat.target_id, game.tick)
+		if guess.distance_to(pos) < PRESS_RANGE:
+			return [Goal.CHASE, guess]
 	return [Goal.MIDFIELD, _midfield_spot()]
+
+
+## Health below which the bot backs off, by its personality.
+func low_health() -> float:
+	match personality:
+		Personality.CAREFUL:
+			return CAREFUL_HEALTH
+		Personality.AGGRESSIVE:
+			return AGGRESSIVE_HEALTH
+	return BotCombat.LOW_HEALTH
 
 
 ## Where an escort goes round a runner: the first ahead of it, clearing the
@@ -412,6 +444,11 @@ func _escort_spot(runner: Soldier) -> Vector3:
 ## way, or it's waited long enough.
 func _ready_to_attack() -> bool:
 	if attacking:
+		return true
+	var boss := director.commander(soldier.team)
+	if boss != null and boss.attack_now():
+		# Told to take the flag: no waiting for the others.
+		attacking = true
 		return true
 	if goal != Goal.RALLY or not at_goal:
 		rally_tick = -1
@@ -447,11 +484,16 @@ func _defence_spot(slot: int) -> Vector3:
 	return graph.points[spots[slot % spots.size()]]
 
 
-## A high spot on the bot's own half.
+## A high spot on the bot's own half; for a sniper in midfield, a sniper
+## perch there if the map has one it can get to without a must-jet climb.
 func _midfield_spot() -> Vector3:
 	var graph := director.graph
 	var mine: Array[int] = []
 	var home_x := game.stands[soldier.team].x
+	if personality == Personality.SNIPER and role == Role.MIDFIELD:
+		var perches := director.perches(soldier.team)
+		if not perches.is_empty():
+			return graph.points[perches[role_slot % perches.size()]]
 	for point in graph.interest_points(RouteGraph.HIGH_GROUND, -1):
 		var p := graph.points[point]
 		if signf(p.x) == signf(home_x) and absf(p.x) < absf(home_x) - 30.0:
@@ -845,9 +887,13 @@ func describe() -> String:
 	var name_ := ROLE_NAMES[role]
 	if role_target != 0:
 		name_ += " %d" % role_target
+	var boss := director.commander(soldier.team)
+	if boss != null and boss.order_locks.has(soldier.entity_id):
+		name_ += " (ordered)"
 	if GOAL_NAMES[goal] != ROLE_NAMES[role]:
 		name_ += ", " + GOAL_NAMES[goal]
-	return "%s: %s%s\n%.0f m/s  energy %.0f  health %.0f  knows %d" % [name_, doing, fight, soldier.velocity.length(), soldier.energy, soldier.health, perception.known_count()]
+	var who := "%s, %s" % [BotDirector.SKILL_NAMES[BotDirector.skill_level(skill)], PERSONALITY_NAMES[personality]]
+	return "%s: %s%s\n%s  %.0f m/s  energy %.0f  health %.0f  knows %d" % [name_, doing, fight, who, soldier.velocity.length(), soldier.energy, soldier.health, perception.known_count()]
 
 
 func get_state() -> Dictionary:
@@ -855,6 +901,7 @@ func get_state() -> Dictionary:
 		"yaw": yaw,
 		"pitch": pitch,
 		"skill": skill,
+		"personality": personality,
 		"think_offset": think_offset,
 		"goal": goal,
 		"goal_point": goal_point,
@@ -898,6 +945,7 @@ func set_state(state: Dictionary) -> void:
 	yaw = state.yaw
 	pitch = state.pitch
 	skill = state.skill
+	personality = state.get("personality", Personality.DEFAULT)
 	think_offset = state.think_offset
 	goal = state.goal
 	goal_point = state.goal_point

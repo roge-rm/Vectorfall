@@ -25,6 +25,10 @@ var pitch := 0.0
 var buttons := 0
 ## Weapon slot to switch to, or -1 to keep the current one.
 var weapon := -1
+## An order to the team's bots (Orders.Kind), sent for one tick, and what it's
+## about, such as the bot and role for Orders.Kind.SET_ROLE.
+var order := 0
+var order_arg := 0
 
 
 func has(button: int) -> bool:
@@ -36,7 +40,7 @@ func duplicate() -> PlayerCommand:
 
 
 func to_dict() -> Dictionary:
-	return { "move": move, "yaw": yaw, "pitch": pitch, "buttons": buttons, "weapon": weapon }
+	return { "move": move, "yaw": yaw, "pitch": pitch, "buttons": buttons, "weapon": weapon, "order": order, "order_arg": order_arg }
 
 
 static func from_dict(data: Dictionary) -> PlayerCommand:
@@ -46,4 +50,6 @@ static func from_dict(data: Dictionary) -> PlayerCommand:
 	command.pitch = data.get("pitch", 0.0)
 	command.buttons = data.get("buttons", 0)
 	command.weapon = data.get("weapon", -1)
+	command.order = data.get("order", 0)
+	command.order_arg = data.get("order_arg", 0)
 	return command

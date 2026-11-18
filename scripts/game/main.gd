@@ -3,7 +3,9 @@ extends Node
 ## Loads straight into a map (Ochre Fold, or another with --map NAME after --
 ## on the command line, or GameMap.chosen) with you beside team 0's base, a flag on each
 ## base, and bots on both teams playing capture the flag with you, as
-## offence, defence or midfield. F3 shows what the bots are doing.
+## offence, defence or midfield. F3 shows what the bots are doing, and V,
+## the D-pad up or ORDERS opens the order menu. Bot skill per team and
+## commander mode come from Settings.
 
 ## Bots on your team, and on the other.
 const OWN_BOTS := 3
@@ -20,6 +22,7 @@ var overlay: BotOverlay
 var camera: FirstPersonCamera
 var hud: Hud
 var touch: TouchControls
+var menu: OrderMenu
 var effects: Effects
 
 
@@ -44,6 +47,7 @@ func _ready() -> void:
 	player.set_first_person(true)
 
 	bots = BotDirector.new(game, map.route_graph)
+	bots.skill_levels.assign(Settings.bot_skill)
 	for k in OWN_BOTS:
 		# Slot 3 is yours.
 		bots.add_bot(0, map.spawn_point(0, k if k < 3 else k + 1))
@@ -74,15 +78,33 @@ func _ready() -> void:
 	hud.watch(game)
 	hud.restart_requested.connect(restart)
 	layer.add_child(hud)
+	menu = OrderMenu.new()
+	menu.director = bots
+	menu.soldier = player
+	menu.commander_mode = Settings.commander_mode
+	layer.add_child(menu)
+	menu.chosen.connect(input.queue_order)
 	touch = TouchControls.new()
 	layer.add_child(touch)
+	touch.menu = menu
 	input.touch = touch
+	input.menu = menu
+	for team: int in bots.commanders:
+		bots.commanders[team].said.connect(_on_said)
 	input.device_changed.connect(_on_device_changed)
 	_on_device_changed(input.device)
 
 
 func _on_device_changed(device: LocalInput.Device) -> void:
 	touch.visible = device == LocalInput.Device.TOUCH
+
+
+## A bot said something to its team: shown and spoken if it's yours.
+func _on_said(team: int, speaker_id: int, line: int, text: String) -> void:
+	if team != player.team:
+		return
+	hud.add_chat(game.soldier(speaker_id), text)
+	BotVoice.play(line, speaker_id)
 
 
 func _on_match_over(_winner: int) -> void:

@@ -8,6 +8,9 @@ extends Node
 ##   --seed N      the match seed (1)
 ##   --minutes N   simulated minutes (5)
 ##   --map NAME    ochre_fold or test (ochre_fold)
+##   --skill0 N    team 0's skill level, 0 beginner to 4 expert (2, normal)
+##   --skill1 N    team 1's (2)
+##   --plain       every bot the default personality
 ##   --check       print a CHECK line for tools/bot-check.sh, and exit with an
 ##                 error if the bots stopped moving: 60 s or more stuck
 ## The capture limit is off, so the match runs the whole time. The report has
@@ -22,6 +25,8 @@ var bots := 8
 var seed_value := 1
 var minutes := 5.0
 var check := false
+var skills: Array[int] = [BotDirector.NORMAL, BotDirector.NORMAL]
+var plain := false
 ## Every flag event, in order.
 var flag_events: Array[Dictionary] = []
 
@@ -29,6 +34,7 @@ var flag_events: Array[Dictionary] = []
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	check = args.has("--check")
+	plain = args.has("--plain")
 	for k in args.size() - 1:
 		match args[k]:
 			"--bots":
@@ -37,6 +43,10 @@ func _ready() -> void:
 				seed_value = int(args[k + 1])
 			"--minutes":
 				minutes = float(args[k + 1])
+			"--skill0":
+				skills[0] = clampi(int(args[k + 1]), 0, BotDirector.SKILLS.size() - 1)
+			"--skill1":
+				skills[1] = clampi(int(args[k + 1]), 0, BotDirector.SKILLS.size() - 1)
 	map = GameMap.make(GameMap.chosen_name())
 	add_child(map)
 	print("Map %s built in %.2f s, its route graph in %.2f s (%d points, %d links)" % [map.title, map.build_seconds, map.graph_seconds, map.route_graph.points.size(), map.route_graph.links.size()])
@@ -51,6 +61,8 @@ func _ready() -> void:
 	game.start_clock()
 	add_child(game)
 	director = BotDirector.new(game, map.route_graph)
+	director.skill_levels.assign(skills)
+	director.personalities = not plain
 	for team in 2:
 		for k in bots:
 			var brain := director.add_bot(team, map.spawn_point(team, k))
@@ -148,6 +160,8 @@ func _report(ticks: int, wall: float) -> Dictionary:
 			"routes_completed": s.routes,
 			"avg_route_seconds": snappedf(route_avg, 0.1),
 			"role": BotBrain.ROLE_NAMES[brain.role],
+			"skill": BotDirector.SKILL_NAMES[BotDirector.skill_level(brain.skill)],
+			"personality": BotBrain.PERSONALITY_NAMES[brain.personality],
 			"kills": s.kills,
 			"deaths": s.deaths,
 			"captures": s.captures,
@@ -190,10 +204,21 @@ func _report(ticks: int, wall: float) -> Dictionary:
 	for key in totals:
 		if totals[key] is float:
 			totals[key] = snappedf(totals[key], 0.01)
+	var teams := [{}, {}]
+	for team in 2:
+		teams[team] = { "skill": BotDirector.SKILL_NAMES[skills[team]], "kills": 0, "deaths": 0, "captures": 0, "grabs": 0, "returns": 0, "disc_shots": 0, "disc_hits": 0 }
+	for bot: Dictionary in per_bot:
+		var t: Dictionary = teams[bot.team]
+		for key in ["kills", "deaths", "captures", "grabs", "returns", "disc_shots", "disc_hits"]:
+			t[key] += bot[key]
 	var commanders := {}
 	for team: int in director.commanders:
 		var boss: TeamCommander = director.commanders[team]
+		var lines := {}
+		for said: Dictionary in boss.chat:
+			lines[said.text] = int(lines.get(said.text, 0)) + 1
 		commanders[team] = {
+			"recent_lines": lines,
 			"roles_over_time": boss.history,
 			"decisions": boss.decisions,
 			"attack_lanes": boss.attack_lanes.map(func(w: float) -> float: return snappedf(w, 0.01)),
@@ -214,6 +239,7 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		"carrier_lives": lives,
 		"commanders": commanders,
 		"totals": totals,
+		"teams": teams,
 		"bots": per_bot,
 	}
 
@@ -224,6 +250,9 @@ func _print_summary(report: Dictionary, path: String) -> void:
 	print("Routes completed %d, distance %.0f m, average speed %.1f m/s, top %.1f m/s" % [totals.routes, totals.distance, totals.avg_speed, totals.top_speed])
 	print("Time stuck %.1f s over %d stuck spots" % [totals.time_stuck, totals.stuck_spots])
 	print("Score %d to %d: %d captures, %d grabs, %d returns, %d kills, %d deaths" % [report.scores[0], report.scores[1], totals.captures, totals.grabs, totals.returns, totals.kills, totals.deaths])
+	for team in 2:
+		var t: Dictionary = report.teams[team]
+		print("Team %d (%s): %d kills, %d deaths, %d captures, %d grabs, %d returns, discs %d of %d hit" % [team, t.skill, t.kills, t.deaths, t.captures, t.grabs, t.returns, t.disc_hits, t.disc_shots])
 	print("Carriers held the flag %.1f s on average, %.1f s at most" % [totals.carrier_life_avg, totals.carrier_life_max])
 	for team: int in report.commanders:
 		var boss: Dictionary = report.commanders[team]
@@ -233,5 +262,5 @@ func _print_summary(report: Dictionary, path: String) -> void:
 				print("  %4.0f s  %s" % [sample.seconds, sample.plan])
 	print("Disc %d shots, %d hits (%.0f%%), chaingun %d shots, %d hits (%.0f%%)" % [totals.disc_shots, totals.disc_hits, totals.disc_hit_rate * 100.0, totals.chaingun_shots, totals.chaingun_hits, totals.chaingun_hit_rate * 100.0])
 	for bot: Dictionary in report.bots:
-		print("  bot %d team %d %s: %.0f m, avg %.1f m/s, stuck %.1f s, %d spots, %d kills, %d deaths, %d caps, %d grabs, %d returns" % [bot.id, bot.team, bot.role, bot.distance, bot.avg_speed, bot.time_stuck, bot.stuck_spots.size(), bot.kills, bot.deaths, bot.captures, bot.grabs, bot.returns])
+		print("  bot %d team %d %s %s: %.0f m, avg %.1f m/s, stuck %.1f s, %d spots, %d kills, %d deaths, %d caps, %d grabs, %d returns" % [bot.id, bot.team, bot.personality, bot.role, bot.distance, bot.avg_speed, bot.time_stuck, bot.stuck_spots.size(), bot.kills, bot.deaths, bot.captures, bot.grabs, bot.returns])
 	print("Report: ", path)

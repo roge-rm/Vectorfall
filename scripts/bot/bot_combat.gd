@@ -19,8 +19,12 @@ const CHAIN_RANGE := 40.0
 ## Discs go at the feet when they're at least this far below the look, in
 ## radians, about 6°. Flatter than that a small error lands them far off.
 const FEET_ANGLE := 0.1
-## Seconds a target that went out of sight is still aimed at.
+## Seconds a target that went out of sight is still aimed at, and for an
+## aggressive bot, which chases longer.
 const KEEP_AIM := 1.0
+const KEEP_AIM_AGGRESSIVE := 2.5
+## A sniper takes disc shots this much further out.
+const SNIPER_REACH := 1.35
 ## Health below which the bot backs off.
 const LOW_HEALTH := 35.0
 ## Seconds a hit tells the bot who's shooting at it.
@@ -64,6 +68,12 @@ static func turn_rate_for(skill: float) -> float:
 	return lerpf(3.0, 10.0, skill)
 
 
+## How far out the bot fires discs at someone on the ground: further for a
+## sniper.
+static func disc_range(brain: BotBrain) -> float:
+	return DISC_RANGE * (SNIPER_REACH if brain.personality == BotBrain.Personality.SNIPER else 1.0)
+
+
 ## Picks a target and a weapon, and lets the aim error wander. Called when
 ## the bot thinks.
 func think(brain: BotBrain) -> void:
@@ -93,10 +103,11 @@ func think(brain: BotBrain) -> void:
 			continue
 		var seen := perception.can_see(id)
 		var last_seen: float = (game.tick - perception.contacts[id].tick) / 60.0
-		if not seen and last_seen > KEEP_AIM:
+		var keep := KEEP_AIM_AGGRESSIVE if brain.personality == BotBrain.Personality.AGGRESSIVE else KEEP_AIM
+		if not seen and last_seen > keep:
 			continue
 		var distance := s.global_position.distance_to(perception.guess_position(id, game.tick))
-		if distance > DISC_RANGE:
+		if distance > disc_range(brain):
 			continue
 		# Closer is more of a threat, a carrier of our flag matters most, and
 		# whoever is shooting at us comes next.
@@ -132,7 +143,7 @@ func think(brain: BotBrain) -> void:
 	if target_id != 0:
 		var other := game.soldier(target_id)
 		var distance := s.global_position.distance_to(other.global_position)
-		var disc_reach := DISC_RANGE if other.grounded else DISC_AIR_RANGE
+		var disc_reach := disc_range(brain) if other.grounded else DISC_AIR_RANGE
 		var has_disc := s.ammo[Weapon.DISC] > 0
 		var has_chain := s.ammo[Weapon.CHAINGUN] > 0
 		if has_disc and distance > DISC_MIN and distance < disc_reach:
