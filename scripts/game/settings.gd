@@ -162,6 +162,8 @@ static func apply() -> void:
 	if tree != null and tree.root != null:
 		tree.root.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		tree.root.scaling_3d_scale = render_scale
+		# MSAA with a scaled 3D buffer leaks memory every frame on Android GLES3.
+		tree.root.msaa_3d = Viewport.MSAA_2X if render_scale >= 1.0 else Viewport.MSAA_DISABLED
 	Sound.set_volumes(sound_volume, voice_volume)
 
 
