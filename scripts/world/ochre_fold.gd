@@ -65,10 +65,11 @@ func _init(colours: Palette = null) -> void:
 	var started := Time.get_ticks_usec()
 	base_distance = BASE_X
 	base_ground = BASE_GROUND
-	spawn_side = 40.0
-	# Spawns sit a little behind the flag, so a carrier leaving forward
-	# doesn't run past the enemy coming back to life.
-	spawn_back = 14.0
+	# Spawns are 200 m out to the side, on the flat spine top to the south
+	# and the canyon floor to the north, so a carrier at the stand isn't next
+	# to enemies coming back to life.
+	spawn_side = 200.0
+	spawn_back = 20.0
 	deck_depth = 6.0
 	palette = colours if colours != null else OchreFold.palette_for_map()
 	rng.seed = MAP_SEED

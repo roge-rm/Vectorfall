@@ -3,7 +3,7 @@ extends Node3D
 
 ## What every map has: two bases on the x axis, team 0's at -x and team 1's at
 ## +x, each a raised deck with a ramp at the front, a tower at the back and the
-## flag stand in the middle, spawn points beside the flag, things the bots
+## flag stand in the middle, spawn points to the side of the base, things the bots
 ## can't pass, and the bots' route graph. A map script extends it and builds
 ## its ground, props and route graph.
 
@@ -95,7 +95,7 @@ func deck_height() -> float:
 	return base_ground + 2.0
 
 
-## Where a team's soldiers start: 40 m beside their flag stand in two groups
+## Where a team's soldiers start: spawn_side m to the side of their flag stand in two groups
 ## of four, one each side, facing the other base.
 func spawn_point(team: int, slot := 0) -> Transform3D:
 	var side := 1.0 if slot % 2 == 0 else -1.0

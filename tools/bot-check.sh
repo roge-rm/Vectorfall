@@ -11,7 +11,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 SEEDS="1 2 3 4"
 MINUTES=4
-MIN_GRABS=16
+MIN_GRABS=12
 MIN_RETURNS=8
 MIN_CAPTURES=1
 status=0

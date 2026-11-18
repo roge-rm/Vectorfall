@@ -32,9 +32,9 @@ func _run() -> void:
 		for point in map.spawn_points(team):
 			var o := point.origin
 			var away := Vector2(o.x - map.base_x(team), o.z).length()
-			good = good and away > 30.0 and away < 50.0 and not map.blocked_at(o.x, o.z)
+			good = good and away > 190.0 and away < 215.0 and not map.blocked_at(o.x, o.z)
 			good = good and absf(o.y - 0.3 - map.surface_at(o.x, o.z)) < 0.05 and absf(o.y - 0.3 - map.ground_height(o.x, o.z)) < 0.05
-		checks.check(good, "team %d's 8 spawn points are on the ground 30 to 50 m from its flag" % team)
+		checks.check(good, "team %d's 8 spawn points are on the ground 190 to 215 m from its flag" % team)
 
 	var stands := [graph.interest_points(RouteGraph.FLAG_STAND, 0), graph.interest_points(RouteGraph.FLAG_STAND, 1)]
 	checks.check(stands[0].size() == 1 and stands[1].size() == 1, "each base has one flag stand point")

@@ -236,7 +236,7 @@ func _person_defends() -> void:
 	await _done(alone)
 	var setup := _match(7, 0)
 	var game: Match = setup.game
-	var stand_in := _add_stand_in(setup, 0, map.spawn_point(0, 7).origin)
+	var stand_in := _add_stand_in(setup, 0, Vector3(map.base_x(0) + 8.0, map.deck_height() + 0.3, 8.0))
 	await ticks(60 * 12)
 	var boss: TeamCommander = setup.director.commander(0)
 	var read: int = boss.people[stand_in.soldier.entity_id].role
