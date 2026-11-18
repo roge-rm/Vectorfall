@@ -3,11 +3,13 @@ extends Node
 ## The style test scene: a soldier of each armour for each team, a base piece
 ## with its flag, a slope of ground and a fight (a disc in flight, a blast, a
 ## jet, chaingun fire and a skier). Takes pictures of it in each palette, a
-## close-up of the soldiers, and one from the main scene, then quits. It needs
-## a screen:
+## close-up of the soldiers, both guns in your hands for both teams, the six
+## soldiers at 50 m, and one from the main scene, then quits. It needs a
+## screen:
 ##   DISPLAY=:0 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/style_shot.tscn
-## Saves style-desert.png, style-highland.png, style-soldiers.png and
-## style-ingame.png in /srv/downloads/temp/debug/vectorfall.
+## Saves style-desert.png, style-highland.png, style-soldiers.png,
+## style-weapons.png, style-silhouettes.png and style-ingame.png in
+## /srv/downloads/temp/debug/vectorfall.
 
 const FOLDER := "/srv/downloads/temp/debug/vectorfall"
 
@@ -38,6 +40,8 @@ func _ready() -> void:
 		if palette.title.contains("desert"):
 			_camera.look_at_from_position(Vector3(0.0, 1.5, 5.2), Vector3(0.0, 1.1, -1.0))
 			await _save("style-soldiers.png")
+			await _weapons()
+			await _silhouettes()
 		_root.queue_free()
 		await get_tree().process_frame
 
@@ -58,12 +62,76 @@ func _ready() -> void:
 
 
 func _save(file: String) -> void:
+	_write(await _grab(), file)
+
+
+func _grab() -> Image:
 	for i in 3:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
+	return get_viewport().get_texture().get_image()
+
+
+func _write(image: Image, file: String) -> void:
 	DirAccess.make_dir_recursive_absolute(FOLDER)
-	get_viewport().get_texture().get_image().save_png(FOLDER + "/" + file)
+	image.save_png(FOLDER + "/" + file)
 	print("Saved ", FOLDER + "/" + file)
+
+
+## Both guns in your hands for both teams, set up as ViewModel does at the
+## game's field of view: the lower right of four frames side by side, disc
+## launcher on top, orange on the left.
+func _weapons() -> void:
+	_camera.fov = 75.0
+	_camera.near = 0.05
+	_camera.look_at_from_position(Vector3(0.0, 1.7, 9.0), Vector3(2.0, 1.2, -12.0))
+	var sheet := Image.create(1600, 900, false, Image.FORMAT_RGBA8)
+	for slot in [Weapon.DISC, Weapon.CHAINGUN]:
+		for team in 2:
+			var gun := WeaponModels.build(slot, true)
+			gun.scale = Vector3.ONE * ViewModel.SCALE
+			gun.position = ViewModel.REST
+			gun.rotation = Vector3(ViewModel.TIP, ViewModel.TURN, 0.0)
+			_camera.add_child(gun)
+			for view in gun.find_children("*", "GeometryInstance3D", true, false):
+				Cel.set_team(view as GeometryInstance3D, Soldier.TEAM_COLOURS[team])
+			var frame := await _grab()
+			frame.convert(Image.FORMAT_RGBA8)
+			sheet.blit_rect(frame, Rect2i(480, 270, 800, 450), Vector2i(team * 800, slot * 450))
+			gun.queue_free()
+	_write(sheet, "style-weapons.png")
+	_camera.fov = 62.0
+
+
+## The six soldiers 50 m away at the game's field of view, light, medium and
+## heavy for each team, with a 4x close-up of them in the top left.
+func _silhouettes() -> void:
+	for soldier in _soldiers:
+		soldier.visible = false
+	var armours := [SoldierBody.Armour.LIGHT, SoldierBody.Armour.MEDIUM, SoldierBody.Armour.HEAVY]
+	var lineup: Array[Soldier] = []
+	for team in 2:
+		for k in 3:
+			var x := -5.5 + team * 6.5 + k * 2.0
+			lineup.append(_soldier(team, armours[k], Vector3(x, 0.0, -41.0), PI + (0.5 if team == 0 else -0.5)))
+	for i in 20:
+		await get_tree().physics_frame
+	for soldier in lineup:
+		soldier.blob.follow(soldier)
+	_camera.fov = 75.0
+	_camera.look_at_from_position(Vector3(0.0, _height(0.0, 9.0) + 1.7, 9.0), Vector3(0.0, _height(0.0, -41.0) + 1.0, -41.0))
+	var frame := await _grab()
+	frame.convert(Image.FORMAT_RGBA8)
+	var close := frame.get_region(Rect2i(560, 320, 160, 50))
+	close.resize(640, 200, Image.INTERPOLATE_NEAREST)
+	frame.fill_rect(Rect2i(0, 0, 648, 208), Color.BLACK)
+	frame.blit_rect(close, Rect2i(0, 0, 640, 200), Vector2i(4, 4))
+	_write(frame, "style-silhouettes.png")
+	_camera.fov = 62.0
+	for soldier in lineup:
+		soldier.queue_free()
+	for soldier in _soldiers:
+		soldier.visible = true
 
 
 func _height(x: float, z: float) -> float:

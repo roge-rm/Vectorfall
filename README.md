@@ -64,7 +64,7 @@ tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/mockup_s
 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/perf_shot.tscn
 ```
 
-The style shot has a soldier of each armour for each team, a base and a fight, in both map palettes, plus a close-up and a picture from the main scene. The mockup shot draws one scene in the four comic ink styles Dan picked from. The perf shot prints draw calls and frame times in the main scene with 17 soldiers in view, with outlines and hatching on and off.
+The style shot has a soldier of each armour for each team, a base and a fight, in both map palettes, plus a close-up, both guns in your hands for both teams, the six soldiers at 50 m and a picture from the main scene. The mockup shot draws one scene in the four comic ink styles Dan picked from. The perf shot prints draw calls and frame times in the main scene with 17 soldiers in view, with outlines and hatching on and off.
 
 ## Testing
 

@@ -14,8 +14,10 @@ static var _meshes: Dictionary[String, ArrayMesh] = {}
 static var _glows: Dictionary[String, StandardMaterial3D] = {}
 static var _outline: ShaderMaterial
 static var _near_outline: ShaderMaterial
+static var _figure_outline: ShaderMaterial
 static var _effect_outline: ShaderMaterial
 static var _outlines_on := true
+static var _grain: ImageTexture
 ## Uniforms every ink material gets, from the palette and the settings.
 static var _shared: Dictionary[String, Variant] = {}
 ## Uniforms only the ground gets.
@@ -27,9 +29,10 @@ static var _ground_shared: Dictionary[String, Variant] = {}
 ## get the outline pass. With vertex_colour the albedo multiplies the vertex
 ## colours and the vertex alpha scales team_amount. near is for things right
 ## in front of the camera, like the gun in your hands, which get a thinner
-## outline.
-static func material(colour: Color, team_amount := 0.0, outlined := true, vertex_colour := false, near := false) -> ShaderMaterial:
-	var key := "%s/%s/%s/%s/%s" % [colour.to_html(), team_amount, outlined, vertex_colour, near]
+## outline. figure is for soldiers, what they carry and flags, whose outline
+## thins sooner with distance so it doesn't swallow them.
+static func material(colour: Color, team_amount := 0.0, outlined := true, vertex_colour := false, near := false, figure := false) -> ShaderMaterial:
+	var key := "%s/%s/%s/%s/%s/%s" % [colour.to_html(), team_amount, outlined, vertex_colour, near, figure]
 	if _materials.has(key):
 		return _materials[key]
 	var made := ShaderMaterial.new()
@@ -41,10 +44,12 @@ static func material(colour: Color, team_amount := 0.0, outlined := true, vertex
 	# bright band towards the horizon.
 	made.set_shader_parameter("rim_amount", 0.3 if team_amount > 0.0 else 0.0)
 	made.set_shader_parameter("camera_light", near)
+	made.set_shader_parameter("paper_grain", paper_grain())
 	_share(made, _shared)
 	if outlined:
 		made.set_meta("outlined", true)
 		made.set_meta("near", near)
+		made.set_meta("figure", figure)
 		if _outlines_on:
 			made.next_pass = _outline_for(made)
 	_materials[key] = made
@@ -105,6 +110,7 @@ static func ground_material() -> ShaderMaterial:
 	made.shader = CEL
 	made.set_shader_parameter("ground", true)
 	made.set_shader_parameter("rim_amount", 0.0)
+	made.set_shader_parameter("paper_grain", paper_grain())
 	_share(made, _shared)
 	_share(made, _ground_shared)
 	_grounds.append(made)
@@ -135,15 +141,29 @@ static func glow(colour: Color, vertex_colour := false) -> StandardMaterial3D:
 ## material, made now or later.
 static func set_palette(palette: Palette) -> void:
 	var direction := palette.sun_direction.normalized()
-	for key: String in ["sun_colour", "ambient", "ambient_energy", "ink", "paper", "saturation"]:
+	for key: String in ["sun_colour", "ambient", "ambient_energy", "ink", "paper", "saturation", "grit"]:
 		_shared[key] = palette.get(key)
 	_shared["sun_direction"] = direction
 	for key: String in ["grass", "grass_dark", "dirt", "rock", "low", "low_height", "high", "high_height"]:
 		_ground_shared[key] = palette.get(key)
 	_share_all()
-	for line: ShaderMaterial in [outline(), near_outline(), effect_outline()]:
+	for line: ShaderMaterial in [outline(), near_outline(), figure_outline(), effect_outline()]:
 		line.set_shader_parameter("colour", palette.ink)
 		line.set_shader_parameter("sun_direction", direction)
+
+
+## The paper grain tile: 64 by 64 random greys, the same every run, which
+## the ink shader reads with smooth filtering so the grain is soft.
+static func paper_grain() -> ImageTexture:
+	if _grain == null:
+		var random := RandomNumberGenerator.new()
+		random.seed = 7
+		var bytes := PackedByteArray()
+		bytes.resize(64 * 64)
+		for k in bytes.size():
+			bytes[k] = random.randi_range(0, 255)
+		_grain = ImageTexture.create_from_image(Image.create_from_data(64, 64, false, Image.FORMAT_L8, bytes))
+	return _grain
 
 
 ## Hatching in the shaded bands, on or off.
@@ -305,6 +325,18 @@ static func near_outline() -> ShaderMaterial:
 	return _near_outline
 
 
+## The outline pass for soldiers and flags: the same line up close, but it
+## stops growing at 22 m so at 50 m it's about a pixel and the shape shows,
+## and it's less heavy on the shadow side.
+static func figure_outline() -> ShaderMaterial:
+	if _figure_outline == null:
+		_figure_outline = ShaderMaterial.new()
+		_figure_outline.shader = OUTLINE
+		_figure_outline.set_shader_parameter("max_distance", 22.0)
+		_figure_outline.set_shader_parameter("shadow_weight", 0.4)
+	return _figure_outline
+
+
 ## The outline pass for effects: shots, flames and blasts, a little thinner
 ## and with no wobble, since they move fast.
 static func effect_outline() -> ShaderMaterial:
@@ -319,7 +351,9 @@ static func effect_outline() -> ShaderMaterial:
 
 
 static func _outline_for(made: ShaderMaterial) -> ShaderMaterial:
-	return near_outline() if made.get_meta("near", false) else outline()
+	if made.get_meta("near", false):
+		return near_outline()
+	return figure_outline() if made.get_meta("figure", false) else outline()
 
 
 static func set_outlines(on: bool) -> void:

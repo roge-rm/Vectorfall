@@ -20,6 +20,8 @@ extends Resource
 @export var fog_density := 0.0016
 @export var ink := Color(0.07, 0.05, 0.04)
 @export var paper := Color(0.98, 0.93, 0.84)
+## How much the paper grain darkens, 0 to 1. The sky has none.
+@export var grit := 0.06
 ## Flat ground in two patch colours, gentle slopes and steep slopes.
 @export var grass := Color(0.66, 0.58, 0.4)
 @export var grass_dark := Color(0.6, 0.52, 0.36)

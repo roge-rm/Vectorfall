@@ -56,7 +56,7 @@ func _ready() -> void:
 	var view := MeshInstance3D.new()
 	view.name = "Look"
 	view.mesh = _look_mesh(cloth_at, pale, team_part)
-	view.material_override = Cel.material(Color.WHITE, 1.0, true, true)
+	view.material_override = Cel.material(Color.WHITE, 1.0, true, true, false, true)
 	add_child(view)
 	Cel.set_team(view, colour)
 	# An upright beam of light that stays vertical however the flag lies.

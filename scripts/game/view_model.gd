@@ -5,9 +5,12 @@ extends Node3D
 ## back on each shot, bobs as you run, spins the chaingun's barrels and drops
 ## out of view while switching. It only reads the soldier.
 
-## Where the gun sits in camera space.
-const REST := Vector3(0.14, -0.13, -0.3)
-const SCALE := 0.42
+## Where the gun sits in camera space, how far it turns in towards the middle
+## of the screen and tips its muzzle up, in radians.
+const REST := Vector3(0.25, -0.22, -0.42)
+const TURN := 0.3
+const TIP := 0.1
+const SCALE := 0.56
 
 var soldier: Soldier
 var _guns: Array[Node3D] = []
@@ -50,7 +53,7 @@ func _process(delta: float) -> void:
 	_bob += delta * TAU * 1.6 * minf(pace, 1.0)
 	var sway := Vector3(sin(_bob) * 0.012, -absf(cos(_bob)) * 0.01, 0.0) * minf(pace, 1.0)
 	position = REST + sway + Vector3(0.0, -0.25 * _lower, 0.06 * _kick)
-	rotation = Vector3(0.12 * _kick, 0.0, 0.0)
+	rotation = Vector3(TIP + 0.12 * _kick, TURN, 0.0)
 	for slot in _guns.size():
 		_guns[slot].visible = slot == soldier.weapon
 	var spinner := _guns[Weapon.CHAINGUN].get_node("Spinner") as Node3D

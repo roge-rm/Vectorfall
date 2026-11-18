@@ -329,7 +329,7 @@ func _apply(style: Dictionary) -> void:
 		_ground.set_shader_parameter(key, style[key])
 	_concrete.set_shader_parameter("albedo", style["concrete"])
 	_rock.set_shader_parameter("albedo", style["rock"])
-	for outline: ShaderMaterial in [Cel.outline(), Cel.near_outline(), _effect_outline]:
+	for outline: ShaderMaterial in [Cel.outline(), Cel.near_outline(), Cel.figure_outline(), _effect_outline]:
 		outline.shader = INK_OUTLINE
 		outline.set_shader_parameter("colour", ink)
 		outline.set_shader_parameter("sun_direction", _sun_direction)

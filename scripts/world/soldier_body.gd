@@ -22,18 +22,22 @@ const TEAM := Color(1.0, 1.0, 1.0, 1.0)
 const FLAME := Color(1.0, 0.55, 0.15)
 const FLAME_CORE := Color(1.0, 0.95, 0.6)
 const SPARK := Color(1.0, 0.92, 0.55)
+## Medium armour's leg; the others scale it by their "leg" size.
 const HIP_HEIGHT := 0.97
 const THIGH := 0.46
 const SHIN := 0.44
+const FOOT := HIP_HEIGHT - THIGH - SHIN
 ## Right and left hands in aim space, and where the gun's grip sits.
 const HANDS := [Vector3(0.17, -0.2, -0.3), Vector3(0.1, -0.15, -0.62)]
 const GUN_AT := Vector3(0.17, -0.18, -0.36)
-## Sizes by armour: torso width, limb thickness, shoulders, pack, helmet and
-## chest depth.
+## Sizes by armour: torso width, limb thickness, shoulders, pack, helmet,
+## chest depth and leg length. Light is slim and tall with a small pack,
+## heavy is wide and squat with big shoulders, pack and legs, so each reads
+## from its outline alone at 50 m.
 const BUILDS := {
-	Armour.LIGHT: {"width": 0.84, "limb": 0.84, "shoulder": 0.7, "pack": 0.75, "helmet": 0.92, "depth": 0.88},
-	Armour.MEDIUM: {"width": 1.0, "limb": 1.0, "shoulder": 1.0, "pack": 1.0, "helmet": 1.0, "depth": 1.0},
-	Armour.HEAVY: {"width": 1.24, "limb": 1.28, "shoulder": 1.65, "pack": 1.4, "helmet": 1.1, "depth": 1.22},
+	Armour.LIGHT: {"width": 0.7, "limb": 0.66, "shoulder": 0.45, "pack": 0.58, "helmet": 0.88, "depth": 0.8, "leg": 1.12},
+	Armour.MEDIUM: {"width": 1.0, "limb": 1.0, "shoulder": 1.0, "pack": 1.0, "helmet": 1.0, "depth": 1.0, "leg": 1.0},
+	Armour.HEAVY: {"width": 1.42, "limb": 1.6, "shoulder": 2.1, "pack": 1.7, "helmet": 1.14, "depth": 1.35, "leg": 0.94},
 }
 
 ## Meshes shared by every soldier, by part, team and armour.
@@ -62,6 +66,10 @@ var _air := 0.0
 var _jet := 0.0
 var _fallen := 0.0
 var _flicker := RandomNumberGenerator.new()
+## This armour's leg, in metres.
+var _hip_height := HIP_HEIGHT
+var _thigh := THIGH
+var _shin := SHIN
 
 
 func _init() -> void:
@@ -103,7 +111,7 @@ func _joint(parent: Node3D, at: Vector3, part: String) -> Node3D:
 	joint.position = at
 	parent.add_child(joint)
 	var view := _view(joint, part)
-	view.material_override = Cel.material(Color.WHITE, 1.0, true, true)
+	view.material_override = Cel.material(Color.WHITE, 1.0, true, true, false, true)
 	return joint
 
 
@@ -121,6 +129,16 @@ func _view(parent: Node3D, part: String) -> MeshInstance3D:
 func set_look(new_team: int, new_armour: Armour) -> void:
 	team = new_team
 	armour = new_armour
+	var build: Dictionary = BUILDS[armour]
+	var leg: float = build.leg
+	_thigh = THIGH * leg
+	_shin = SHIN * leg
+	_hip_height = _thigh + _shin + FOOT
+	hips.position.y = _hip_height
+	torso.position.y = _hip_height
+	for k in 2:
+		legs[k].position.x = (1.0 if k == 0 else -1.0) * 0.12 * sqrt(float(build.width))
+		knees[k].position.y = -_thigh
 	for part: String in _views:
 		for view: MeshInstance3D in _views[part]:
 			view.mesh = mesh(part, team, armour)
@@ -168,17 +186,19 @@ static func _parts(part: String, for_team: int, b: Dictionary) -> Array:
 	var p: float = b.pack
 	var h: float = b.helmet
 	var d: float = b.depth
+	var thigh: float = THIGH * float(b.leg)
+	var shin: float = SHIN * float(b.leg)
 	var angular := for_team == 0
 	var parts := []
 	match part:
 		"hips":
 			parts.append([Cel.box(Vector3(0.36 * w, 0.18, 0.22 * d)), _at(0, 0, 0), LIMB])
 		"thigh":
-			parts.append([Cel.box(Vector3(0.16 * l, THIGH, 0.18 * l)), _at(0, -THIGH * 0.5, 0), LIMB])
-			parts.append([Cel.box(Vector3(0.19 * l, 0.17, 0.21 * l)), _at(0, -THIGH * 0.35, -0.01), TEAM])
+			parts.append([Cel.box(Vector3(0.16 * l, thigh, 0.18 * l)), _at(0, -thigh * 0.5, 0), LIMB])
+			parts.append([Cel.box(Vector3(0.19 * l, 0.17, 0.21 * l)), _at(0, -thigh * 0.35, -0.01), TEAM])
 		"shin":
-			parts.append([Cel.box(Vector3(0.15 * l, SHIN, 0.17 * l)), _at(0, -SHIN * 0.5, 0), PLATE])
-			parts.append([Cel.box(Vector3(0.17 * l, 0.1, 0.28)), _at(0, -SHIN + 0.02, -0.05), LIMB])
+			parts.append([Cel.box(Vector3(0.15 * l, shin, 0.17 * l)), _at(0, -shin * 0.5, 0), PLATE])
+			parts.append([Cel.box(Vector3(0.17 * l, 0.1, 0.28)), _at(0, -shin + 0.02, -0.05), LIMB])
 			if l > 1.1:
 				# Heavy: armoured knees.
 				parts.append([Cel.box(Vector3(0.19 * l, 0.14, 0.08)), _at(0, -0.04, -0.1 * l), TEAM])
@@ -218,20 +238,25 @@ static func _torso(parts: Array, angular: bool, w: float, s: float, p: float, d:
 	parts.append([Cel.box(Vector3(0.34 * w, 0.16, 0.22 * d)), _at(0, 0.1, 0), LIMB])
 	parts.append([Cel.box(Vector3(0.48 * w, 0.42, 0.3 * d)), _at(0, 0.36, 0), TEAM])
 	var front := -0.15 * d - 0.01
+	# The pack grows wider and deeper faster than it grows taller.
+	var tall := sqrt(p)
+	if p > 1.4:
+		# Heavy: a block between the two halves of the pack.
+		parts.append([Cel.box(Vector3(0.2 * p, 0.42 * tall, 0.12 * p)), _at(0, 0.34, 0.22 * d), LIMB])
 	if angular:
 		# Orange: slab shoulders sloping out, twin fin pack, a chevron.
 		for side: float in [1.0, -1.0]:
 			var slope := Basis(Vector3.BACK, side * -0.35)
 			parts.append([Cel.box(Vector3(0.22, 0.08, 0.28) * Vector3(s, sqrt(s), s)), Transform3D(slope, Vector3(side * (0.27 * w + 0.06 * s), 0.6, 0)), TEAM])
-			parts.append([Cel.box(Vector3(0.11, 0.6, 0.16) * p), _at(side * 0.12 * p, 0.36, 0.24 * d), LIMB])
-			parts.append([Cel.box(Vector3(0.12, 0.08, 0.18) * p), _at(side * 0.12 * p, 0.36 + 0.3 * p, 0.24 * d), TEAM])
+			parts.append([Cel.box(Vector3(0.11 * p, 0.6 * tall, 0.16 * p)), _at(side * 0.12 * p, 0.36, 0.24 * d), LIMB])
+			parts.append([Cel.box(Vector3(0.12 * p, 0.08 * tall, 0.18 * p)), _at(side * 0.12 * p, 0.36 + 0.3 * tall, 0.24 * d), TEAM])
 			parts.append([Cel.box(Vector3(0.05, 0.22, 0.02)), Transform3D(Basis(Vector3.BACK, side * 0.75), Vector3(side * 0.065, 0.38, front)), PALE])
 	else:
 		# Blue: round shoulders, twin tank pack, a ring.
 		for side: float in [1.0, -1.0]:
 			parts.append([Cel.sphere(0.12 * s, 0.2 * s, 10), _at(side * (0.27 * w + 0.05 * s), 0.56, 0), TEAM])
-			parts.append([Cel.cylinder(0.09 * p, 0.09 * p, 0.5 * p, 10), _at(side * 0.1 * p, 0.34, 0.25 * d), LIMB])
-			parts.append([Cel.sphere(0.09 * p, 0.12 * p, 10), _at(side * 0.1 * p, 0.34 + 0.25 * p, 0.25 * d), TEAM])
+			parts.append([Cel.cylinder(0.09 * p, 0.09 * p, 0.5 * tall, 10), _at(side * 0.1 * p, 0.34, 0.25 * d), LIMB])
+			parts.append([Cel.sphere(0.09 * p, 0.12 * p, 10), _at(side * 0.1 * p, 0.34 + 0.25 * tall, 0.25 * d), TEAM])
 		var flat := Basis(Vector3.RIGHT, PI * 0.5)
 		parts.append([Cel.cylinder(0.09, 0.09, 0.02, 12), Transform3D(flat, Vector3(0, 0.4, front)), PALE])
 		parts.append([Cel.cylinder(0.05, 0.05, 0.03, 10), Transform3D(flat, Vector3(0, 0.4, front - 0.005)), TEAM])
@@ -270,10 +295,10 @@ func _process(delta: float) -> void:
 	# Lower the hips so bent legs keep the feet on the ground.
 	var reach := 0.0
 	for k in 2:
-		reach = maxf(reach, THIGH * cos(hip_angles[k]) + SHIN * cos(hip_angles[k] + knee_angles[k]))
-	var drop := (THIGH + SHIN - reach) * (1.0 - _air)
+		reach = maxf(reach, _thigh * cos(hip_angles[k]) + _shin * cos(hip_angles[k] + knee_angles[k]))
+	var drop := (_thigh + _shin - reach) * (1.0 - _air)
 	var bob := absf(sin(_phase)) * 0.05 * _run
-	hips.position.y = HIP_HEIGHT - drop + bob
+	hips.position.y = _hip_height - drop + bob
 	torso.position.y = hips.position.y
 	torso.rotation.x = -0.12 * _run - 0.3 * _ski - 0.1 * _air
 	var look := s.pitch * (1.0 - _fallen)

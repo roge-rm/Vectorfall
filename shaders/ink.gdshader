@@ -1,5 +1,5 @@
 // Comic ink shading for everything solid: flat colour, three hard bands from
-// a sun given as uniforms, hatching in ink over the shaded bands, paper grain
+// a sun given as uniforms, hatching in ink over the shaded bands, light paper grain
 // and the world's colours held below the team colour. Lit in the
 // fragment, so the bands can be drawn with ink. Hatching and grain are in
 // screen space, sized to a 720 pixel high screen. The defaults are the game's
@@ -59,8 +59,12 @@ uniform float deep_edge = -0.15;
 uniform float mid_ink = 1.0;
 // Colour strength of everything but the team colour.
 uniform float saturation = 0.75;
-// Paper grain over everything, and the paper's colour.
-uniform float grit = 0.16;
+// Paper grain over everything but the sky, and the paper's colour. The grain
+// is a soft noise tile from Cel.paper_grain(), fixed to the screen so it
+// doesn't crawl, in grain_size pixel cells at 720 pixels high.
+uniform float grit = 0.06;
+uniform float grain_size = 4.0;
+uniform sampler2D paper_grain : hint_default_black, filter_linear, repeat_enable;
 uniform vec4 paper : source_color = vec4(0.98, 0.93, 0.84, 1.0);
 
 varying float height;
@@ -69,13 +73,10 @@ void vertex() {
 	height = (MODEL_MATRIX * vec4(VERTEX, 1.0)).y;
 }
 
-// 0 to 1 from a pixel, an integer hash so it holds up at medium precision.
+// 0 to 1 from a pixel: a fine grain over a coarser blotch, both soft.
 float grain(vec2 px) {
-	uvec2 q = uvec2(ivec2(floor(px * 0.5)) + 4096);
-	uint h = q.x * 1597334677u ^ q.y * 3812015801u;
-	h = (h ^ (h >> 16u)) * 2246822519u;
-	h ^= h >> 13u;
-	return float(h & 1023u) / 1023.0;
+	vec2 cell = px / (grain_size * 64.0);
+	return texture(paper_grain, cell).r * 0.6 + texture(paper_grain, cell * 0.37 + 0.5).r * 0.4;
 }
 
 // 1 on a diagonal line, with a pixel of soft edge.
@@ -118,7 +119,7 @@ void fragment() {
 	base = mix(vec3(grey), base, saturation);
 	vec3 colour = mix(base, team_colour.rgb, team);
 
-	vec3 light_dir = camera_light ? vec3(-0.3, 0.5, 0.81) : normalize((VIEW_MATRIX * vec4(sun_direction, 0.0)).xyz);
+	vec3 light_dir = camera_light ? vec3(-0.35, 0.75, 0.56) : normalize((VIEW_MATRIX * vec4(sun_direction, 0.0)).xyz);
 	float n_dot_l = dot(NORMAL, light_dir);
 	float band = n_dot_l > lit_edge ? shade_lit : (n_dot_l > mid_edge ? shade_mid : shade_dark);
 	// Team colours shade less, so they stay the strongest colours in shadow.
@@ -129,7 +130,8 @@ void fragment() {
 	vec2 px = FRAGCOORD.xy * 720.0 / VIEWPORT_SIZE.y;
 	float inked = 0.0;
 	if (shadow_style == 1) {
-		if (n_dot_l <= mid_edge || (mid_ink > 0.0 && n_dot_l <= lit_edge)) {
+		// The gun in your hands only hatches its dark band, so it stays clean.
+		if (n_dot_l <= mid_edge || (mid_ink > 0.0 && !camera_light && n_dot_l <= lit_edge)) {
 			inked = lines(px, 1.0);
 			if (n_dot_l < deep_edge) {
 				inked = max(inked, lines(vec2(-px.x, px.y), 1.0));
