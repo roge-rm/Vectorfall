@@ -478,12 +478,8 @@ func replan() -> void:
 			avoid_links[link] = RoutePlanner.AVOID_COST
 	if goal == Goal.CAPTURE:
 		# A carrier keeps off the enemy's spawn, where they come back to life.
-		for spawn in graph.interest_points(RouteGraph.SPAWN, 1 - soldier.team):
-			var at := graph.points[spawn]
-			for link: RouteGraph.Link in graph.links:
-				var end := graph.points[link.to]
-				if Vector2(end.x - at.x, end.z - at.z).length() < CARRIER_KEEP_OFF:
-					avoid_links[link] = float(avoid_links.get(link, 0.0)) + CARRIER_AVOID_COST
+		for link: RouteGraph.Link in director.links_near_spawns(1 - soldier.team, CARRIER_KEEP_OFF):
+			avoid_links[link] = float(avoid_links.get(link, 0.0)) + CARRIER_AVOID_COST
 	var start := graph.start_point(soldier.global_position, soldier.velocity)
 	path = director.plan(start, goal_point, soldier.velocity, soldier.energy, avoid_links)
 	path_start = soldier.global_position

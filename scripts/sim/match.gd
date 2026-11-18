@@ -54,6 +54,10 @@ var time_left := 0.0
 var over := false
 ## The winning team, or -1 for a draw, once the match is over.
 var winner := -1
+## The map's chunked ground, if it has one. Its collision is kept under the
+## soldiers and flags each tick, and shots and sight lines are checked
+## against its heights everywhere.
+var terrain: Terrain
 
 
 func _init(match_seed := 1) -> void:
@@ -72,12 +76,48 @@ func step(delta: float) -> void:
 	tick += 1
 	var ids := entities.keys()
 	ids.sort()
+	if terrain != null:
+		_keep_terrain_collision(ids)
 	for id: int in ids:
 		var source: CommandSource = sources.get(id)
 		var command := source.make_command(delta) if source != null else PlayerCommand.new()
 		entities[id].simulate(command, delta)
 	_step_projectiles(delta)
 	_step_flags(delta)
+
+
+## Collision under every soldier, living or dead, and every flag.
+func _keep_terrain_collision(ids: Array) -> void:
+	var points := PackedVector3Array()
+	var speeds := PackedFloat32Array()
+	for id: int in ids:
+		var body := entities[id] as Node3D
+		if body is Soldier:
+			points.append(body.global_position)
+			speeds.append((body as Soldier).velocity.length())
+	for team: int in flags:
+		points.append(flags[team].global_position)
+		speeds.append(flags[team].linear_velocity.length())
+	terrain.keep_collision_near(points, speeds)
+
+
+## The first thing in the world on the segment from a to b, from the physics
+## world and the terrain's heights, as intersect_ray() gives it. The terrain
+## has no collider.
+func world_ray(a: Vector3, b: Vector3, mask: int, exclude: Array[RID] = []) -> Dictionary:
+	var query := PhysicsRayQueryParameters3D.create(a, b, mask, exclude)
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if terrain != null and mask & WORLD_LAYER:
+		var ground := terrain.raycast(a, b)
+		if not ground.is_empty() and (hit.is_empty() or a.distance_squared_to(ground.position) < a.distance_squared_to(hit.position)):
+			ground["collider"] = null
+			return ground
+	return hit
+
+
+## True if nothing in the world is between a and b.
+func line_clear(a: Vector3, b: Vector3) -> bool:
+	return world_ray(a, b, WORLD_LAYER).is_empty()
 
 
 ## Puts a team's flag on its stand. stand is the spot a capturing carrier has to
@@ -254,7 +294,6 @@ func fire(shooter: Soldier) -> void:
 func _step_projectiles(delta: float) -> void:
 	if projectiles.is_empty():
 		return
-	var space := get_world_3d().direct_space_state
 	var kept: Array[Projectile] = []
 	for shot in projectiles:
 		var weapon := Weapon.all[shot.weapon]
@@ -266,8 +305,7 @@ func _step_projectiles(delta: float) -> void:
 		var owner_body := soldier(shot.shooter)
 		if owner_body != null:
 			exclude.append(owner_body.get_rid())
-		var query := PhysicsRayQueryParameters3D.create(shot.position, to, WORLD_LAYER | SOLDIER_LAYER, exclude)
-		var hit := space.intersect_ray(query)
+		var hit := world_ray(shot.position, to, WORLD_LAYER | SOLDIER_LAYER, exclude)
 		shot.age += delta
 		if not hit.is_empty():
 			var victim := hit.collider as Soldier
@@ -303,7 +341,6 @@ func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier) ->
 ## soldier in range that the blast can see, less for those further away.
 func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = null) -> void:
 	var weapon := Weapon.all[weapon_slot]
-	var space := get_world_3d().direct_space_state
 	var ids := entities.keys()
 	ids.sort()
 	for id: int in ids:
@@ -314,8 +351,7 @@ func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = nu
 		if distance > weapon.splash_radius:
 			continue
 		# Walls and ground between the blast and the soldier block it.
-		var query := PhysicsRayQueryParameters3D.create(at, target.centre(), WORLD_LAYER)
-		if not space.intersect_ray(query).is_empty():
+		if not line_clear(at, target.centre()):
 			continue
 		var away := target.centre() - at
 		away = away.normalized() if away.length() > 0.01 else Vector3.UP

@@ -27,6 +27,8 @@ class Pose:
 func _ready() -> void:
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	DisplayServer.window_set_size(Vector2i(1280, 720))
+	# These pictures are of the test map.
+	GameMap.chosen = "test"
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	var enemy: Soldier = main.enemy

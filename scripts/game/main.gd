@@ -1,6 +1,7 @@
 extends Node
 
-## Loads straight into the test map with you beside team 0's base, a flag on each
+## Loads straight into a map (Ochre Fold, or another with --map NAME after --
+## on the command line, or GameMap.chosen) with you beside team 0's base, a flag on each
 ## base, and bots on both teams playing capture the flag with you, as
 ## offence, defence or midfield. F3 shows what the bots are doing.
 
@@ -8,7 +9,7 @@ extends Node
 const OWN_BOTS := 3
 const ENEMY_BOTS := 4
 
-var map: TestMap
+var map: GameMap
 var game: Match
 var input: LocalInput
 var player: Soldier
@@ -24,9 +25,12 @@ var effects: Effects
 
 func _ready() -> void:
 	Settings.load_file()
-	map = TestMap.new()
+	map = GameMap.make(GameMap.chosen_name())
 	add_child(map)
+	map.set_view_distance(Settings.view_distance)
+	print("Map %s built in %.2f s, its route graph in %.2f s" % [map.title, map.build_seconds, map.graph_seconds])
 	game = Match.new(1)
+	game.terrain = map.terrain
 	for team in 2:
 		game.spawns[team] = map.spawn_points(team)
 	for team in 2:
@@ -60,6 +64,7 @@ func _ready() -> void:
 	camera.soldier = player
 	camera.view_model.set_team_colour(Palette.team(player.team))
 	add_child(camera)
+	camera.far = Settings.view_distance
 	camera.make_current()
 
 	var layer := CanvasLayer.new()

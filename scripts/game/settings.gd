@@ -7,6 +7,9 @@ const PATH := "user://settings.cfg"
 
 static var outlines := true
 static var hatching := true
+## How far you can see, in metres: the camera's far plane, where the fog is
+## nearly solid, and how far chunked ground is drawn.
+static var view_distance := 1200.0
 
 
 static func load_file() -> void:
@@ -14,6 +17,7 @@ static func load_file() -> void:
 	if file.load(PATH) == OK:
 		outlines = file.get_value("graphics", "outlines", outlines)
 		hatching = file.get_value("graphics", "hatching", hatching)
+		view_distance = clampf(file.get_value("graphics", "view_distance", view_distance), 300.0, 3000.0)
 	Cel.set_outlines(outlines)
 	Cel.set_hatching(hatching)
 
@@ -23,6 +27,7 @@ static func save_file() -> void:
 	file.load(PATH)
 	file.set_value("graphics", "outlines", outlines)
 	file.set_value("graphics", "hatching", hatching)
+	file.set_value("graphics", "view_distance", view_distance)
 	file.save(PATH)
 
 

@@ -1,17 +1,18 @@
 extends Node
 
-## Plays a headless capture the flag match of bots only on the test map, as
+## Plays a headless capture the flag match of bots only on a map, as
 ## fast as it can, and writes a report on how they moved, fought and played
 ## to build/bot-reports/. Run it with tools/bot-match.sh, which passes these
 ## after --:
 ##   --bots N      bots per team, 8 at most (8)
 ##   --seed N      the match seed (1)
 ##   --minutes N   simulated minutes (5)
+##   --map NAME    ochre_fold or test (ochre_fold)
 ## The capture limit is off, so the match runs the whole time.
 
 const REPORTS := "res://build/bot-reports"
 
-var map: TestMap
+var map: GameMap
 var game: Match
 var director: BotDirector
 var bots := 8
@@ -31,9 +32,11 @@ func _ready() -> void:
 				seed_value = int(args[k + 1])
 			"--minutes":
 				minutes = float(args[k + 1])
-	map = TestMap.new()
+	map = GameMap.make(GameMap.chosen_name())
 	add_child(map)
+	print("Map %s built in %.2f s, its route graph in %.2f s (%d points, %d links)" % [map.title, map.build_seconds, map.graph_seconds, map.route_graph.points.size(), map.route_graph.links.size()])
 	game = Match.new(seed_value)
+	game.terrain = map.terrain
 	for team in 2:
 		game.spawns[team] = map.spawn_points(team)
 	for team in 2:
@@ -151,7 +154,7 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		if totals[key] is float:
 			totals[key] = snappedf(totals[key], 0.01)
 	return {
-		"map": "test",
+		"map": GameMap.chosen_name(),
 		"seed": seed_value,
 		"bots_per_team": bots,
 		"simulated_seconds": seconds,

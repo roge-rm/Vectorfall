@@ -16,6 +16,12 @@ const SPAWN := "spawn"
 const WAY_IN := "way_in"
 const DEFENCE := "defence"
 const HIGH_GROUND := "high_ground"
+## Perches with a long view, ways to a team's flag, and where vehicle pads
+## and deployables will go in later milestones.
+const SNIPER := "sniper"
+const FLAG_APPROACH := "flag_approach"
+const VEHICLE_PAD := "vehicle_pad"
+const DEPLOY := "deploy"
 
 ## Energy a jet climb costs per metre of height, from standing. The jet lifts
 ## you at about 8 m/s on average and drains 40 a second.
@@ -61,6 +67,8 @@ var links: Array[Link] = []
 var out_links: Array[Array] = []
 ## Each is { kind, team, point }.
 var interest: Array[Dictionary] = []
+## While linking, whether there were links already to keep from doubling.
+var _check_existing := true
 
 
 func add_point(at: Vector3) -> int:
@@ -164,11 +172,26 @@ func connected(from: int, to: int) -> bool:
 ## it. surface(x, z) is the height you'd stand at, and blocked(x, z) is true
 ## inside anything you can't pass, such as a rock or a tower.
 func auto_link(max_length: float, surface: Callable, blocked: Callable, step := 1.5) -> void:
+	# Points by grid cell max_length wide, so each only looks at its own
+	# cell and the eight round it.
+	var cells := {}
+	for k in points.size():
+		var key := Vector2i(floori(points[k].x / max_length), floori(points[k].z / max_length))
+		if not cells.has(key):
+			cells[key] = PackedInt32Array()
+		cells[key].append(k)
 	for a in points.size():
-		for b in points.size():
+		var pa := points[a]
+		var home := Vector2i(floori(pa.x / max_length), floori(pa.z / max_length))
+		var near := PackedInt32Array()
+		for dj in range(-1, 2):
+			for di in range(-1, 2):
+				near.append_array(cells.get(home + Vector2i(di, dj), PackedInt32Array()))
+		# In point order, so links come out the same as checking every pair.
+		near.sort()
+		for b in near:
 			if a == b:
 				continue
-			var pa := points[a]
 			var pb := points[b]
 			var flat := Vector2(pb.x - pa.x, pb.z - pa.z)
 			if flat.length() > max_length or link_between(a, b) != null:
@@ -177,6 +200,121 @@ func auto_link(max_length: float, surface: Callable, blocked: Callable, step := 
 			if profile.is_empty():
 				continue
 			add_link(a, b, profile.kind, profile.must_jet, profile.steep)
+
+
+## Like auto_link(), but quicker on a big map: the ground between each pair is
+## sampled once for both directions, every step metres with the lines to
+## each side where near(a, b) is true, such as round buildings, and every
+## coarse_step metres along the middle only elsewhere. mirror, if given,
+## holds each point's twin on a map mirrored in x (or -1), and a pair's twin
+## gets the same links without sampling again. Links come out a to b, then
+## b to a.
+func auto_link_pairs(max_length: float, surface: Callable, blocked: Callable, step: float, coarse_step: float, near: Callable, mirror := PackedInt32Array()) -> void:
+	var cells := {}
+	for k in points.size():
+		var key := Vector2i(floori(points[k].x / max_length), floori(points[k].z / max_length))
+		if not cells.has(key):
+			cells[key] = PackedInt32Array()
+		cells[key].append(k)
+	var twins := not mirror.is_empty()
+	_check_existing = not links.is_empty()
+	for a in points.size():
+		var pa := points[a]
+		var home := Vector2i(floori(pa.x / max_length), floori(pa.z / max_length))
+		var close := PackedInt32Array()
+		for dj in range(-1, 2):
+			for di in range(-1, 2):
+				close.append_array(cells.get(home + Vector2i(di, dj), PackedInt32Array()))
+		close.sort()
+		for b in close:
+			if b <= a:
+				continue
+			var pb := points[b]
+			if Vector2(pb.x - pa.x, pb.z - pa.z).length() > max_length:
+				continue
+			var ma := mirror[a] if twins else -1
+			var mb := mirror[b] if twins else -1
+			# The twin pair, if it comes first, has done this one already.
+			if ma >= 0 and mb >= 0 and mini(ma, mb) * points.size() + maxi(ma, mb) < a * points.size() + b:
+				continue
+			var fine: bool = near.call(pa, pb)
+			var both := _profile_both(pa, pb, surface, blocked, step if fine else coarse_step, fine)
+			_add_pair(a, b, both)
+			if ma >= 0 and mb >= 0 and not (ma == a and mb == b) and not (ma == b and mb == a):
+				_add_pair(ma, mb, both)
+
+
+func _add_pair(a: int, b: int, both: Array) -> void:
+	var there: Dictionary = both[0]
+	var back: Dictionary = both[1]
+	if not there.is_empty() and (not _check_existing or link_between(a, b) == null):
+		add_link(a, b, there.kind, there.must_jet, there.steep)
+	if not back.is_empty() and (not _check_existing or link_between(b, a) == null):
+		add_link(b, a, back.kind, back.must_jet, back.steep)
+
+
+## _profile() both ways along a straight line, from one set of samples, as
+## [a to b, b to a].
+static func _profile_both(a: Vector3, b: Vector3, surface: Callable, blocked: Callable, step: float, with_sides: bool) -> Array:
+	var flat := Vector2(b.x - a.x, b.z - a.z)
+	var count := maxi(int(ceil(flat.length() / step)), 1)
+	var gap := flat.length() / count
+	var side := Vector2(-flat.y, flat.x).normalized() * SIDE_CHECK
+	var lines := 3 if with_sides else 1
+	var middle := 1 if with_sides else 0
+	var stuck := PackedByteArray()
+	stuck.resize(count + 1)
+	var heights: Array[PackedFloat32Array] = []
+	for line in lines:
+		var row := PackedFloat32Array()
+		row.resize(count + 1)
+		heights.append(row)
+	for k in count + 1:
+		var t := float(k) / count
+		var x := lerpf(a.x, b.x, t)
+		var z := lerpf(a.z, b.z, t)
+		stuck[k] = 1 if (k > 0 and k < count and blocked.call(x, z)) else 0
+		for line in lines:
+			var off := side * (line - middle)
+			heights[line][k] = surface.call(x + off.x, z + off.y)
+	if blocked.call(b.x, b.z):
+		stuck[count] = 1
+	if blocked.call(a.x, a.z):
+		stuck[0] = 1
+	heights[middle][0] = a.y
+	heights[middle][count] = b.y
+	return [_walk(heights, stuck, middle, count, gap, a.y, b.y, flat.length(), true), _walk(heights, stuck, middle, count, gap, b.y, a.y, flat.length(), false)]
+
+
+static func _walk(heights: Array[PackedFloat32Array], stuck: PackedByteArray, middle: int, count: int, gap: float, start: float, end: float, length: float, forward: bool) -> Dictionary:
+	var lines := heights.size()
+	var last := PackedFloat32Array()
+	var last_rise := PackedFloat32Array()
+	last.resize(lines)
+	last_rise.resize(lines)
+	last.fill(start)
+	var must_jet := false
+	var steep := 0.0
+	for n in range(1, count + 1):
+		var k := n if forward else count - n
+		if stuck[k] != 0:
+			return {}
+		for line in lines:
+			var h := heights[line][k]
+			var rise := h - last[line]
+			if (n < count or line == middle) and n > 1 and rise / gap > WALL_SLOPE and rise - last_rise[line] > WALL_KINK and last_rise[line] / gap > -0.3:
+				must_jet = true
+			if line == middle and rise / gap > STEEP_SLOPE:
+				steep += rise
+			last_rise[line] = rise
+			last[line] = h
+	var slope := (end - start) / maxf(length, 0.01)
+	var kind := Kind.RUN
+	if must_jet or slope > JET_SLOPE:
+		kind = Kind.JET
+	elif slope < SKI_SLOPE:
+		kind = Kind.SKI
+	return { "kind": kind, "must_jet": must_jet, "steep": snappedf(steep, 0.1) }
 
 
 ## How a straight way from a to b goes: its kind and whether it has a wall,

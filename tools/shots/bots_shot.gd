@@ -15,6 +15,8 @@ func _ready() -> void:
 	DisplayServer.window_set_size(Vector2i(1280, 720))
 	var args := OS.get_cmdline_user_args()
 	var seconds := float(args[0]) if not args.is_empty() else 12.0
+	# These pictures are of the test map.
+	GameMap.chosen = "test"
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	main.overlay.visible = true

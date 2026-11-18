@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Plays a headless match of bots only on the test map, faster than real
-# time, and writes a JSON report to build/bot-reports/.
+# Plays a headless match of bots only, faster than real time, and writes a
+# JSON report to build/bot-reports/.
 #
-#   tools/bot-match.sh                          8 bots a team, seed 1, 5 minutes
+#   tools/bot-match.sh                          8 bots a team, seed 1, 5 minutes, Ochre Fold
 #   tools/bot-match.sh --bots 4 --seed 7 --minutes 2
+#   tools/bot-match.sh --map test               on the test map
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

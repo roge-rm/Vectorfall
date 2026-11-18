@@ -1,6 +1,6 @@
 # Vectorfall
 
-Vectorfall is a team capture the flag shooter for Android with jetpacks and a cel shaded look. Two teams of 8 fight over each other's flags, on foot or in the air. It's early: for now there's a test map with three hills to ski over, two weapons, and a full capture the flag match with bots on both teams that ski, jet, fight and play offence, defence or midfield around you.
+Vectorfall is a team capture the flag shooter for Android with jetpacks and a cel shaded look. Two teams of 8 fight over each other's flags, on foot or in the air. It's early: for now there's one full size map, Ochre Fold, 1.5 km of ridges, a canyon and a high spine between two bases, a small test map, two weapons, and a full capture the flag match with bots on both teams that ski, jet, fight and play offence, defence or midfield around you.
 
 ## Controls
 
@@ -43,6 +43,7 @@ Vectorfall uses Godot 4.7.2, the Compatibility renderer and Jolt physics. The sc
 
 ```sh
 tools/run.sh                       # run from the source in a window, extra arguments go to Godot
+tools/run.sh -- --map test         # the same on the test map
 tools/build-linux.sh               # Linux debug build, build/desktop/vectorfall.x86_64
 tools/build-linux.sh --release     # release build, build/desktop/release/vectorfall.x86_64
 tools/build-linux.sh --run         # build, then start it in a window
@@ -66,9 +67,12 @@ ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path
 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/team_shot.tscn
 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/final_shot.tscn
 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/perf_shot.tscn
+ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/m6_shot.tscn
 ```
 
-The final shot draws the game's look, the paperback palette: the style scene, the six soldiers close from the front and behind, both guns in your hands and the soldiers at 50 m on sand, turquoise, in shade and against the sky. The style shot has a soldier of each armour for each team, a base and a fight, in the desert and highland palettes, plus a close-up, both guns in your hands for both teams, the six soldiers at 50 m and a picture from the main scene. The mockup shot draws one scene in the four comic ink styles Dan picked from. The warm shot draws the style shot's desert scene in today's look and five warmer ones: golden hour, sepia ink, warm shadows, glow from fire and energy, and sepia with warm shadows. The direction shot draws the same scene in five art directions: warm sun and cool shade, a 1970s sci-fi paperback, a lush painted meadow, a flat travel poster and a neon frontier at dusk (`Palette.sun_and_shade()`, `paperback()`, `meadow()`, `travel_poster()` and `neon_frontier()`); add `-- 2 5` to take only some of them. The team shot draws the paperback scene with three team colour pairs and the six soldiers at 50 m for each. A palette sets its own team colours in `team_colours`, read everywhere through `Palette.team()`. The perf shot prints draw calls, triangles and frame times in the main scene with 17 soldiers in view, with outlines and hatching on and off.
+The final shot draws the game's look, the paperback palette: the style scene, the six soldiers close from the front and behind, both guns in your hands and the soldiers at 50 m on sand, turquoise, in shade and against the sky. The style shot has a soldier of each armour for each team, a base and a fight, in the desert and highland palettes, plus a close-up, both guns in your hands for both teams, the six soldiers at 50 m and a picture from the main scene. The mockup shot draws one scene in the four comic ink styles Dan picked from. The warm shot draws the style shot's desert scene in today's look and five warmer ones: golden hour, sepia ink, warm shadows, glow from fire and energy, and sepia with warm shadows. The direction shot draws the same scene in five art directions: warm sun and cool shade, a 1970s sci-fi paperback, a lush painted meadow, a flat travel poster and a neon frontier at dusk (`Palette.sun_and_shade()`, `paperback()`, `meadow()`, `travel_poster()` and `neon_frontier()`); add `-- 2 5` to take only some of them. The team shot draws the paperback scene with three team colour pairs and the six soldiers at 50 m for each. A palette sets its own team colours in `team_colours`, read everywhere through `Palette.team()`. The perf shot prints draw calls, triangles, frame times and terrain chunks drawn in the main scene on Ochre Fold with 17 soldiers spread down the map in view, with outlines on and off; add `-- test` for the test map. The M6 shot draws Ochre Fold from high up, a base, the ski line from a base in game and a long view to the fog. The other shots are of the test map.
+
+The game loads Ochre Fold. Add `--map test` after `--` on the command line for the test map. How far you can see is `view_distance` under `[graphics]` in `user://settings.cfg`, 1200 m by default, with no menu yet; the fog thickens to match it.
 
 ## Testing
 
@@ -78,12 +82,13 @@ Run the headless tests on the computer:
 tools/run-tests.sh
 ```
 
-They check the jetpack, skiing, movement in the air, that soldiers move only from their commands, the touch controls, weapon damage, splash and disc jumps, every capture the flag rule, that shots can't pass through walls, respawning, the test map's ski speed and saving and loading match state. For the bots they check the route graph and planner, what bots see and hear, a bot getting from base to base past 40 m/s, a boxed in bot getting out, leading a moving target, the roles, two bots capturing a flag on their own, and that the same seed plays a match with fighting and flags the same way.
+They check the jetpack, skiing, movement in the air, the chunked terrain (heights, gaps between detail levels, collision under soldiers, shots hitting the ground anywhere), Ochre Fold's spawns and route graph, that soldiers move only from their commands, the touch controls, weapon damage, splash and disc jumps, every capture the flag rule, that shots can't pass through walls, respawning, the test map's ski speed and saving and loading match state. For the bots they check the route graph and planner, what bots see and hear, a bot getting from base to base past 40 m/s, a boxed in bot getting out, leading a moving target, the roles, two bots capturing a flag on their own, and that the same seed plays a match with fighting and flags the same way.
 
 The bot match runs bots headless, faster than real time, and writes a report to `build/bot-reports/` with the score, every flag event, and each bot's role, distance, speeds, kills, deaths, flags, shots and hits per weapon and where it got stuck:
 
 ```sh
 tools/bot-match.sh --bots 8 --seed 1 --minutes 5
+tools/bot-match.sh --map test     # on the test map
 ```
 
 F3 in the game shows the bots' route graph (run links white, ski blue, jet orange, walls red, points of interest as yellow posts), each bot's route and a label with its role, goal, what it's doing and who it's fighting. `tools/shots/bots_shot.tscn` takes a picture of it.

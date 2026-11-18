@@ -43,7 +43,6 @@ func update(me: Soldier, game: Match, director: BotDirector) -> void:
 	var now := game.tick
 	var eye := me.eye_transform()
 	var forward := -eye.basis.z
-	var space := me.get_world_3d().direct_space_state
 	var enemies: Array[Soldier] = []
 	var ids := game.entities.keys()
 	ids.sort()
@@ -61,8 +60,7 @@ func update(me: Soldier, game: Match, director: BotDirector) -> void:
 		if in_view:
 			if not director.take_ray():
 				break
-			var query := PhysicsRayQueryParameters3D.create(eye.origin, eye.origin + to, Match.WORLD_LAYER)
-			in_view = space.intersect_ray(query).is_empty()
+			in_view = game.line_clear(eye.origin, eye.origin + to)
 		checked += 1
 		if in_view:
 			_see(other, now)

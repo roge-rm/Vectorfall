@@ -48,6 +48,8 @@ func _ready() -> void:
 	# The main scene, looking down the valley from in front of the base with
 	# the bots playing.
 	_camera.queue_free()
+	# These pictures are of the test map.
+	GameMap.chosen = "test"
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	var map: TestMap = main.map

@@ -30,6 +30,8 @@ var _ray_tick := -1
 var _rays_left := 0
 ## Routes already planned, by start, goal, speed and energy, rounded.
 var _plans := {}
+## Per team, the links ending near its spawn points, found once.
+var _spawn_links := {}
 
 
 func _init(match_node: Match, route_graph: RouteGraph) -> void:
@@ -175,6 +177,21 @@ func _on_flag_captured(_team: int, soldier_id: int) -> void:
 func _on_impacted(weapon: int, at: Vector3, _normal: Vector3) -> void:
 	if Weapon.all[weapon].splash_radius > 0.0:
 		_add_sound(at, 0, BLAST_RANGE)
+
+
+## The links ending within reach of a team's spawn points, once per spawn
+## they're near, in link order.
+func links_near_spawns(team: int, reach: float) -> Array[RouteGraph.Link]:
+	if not _spawn_links.has(team):
+		var found: Array[RouteGraph.Link] = []
+		for spawn in graph.interest_points(RouteGraph.SPAWN, team):
+			var at := graph.points[spawn]
+			for link: RouteGraph.Link in graph.links:
+				var end := graph.points[link.to]
+				if Vector2(end.x - at.x, end.z - at.z).length() < reach:
+					found.append(link)
+		_spawn_links[team] = found
+	return _spawn_links[team]
 
 
 ## Every stuck spot the bots have logged, oldest first.

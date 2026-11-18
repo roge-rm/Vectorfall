@@ -219,9 +219,7 @@ func apply(brain: BotBrain, command: PlayerCommand, delta: float) -> void:
 		if not brain.director.take_ray():
 			return
 		var forward := -Basis.from_euler(Vector3(aim_pitch, aim_yaw, 0.0)).z
-		var space := s.get_world_3d().direct_space_state
-		var query := PhysicsRayQueryParameters3D.create(eye, eye + forward * DISC_MIN, Match.WORLD_LAYER)
-		if not space.intersect_ray(query).is_empty():
+		if not s.game.line_clear(eye, eye + forward * DISC_MIN):
 			return
 	command.buttons |= PlayerCommand.FIRE
 
