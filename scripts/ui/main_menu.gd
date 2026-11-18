@@ -57,6 +57,9 @@ func _ready() -> void:
 	settings_screen = SettingsScreen.new()
 	settings_screen.visible = false
 	settings_screen.closed.connect(show_home)
+	settings_screen.changed.connect(func() -> void:
+		if map != null:
+			map.set_view_distance(Settings.view_distance))
 	ui.add_child(settings_screen)
 	how_to = HowToPlay.new()
 	how_to.visible = false
@@ -167,6 +170,13 @@ func start_match(setup: MatchSetup) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	get_tree().change_scene_to_file(MATCH_SCENE)
+
+
+func _notification(what: int) -> void:
+	# Android's back button quits from the home screen; the other screens
+	# go back home by themselves.
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST and home != null and home.visible and not _starting:
+		get_tree().quit()
 
 
 func _input(event: InputEvent) -> void:

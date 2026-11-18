@@ -9,7 +9,8 @@ const CEL := preload("res://shaders/ink.gdshader")
 const OUTLINE := preload("res://shaders/ink_outline.gdshader")
 
 static var _materials: Dictionary[String, ShaderMaterial] = {}
-static var _grounds: Array[ShaderMaterial] = []
+## Ground materials, held weakly so a freed map's go away.
+static var _grounds: Array[WeakRef] = []
 static var _meshes: Dictionary[String, ArrayMesh] = {}
 static var _glows: Dictionary[String, StandardMaterial3D] = {}
 static var _outline: ShaderMaterial
@@ -121,7 +122,8 @@ static func ground_material() -> ShaderMaterial:
 	made.set_shader_parameter("soft_noise", soft_noise())
 	_share(made, _shared)
 	_share(made, _ground_shared)
-	_grounds.append(made)
+	_grounds = _grounds.filter(func(held: WeakRef) -> bool: return held.get_ref() != null)
+	_grounds.append(weakref(made))
 	return made
 
 
@@ -229,9 +231,11 @@ static func hatching_on() -> bool:
 static func _share_all() -> void:
 	for made: ShaderMaterial in _materials.values():
 		_share(made, _shared)
-	for made in _grounds:
-		_share(made, _shared)
-		_share(made, _ground_shared)
+	for held in _grounds:
+		var made := held.get_ref() as ShaderMaterial
+		if made != null:
+			_share(made, _shared)
+			_share(made, _ground_shared)
 
 
 static func _share(made: ShaderMaterial, values: Dictionary[String, Variant]) -> void:

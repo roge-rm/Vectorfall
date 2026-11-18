@@ -105,6 +105,7 @@ func _ready() -> void:
 	touch.menu = menu
 	touch.pause_pressed.connect(pause)
 	input.touch = touch
+	hud.touch = touch
 	input.menu = menu
 	input.pause_requested.connect(pause)
 	for team: int in bots.commanders:
@@ -144,12 +145,15 @@ func pause() -> void:
 		menu.close()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	get_tree().paused = true
+	# Touches lifted while paused are never seen, so start clean both ways.
+	touch.release_all()
 	pause_menu.device = input.device
 	pause_menu.open()
 
 
 func _on_resumed() -> void:
 	get_tree().paused = false
+	touch.release_all()
 	if input.device == LocalInput.Device.KEYBOARD and not game.over and DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 

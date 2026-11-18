@@ -147,13 +147,48 @@ func _match() -> void:
 	checks.check(main.bots.skill_levels == [0, 4], "skills go to the right teams (%s)" % [main.bots.skill_levels])
 	checks.check(game.settings.capture_limit == 3 and game.time_left <= 300.0 and game.time_left > 290.0, "time limit and captures reach the match")
 
+	# Hold the stick and FIRE, pause, let go while paused, and resume.
+	var touch: TouchControls = main.touch
+	main.input.set_device(LocalInput.Device.TOUCH)
+	await process_frame
+	var to_window := root.get_final_transform() * touch.get_global_transform_with_canvas()
+	var held: Array[InputEventScreenTouch] = []
+	for at: Vector2 in [Vector2(touch.size.x * 0.2, touch.size.y * 0.7), touch.button_centre(0)]:
+		var press := InputEventScreenTouch.new()
+		press.index = held.size()
+		press.pressed = true
+		press.position = to_window * at
+		Input.parse_input_event(press)
+		held.append(press)
+	var drag := InputEventScreenDrag.new()
+	drag.index = 0
+	drag.position = held[0].position + to_window.basis_xform(Vector2(0.0, -300.0))
+	Input.parse_input_event(drag)
+	await process_frame
+	var was_held := touch.buttons & PlayerCommand.FIRE != 0 and touch.stick.length() > 0.5
 	main.pause()
+	for press in held:
+		var lift := press.duplicate() as InputEventScreenTouch
+		lift.pressed = false
+		Input.parse_input_event(lift)
+	await process_frame
+	main.pause_menu.resume()
+	await process_frame
+	checks.check(was_held and touch.buttons == 0 and touch.stick == Vector2.ZERO, "touches held through a pause are let go")
+	var marker := main.hud._clear_of_touch(touch.button_centre(TouchControls.ORDERS_BUTTON), 10.0) as Vector2
+	checks.check(marker.distance_to(touch.button_centre(TouchControls.ORDERS_BUTTON)) >= touch.button_radius(TouchControls.ORDERS_BUTTON) + 9.9, "edge markers keep clear of the touch buttons")
+	main.input.set_device(LocalInput.Device.KEYBOARD)
+	await process_frame
+
+	main.pause()
+	var audio_clock: int = main.audio._clock
 	var tick: int = game.tick
 	await process_frame
 	await process_frame
 	await process_frame
 	checks.check(paused and main.pause_menu.visible, "pause opens the pause menu and pauses the tree")
 	checks.check(game.tick == tick, "the sim doesn't tick while paused (%d to %d)" % [tick, game.tick])
+	checks.check(main.audio._clock == audio_clock, "the sound clock stops while paused")
 	Settings.view_distance = 600.0
 	Settings.touch_size = 0.8
 	main.pause_menu.settings.changed.emit()

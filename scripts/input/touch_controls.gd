@@ -211,9 +211,18 @@ func _update_buttons() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_VISIBILITY_CHANGED and not visible:
-		_touches.clear()
-		stick = Vector2.ZERO
-		buttons = 0
+		release_all()
+
+
+## Lets go of every touch, for when releases can't be seen, like while
+## paused.
+func release_all() -> void:
+	_touches.clear()
+	stick = Vector2.ZERO
+	buttons = 0
+	_look = Vector2.ZERO
+	_pulses = 0
+	queue_redraw()
 
 
 func _draw() -> void:

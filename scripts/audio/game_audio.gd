@@ -21,7 +21,9 @@ const CHAINGUN_GAP := 0.06
 var game: Match
 var soldier: Soldier
 var _pool: Array[AudioStreamPlayer3D] = []
-## When each pool voice started and finishes, in msec, and how much it matters.
+## Milliseconds of play: it stops while the game is paused, like the players.
+var _clock := 0
+## When each pool voice started and finishes, on _clock, and how much it matters.
 var _started: Array[int] = []
 var _ends: Array[int] = []
 var _priority: Array[int] = []
@@ -96,7 +98,7 @@ func watch(match_node: Match, who: Soldier) -> void:
 ## Plays a sound at a point on a free voice, or the oldest one if they're all
 ## busy and it matters as much. False if it was dropped.
 func play_at(sound_name: String, at: Vector3, volume_db := 0.0, priority := 1, pitch := 1.0) -> bool:
-	var now := Time.get_ticks_msec()
+	var now := _clock
 	var pick := -1
 	var oldest := now + 1
 	for k in VOICES:
@@ -124,7 +126,7 @@ func play_at(sound_name: String, at: Vector3, volume_db := 0.0, priority := 1, p
 
 ## Voices busy now.
 func voices_in_use() -> int:
-	var now := Time.get_ticks_msec()
+	var now := _clock
 	var busy := 0
 	for k in VOICES:
 		if _ends[k] > now:
@@ -148,7 +150,7 @@ func _on_fired(soldier_id: int, weapon: int) -> void:
 		return
 	var at := who.eye_transform().origin
 	if weapon == Weapon.CHAINGUN:
-		var now := Time.get_ticks_msec()
+		var now := _clock
 		if now - _last_chaingun.get(soldier_id, -1000) < int(CHAINGUN_GAP * 1000.0):
 			return
 		_last_chaingun[soldier_id] = now
@@ -187,6 +189,7 @@ func _on_flag(team: int, _soldier_id: int, what: String) -> void:
 
 
 func _process(delta: float) -> void:
+	_clock += roundi(delta * 1000.0)
 	if soldier == null or game == null:
 		return
 	_own_sounds(delta)

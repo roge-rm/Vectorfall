@@ -21,6 +21,8 @@ const MESSAGE_TIME := 3.5
 
 var soldier: Soldier
 var game: Match
+## The touch controls, which edge markers keep clear of while they show.
+var touch: TouchControls
 var _speed_label: Label
 var _ski_label: Label
 var _respawn_label: Label
@@ -38,6 +40,7 @@ var _message_left := 0.0
 var _end_panel: PanelContainer
 var _end_title: Label
 var _end_score: Label
+var _restart_button: Button
 
 
 func _init() -> void:
@@ -88,6 +91,7 @@ func _make_end_panel() -> void:
 	button.add_theme_font_size_override("font_size", 28)
 	button.pressed.connect(restart_requested.emit)
 	box.add_child(button)
+	_restart_button = button
 	var to_menu := Button.new()
 	to_menu.text = "Main menu"
 	to_menu.add_theme_font_size_override("font_size", 28)
@@ -158,6 +162,8 @@ func _on_flag_captured(team: int, _soldier_id: int) -> void:
 
 func _on_match_over(team: int) -> void:
 	_end_panel.visible = true
+	# Focus for a gamepad or keyboard.
+	_restart_button.grab_focus.call_deferred()
 	if team < 0:
 		_end_title.text = "Draw"
 	else:
@@ -432,6 +438,7 @@ func _draw_flag_markers(short: float) -> void:
 			var half := Vector2(size.x * 0.5 - margin, (bottom - top) * 0.5)
 			var scale := minf(half.x / maxf(absf(dir.x), 0.0001), half.y / maxf(absf(dir.y), 0.0001))
 			at = middle + dir * scale
+			at = _clear_of_touch(at, radius * 3.0)
 			var tip := at + dir * radius * 2.4
 			var side := dir.orthogonal() * radius * 0.9
 			var arrow := PackedVector2Array([tip, at + dir * radius * 1.0 + side, at + dir * radius * 1.0 - side])
@@ -450,4 +457,23 @@ func _draw_flag_markers(short: float) -> void:
 		var text_at := at + Vector2(0.0, radius * 2.8)
 		if not inside and dir.y > 0.5:
 			text_at = at + Vector2(0.0, -radius * 1.6)
-		_text(text_at, shown, roundi(short * 0.026), colour)
+		var font_size := roundi(short * 0.026)
+		# The label stays on screen.
+		var half_width := InkUi.font().get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size).x * 0.5 + font_size * 0.4
+		text_at.x = clampf(text_at.x, half_width, maxf(size.x - half_width, half_width))
+		_text(text_at, shown, font_size, colour)
+
+
+## Pushes an edge marker towards the middle of the screen until it's clear of
+## every touch button by `clear`, while the touch controls show.
+func _clear_of_touch(at: Vector2, clear: float) -> Vector2:
+	if touch == null or not touch.visible:
+		return at
+	for k in TouchControls.BUTTONS.size():
+		var centre := touch.button_centre(k)
+		var reach := touch.button_radius(k) + clear
+		var dy := at.y - centre.y
+		if at.distance_to(centre) < reach and absf(dy) < reach:
+			var dx := sqrt(reach * reach - dy * dy)
+			at.x = centre.x - dx if centre.x > size.x * 0.5 else centre.x + dx
+	return at
