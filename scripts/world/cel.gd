@@ -1,24 +1,33 @@
 class_name Cel
 extends RefCounted
 
-## Makes the cel shaded materials, shared by colour, and turns their outlines
-## on and off together.
+## Makes the ink materials, shared by colour, and turns their outlines and
+## hatching on and off together. The palette's light, ink and paper go on
+## every material through set_palette().
 
-const CEL := preload("res://shaders/cel.gdshader")
-const OUTLINE := preload("res://shaders/outline.gdshader")
+const CEL := preload("res://shaders/ink.gdshader")
+const OUTLINE := preload("res://shaders/ink_outline.gdshader")
 
 static var _materials: Dictionary[String, ShaderMaterial] = {}
+static var _grounds: Array[ShaderMaterial] = []
 static var _meshes: Dictionary[String, ArrayMesh] = {}
 static var _glows: Dictionary[String, StandardMaterial3D] = {}
 static var _outline: ShaderMaterial
 static var _near_outline: ShaderMaterial
+static var _effect_outline: ShaderMaterial
 static var _outlines_on := true
+## Uniforms every ink material gets, from the palette and the settings.
+static var _shared: Dictionary[String, Variant] = {}
+## Uniforms only the ground gets.
+static var _ground_shared: Dictionary[String, Variant] = {}
 
 
-## A cel material in this colour. team_amount is how much the instance's team
-## colour shows through. outlined is false for things like the ground that
-## shouldn't get the outline pass. near is for things right in front of the
-## camera, like the gun in your hands, which get a thinner outline.
+## An ink material in this colour. team_amount is how much the team colour
+## shows through. outlined is false for things like the ground that shouldn't
+## get the outline pass. With vertex_colour the albedo multiplies the vertex
+## colours and the vertex alpha scales team_amount. near is for things right
+## in front of the camera, like the gun in your hands, which get a thinner
+## outline.
 static func material(colour: Color, team_amount := 0.0, outlined := true, vertex_colour := false, near := false) -> ShaderMaterial:
 	var key := "%s/%s/%s/%s/%s" % [colour.to_html(), team_amount, outlined, vertex_colour, near]
 	if _materials.has(key):
@@ -30,12 +39,29 @@ static func material(colour: Color, team_amount := 0.0, outlined := true, vertex
 	made.set_shader_parameter("use_vertex_colour", vertex_colour)
 	# Rim light only on team coloured things: on big flat ground it shows as a
 	# bright band towards the horizon.
-	made.set_shader_parameter("rim_amount", 0.35 if team_amount > 0.0 else 0.0)
+	made.set_shader_parameter("rim_amount", 0.3 if team_amount > 0.0 else 0.0)
+	made.set_shader_parameter("camera_light", near)
+	_share(made, _shared)
 	if outlined:
 		made.set_meta("outlined", true)
 		made.set_meta("near", near)
 		if _outlines_on:
 			made.next_pass = _outline_for(made)
+	_materials[key] = made
+	return made
+
+
+## A material in a team's colour at full strength, for flags and team
+## markings on bases. The palette holds the rest of the world below it.
+static func team_material(colour: Color) -> ShaderMaterial:
+	var key := "team_material/%s" % colour.to_html()
+	if _materials.has(key):
+		return _materials[key]
+	var made := material(colour, 1.0).duplicate() as ShaderMaterial
+	made.set_shader_parameter("team_colour", colour)
+	made.set_meta("outlined", true)
+	made.set_meta("near", false)
+	made.next_pass = _outline_for(made) if _outlines_on else null
 	_materials[key] = made
 	return made
 
@@ -72,17 +98,21 @@ static func _team_copy(source: ShaderMaterial, colour: Color) -> ShaderMaterial:
 	return made
 
 
-## The ground's material, which colours by steepness and a patch noise kept
-## in the vertex colours.
+## The ground's material, which colours by steepness, height and a patch
+## noise kept in the vertex colours, from the palette.
 static func ground_material() -> ShaderMaterial:
 	var made := ShaderMaterial.new()
 	made.shader = CEL
 	made.set_shader_parameter("ground", true)
 	made.set_shader_parameter("rim_amount", 0.0)
+	_share(made, _shared)
+	_share(made, _ground_shared)
+	_grounds.append(made)
 	return made
 
 
-## A flat unshaded colour for things that glow, like flames and shots.
+## A flat unshaded colour for things that glow, like flames and shots, with
+## an ink line unless it's see-through.
 static func glow(colour: Color, vertex_colour := false) -> StandardMaterial3D:
 	var key := "%s/%s" % [colour.to_html(), vertex_colour]
 	if _glows.has(key):
@@ -91,11 +121,86 @@ static func glow(colour: Color, vertex_colour := false) -> StandardMaterial3D:
 	made.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	made.albedo_color = colour
 	made.vertex_color_use_as_albedo = vertex_colour
+	made.vertex_color_is_srgb = true
 	made.disable_fog = true
 	if colour.a < 1.0:
 		made.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	elif _outlines_on:
+		made.next_pass = effect_outline()
 	_glows[key] = made
 	return made
+
+
+## Puts a palette's light, ink, paper and ground colours on every ink
+## material, made now or later.
+static func set_palette(palette: Palette) -> void:
+	var direction := palette.sun_direction.normalized()
+	for key: String in ["sun_colour", "ambient", "ambient_energy", "ink", "paper", "saturation"]:
+		_shared[key] = palette.get(key)
+	_shared["sun_direction"] = direction
+	for key: String in ["grass", "grass_dark", "dirt", "rock", "low", "low_height", "high", "high_height"]:
+		_ground_shared[key] = palette.get(key)
+	_share_all()
+	for line: ShaderMaterial in [outline(), near_outline(), effect_outline()]:
+		line.set_shader_parameter("colour", palette.ink)
+		line.set_shader_parameter("sun_direction", direction)
+
+
+## Hatching in the shaded bands, on or off.
+static func set_hatching(on: bool) -> void:
+	_shared["shadow_style"] = 1 if on else 0
+	_share_all()
+
+
+static func hatching_on() -> bool:
+	return _shared.get("shadow_style", 1) == 1
+
+
+static func _share_all() -> void:
+	for made: ShaderMaterial in _materials.values():
+		_share(made, _shared)
+	for made in _grounds:
+		_share(made, _shared)
+		_share(made, _ground_shared)
+
+
+static func _share(made: ShaderMaterial, values: Dictionary[String, Variant]) -> void:
+	for key in values:
+		made.set_shader_parameter(key, values[key])
+
+
+## One mesh from many parts, each a [mesh, transform, colour] with the
+## colour's alpha as how much team colour it takes. Draw it with a
+## material(Color.WHITE, 1.0, true, true) and it costs one draw call and one
+## outline whatever the number of parts. The ink shader reads vertex colours
+## as linear, so they're converted unless for_glow, since glow materials
+## convert them themselves.
+static func merged(parts: Array, for_glow := false) -> ArrayMesh:
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for part: Array in parts:
+		var mesh: Mesh = part[0]
+		var where: Transform3D = part[1]
+		var colour: Color = part[2]
+		if not for_glow:
+			var team := colour.a
+			colour = colour.srgb_to_linear()
+			colour.a = team
+		var normal_basis := where.basis.inverse().transposed()
+		for s in mesh.get_surface_count():
+			var arrays := mesh.surface_get_arrays(s)
+			var points: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+			var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] if arrays[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+			if indices.is_empty():
+				indices.resize(points.size())
+				for k in points.size():
+					indices[k] = k
+			for index in indices:
+				tool.set_color(colour)
+				tool.set_normal((normal_basis * normals[index]).normalized())
+				tool.add_vertex(where * points[index])
+	return hull_mesh(tool.commit())
 
 
 ## Shared box, cylinder and sphere meshes with outline normals, by size.
@@ -194,8 +299,23 @@ static func near_outline() -> ShaderMaterial:
 		_near_outline = ShaderMaterial.new()
 		_near_outline.shader = OUTLINE
 		_near_outline.set_shader_parameter("min_distance", 0.0)
-		_near_outline.set_shader_parameter("width", 0.004)
+		_near_outline.set_shader_parameter("width", 0.006)
+		_near_outline.set_shader_parameter("brush", 0.0)
+		_near_outline.set_shader_parameter("shadow_weight", 0.0)
 	return _near_outline
+
+
+## The outline pass for effects: shots, flames and blasts, a little thinner
+## and with no wobble, since they move fast.
+static func effect_outline() -> ShaderMaterial:
+	if _effect_outline == null:
+		_effect_outline = ShaderMaterial.new()
+		_effect_outline.shader = OUTLINE
+		_effect_outline.set_shader_parameter("min_distance", 0.5)
+		_effect_outline.set_shader_parameter("width", 0.0045)
+		_effect_outline.set_shader_parameter("brush", 0.0)
+		_effect_outline.set_shader_parameter("shadow_weight", 0.0)
+	return _effect_outline
 
 
 static func _outline_for(made: ShaderMaterial) -> ShaderMaterial:
@@ -207,6 +327,9 @@ static func set_outlines(on: bool) -> void:
 	for made: ShaderMaterial in _materials.values():
 		if made.has_meta("outlined"):
 			made.next_pass = _outline_for(made) if on else null
+	for made: StandardMaterial3D in _glows.values():
+		if made.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED:
+			made.next_pass = effect_outline() if on else null
 
 
 static func outlines_on() -> bool:

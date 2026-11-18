@@ -91,7 +91,7 @@ func _ready() -> void:
 
 func set_team(value: int) -> void:
 	team = value
-	body.set_team_colour(TEAM_COLOURS[team % TEAM_COLOURS.size()])
+	body.set_look(team, body.armour)
 
 
 ## Hides your own body from your camera.

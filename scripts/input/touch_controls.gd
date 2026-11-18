@@ -177,23 +177,32 @@ func _notification(what: int) -> void:
 
 func _draw() -> void:
 	var s := _short_side()
-	var font := get_theme_default_font()
+	var font := InkUi.font()
 	var font_size := int(s * 0.035)
+	var line := maxf(2.0, s * 0.005)
 	for k in BUTTONS.size():
 		var centre := button_centre(k)
 		var radius := button_radius(k)
 		var held: bool = buttons & BUTTONS[k][1] != 0
-		draw_circle(centre, radius, Color(1, 1, 1, 0.3 if held else 0.14))
-		draw_arc(centre, radius, 0.0, TAU, 40, Color(1, 1, 1, 0.55), maxf(2.0, s * 0.004), true)
+		# Ink rings round a pale fill, solid ink while held.
+		draw_circle(centre + Vector2(line, line), radius + line, Color(InkUi.INK, 0.35))
+		draw_circle(centre, radius, Color(InkUi.INK, 0.55) if held else Color(InkUi.PAPER, 0.18))
+		draw_arc(centre, radius, 0.0, TAU, 40, Color(InkUi.INK, 0.8), line * 2.0, true)
+		draw_arc(centre, radius - line * 1.5, 0.0, TAU, 40, Color(InkUi.PAPER, 0.6), line * 0.6, true)
 		var label: String = BUTTONS[k][0]
 		var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		draw_string(font, centre + Vector2(-width * 0.5, font_size * 0.35), label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(1, 1, 1, 0.8))
+		var at := centre + Vector2(-width * 0.5, font_size * 0.35)
+		draw_string_outline(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, maxi(4, font_size / 4), Color(InkUi.INK, 0.85))
+		draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(InkUi.PAPER, 0.9))
 	var reach := STICK_REACH * s
 	var origin := _stick_origin
 	var knob := _stick_at
 	if not _touches.values().has("stick"):
 		origin = Vector2(0.2 * s, size.y - 0.22 * s)
 		knob = origin
-	draw_circle(origin, reach, Color(1, 1, 1, 0.1))
-	draw_arc(origin, reach, 0.0, TAU, 40, Color(1, 1, 1, 0.4), maxf(2.0, s * 0.004), true)
-	draw_circle(origin + (knob - origin).limit_length(reach), reach * 0.4, Color(1, 1, 1, 0.35))
+	draw_circle(origin, reach, Color(InkUi.PAPER, 0.1))
+	draw_arc(origin, reach, 0.0, TAU, 40, Color(InkUi.INK, 0.6), line * 2.0, true)
+	draw_arc(origin, reach - line * 1.5, 0.0, TAU, 40, Color(InkUi.PAPER, 0.45), line * 0.6, true)
+	var knob_at := origin + (knob - origin).limit_length(reach)
+	draw_circle(knob_at, reach * 0.4 + line, Color(InkUi.INK, 0.7))
+	draw_circle(knob_at, reach * 0.4, Color(InkUi.PAPER, 0.45))

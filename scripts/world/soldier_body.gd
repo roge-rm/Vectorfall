@@ -1,26 +1,47 @@
 class_name SoldierBody
 extends Node3D
 
-## A soldier's body seen from outside, built from boxes, spheres and
-## cylinders, facing -z with its feet at the origin. Each frame it reads the
-## soldier and poses itself: a run cycle, a crouched ski stance, legs tucked
-## in the air, a jet flame and a fall when dead. Only for looks; nothing here
-## is match state.
+## A soldier's body seen from outside, facing -z with its feet at the origin.
+## Each moving part (hips, thighs, shins, torso with pack, head, arms) is one
+## mesh merged from boxes, spheres and cylinders, coloured by its vertex
+## colours, so a soldier is about ten draw calls. The build depends on the
+## armour (light lean, heavy bulky) and the team (orange angular, blue
+## rounded, each with its own helmet, shoulders, pack and chest mark). Each
+## frame it reads the soldier and poses itself: a run cycle, a crouched ski
+## stance with sparks, legs tucked in the air, a jet flame and a fall when
+## dead. Only for looks; nothing here is match state.
 
-const LIMB := Color(0.26, 0.28, 0.32)
-const ARMOUR := Color(0.78, 0.78, 0.76)
-const VISOR := Color(0.55, 0.95, 1.0)
+enum Armour { LIGHT, MEDIUM, HEAVY }
+
+const LIMB := Color(0.26, 0.28, 0.32, 0.0)
+const PLATE := Color(0.72, 0.72, 0.7, 0.0)
+const PALE := Color(0.96, 0.94, 0.88, 0.0)
+const VISOR := Color(0.98, 0.96, 0.82, 0.0)
+## White with full team amount: takes the team colour.
+const TEAM := Color(1.0, 1.0, 1.0, 1.0)
 const FLAME := Color(1.0, 0.55, 0.15)
 const FLAME_CORE := Color(1.0, 0.95, 0.6)
+const SPARK := Color(1.0, 0.92, 0.55)
 const HIP_HEIGHT := 0.97
 const THIGH := 0.46
 const SHIN := 0.44
-## Right and left shoulders and hands in aim space.
-const SHOULDERS := [Vector3(0.27, 0.0, 0.0), Vector3(-0.27, 0.0, 0.0)]
+## Right and left hands in aim space, and where the gun's grip sits.
 const HANDS := [Vector3(0.17, -0.2, -0.3), Vector3(0.1, -0.15, -0.62)]
 const GUN_AT := Vector3(0.17, -0.18, -0.36)
+## Sizes by armour: torso width, limb thickness, shoulders, pack, helmet and
+## chest depth.
+const BUILDS := {
+	Armour.LIGHT: {"width": 0.84, "limb": 0.84, "shoulder": 0.7, "pack": 0.75, "helmet": 0.92, "depth": 0.88},
+	Armour.MEDIUM: {"width": 1.0, "limb": 1.0, "shoulder": 1.0, "pack": 1.0, "helmet": 1.0, "depth": 1.0},
+	Armour.HEAVY: {"width": 1.24, "limb": 1.28, "shoulder": 1.65, "pack": 1.4, "helmet": 1.1, "depth": 1.22},
+}
+
+## Meshes shared by every soldier, by part, team and armour.
+static var _meshes: Dictionary[String, ArrayMesh] = {}
 
 var soldier: Soldier
+var team := 0
+var armour := Armour.MEDIUM
 var pose: Node3D
 var hips: Node3D
 var torso: Node3D
@@ -28,8 +49,11 @@ var head: Node3D
 var aim: Node3D
 var legs: Array[Node3D] = []
 var knees: Array[Node3D] = []
-var flames: Array[Node3D] = []
+var flame: MeshInstance3D
+var sparks: MeshInstance3D
 var guns: Array[Node3D] = []
+var _views: Dictionary[String, Array] = {}
+var _layer := 1
 var _phase := 0.0
 ## How much of each pose shows, eased towards the soldier's state.
 var _run := 0.0
@@ -44,99 +68,176 @@ func _init() -> void:
 	name = "Body"
 	pose = Node3D.new()
 	add_child(pose)
-	hips = Node3D.new()
-	hips.position.y = HIP_HEIGHT
-	pose.add_child(hips)
-	_part(hips, Cel.box(Vector3(0.36, 0.18, 0.22)), Vector3.ZERO, Cel.material(LIMB))
+	hips = _joint(pose, Vector3(0.0, HIP_HEIGHT, 0.0), "hips")
 	for side: float in [1.0, -1.0]:
-		var leg := Node3D.new()
-		leg.position.x = side * 0.12
-		hips.add_child(leg)
-		_part(leg, Cel.box(Vector3(0.16, THIGH, 0.18)), Vector3(0.0, -THIGH * 0.5, 0.0), Cel.material(LIMB))
-		_part(leg, Cel.box(Vector3(0.18, 0.16, 0.2)), Vector3(0.0, -THIGH * 0.35, -0.01), Cel.material(ARMOUR, 1.0))
-		var knee := Node3D.new()
-		knee.position.y = -THIGH
-		leg.add_child(knee)
-		_part(knee, Cel.box(Vector3(0.15, SHIN, 0.17)), Vector3(0.0, -SHIN * 0.5, 0.0), Cel.material(ARMOUR))
-		_part(knee, Cel.box(Vector3(0.17, 0.1, 0.28)), Vector3(0.0, -SHIN + 0.02, -0.05), Cel.material(LIMB))
+		var leg := _joint(hips, Vector3(side * 0.12, 0.0, 0.0), "thigh")
+		var knee := _joint(leg, Vector3(0.0, -THIGH, 0.0), "shin")
 		legs.append(leg)
 		knees.append(knee)
-
-	torso = Node3D.new()
-	torso.position.y = HIP_HEIGHT
-	pose.add_child(torso)
-	_part(torso, Cel.box(Vector3(0.34, 0.16, 0.22)), Vector3(0.0, 0.1, 0.0), Cel.material(LIMB))
-	_part(torso, Cel.box(Vector3(0.48, 0.42, 0.3)), Vector3(0.0, 0.36, 0.0), Cel.material(ARMOUR, 1.0))
-	for side: float in [1.0, -1.0]:
-		_part(torso, Cel.box(Vector3(0.18, 0.12, 0.24)), Vector3(side * 0.31, 0.56, 0.0), Cel.material(ARMOUR, 1.0))
-	head = Node3D.new()
-	head.position.y = 0.62
-	torso.add_child(head)
-	_part(head, Cel.box(Vector3(0.1, 0.08, 0.1)), Vector3(0.0, -0.02, 0.0), Cel.material(LIMB))
-	_part(head, Cel.sphere(0.16, 0.3, 10), Vector3(0.0, 0.13, 0.01), Cel.material(ARMOUR, 1.0))
-	_part(head, Cel.box(Vector3(0.24, 0.08, 0.08)), Vector3(0.0, 0.14, -0.12), Cel.glow(VISOR))
-
-	# The jetpack on the back, with a nozzle and a flame on each side.
-	var pack := Node3D.new()
-	pack.position = Vector3(0.0, 0.34, 0.24)
-	torso.add_child(pack)
-	_part(pack, Cel.box(Vector3(0.4, 0.46, 0.18)), Vector3.ZERO, Cel.material(LIMB))
-	_part(pack, Cel.box(Vector3(0.42, 0.08, 0.2)), Vector3(0.0, 0.12, 0.0), Cel.material(ARMOUR, 1.0))
-	for side: float in [1.0, -1.0]:
-		_part(pack, Cel.cylinder(0.05, 0.07, 0.12, 8), Vector3(side * 0.11, -0.28, 0.02), Cel.material(LIMB))
-		var flame := Node3D.new()
-		flame.position = Vector3(side * 0.11, -0.34, 0.02)
-		pack.add_child(flame)
-		_part(flame, Cel.cylinder(0.065, 0.0, 0.55, 8), Vector3(0.0, -0.275, 0.0), Cel.glow(FLAME))
-		_part(flame, Cel.cylinder(0.035, 0.0, 0.3, 6), Vector3(0.0, -0.15, 0.0), Cel.glow(FLAME_CORE))
-		flame.visible = false
-		flames.append(flame)
-
+	torso = _joint(pose, Vector3(0.0, HIP_HEIGHT, 0.0), "torso")
+	head = _joint(torso, Vector3(0.0, 0.62, 0.0), "head")
 	# Arms and gun turn together with the look pitch, about the shoulders.
-	aim = Node3D.new()
-	aim.position.y = 0.52
-	torso.add_child(aim)
-	for k in 2:
-		var from: Vector3 = SHOULDERS[k]
-		var to: Vector3 = HANDS[k]
-		var arm := _part(aim, Cel.box(Vector3(0.12, 0.12, from.distance_to(to) + 0.06)), (from + to) * 0.5, Cel.material(LIMB))
-		arm.basis = Basis.looking_at(to - from, Vector3.UP)
-		_part(aim, Cel.box(Vector3(0.13, 0.13, 0.13)), to, Cel.material(ARMOUR))
+	aim = _joint(torso, Vector3(0.0, 0.52, 0.0), "arms")
 	for slot in Weapon.all.size():
 		var gun := WeaponModels.build(slot)
 		gun.position = GUN_AT
-		gun.scale = Vector3.ONE * 1.0
 		aim.add_child(gun)
 		guns.append(gun)
+
+	# Both jet flames as one glowing mesh under the pack's nozzles.
+	flame = _view(torso, "flame")
+	flame.position = Vector3(0.0, 0.0, 0.26)
+	flame.material_override = Cel.glow(Color.WHITE, true)
+	flame.visible = false
+	# Sparks off the skis, behind the feet.
+	sparks = _view(pose, "sparks")
+	sparks.position = Vector3(0.0, 0.04, 0.2)
+	sparks.material_override = Cel.glow(Color.WHITE, true)
+	sparks.visible = false
 	_flicker.seed = 1
+	set_look(0, Armour.MEDIUM)
 
 
-func _part(parent: Node3D, mesh: Mesh, at: Vector3, material: Material) -> MeshInstance3D:
+func _joint(parent: Node3D, at: Vector3, part: String) -> Node3D:
+	var joint := Node3D.new()
+	joint.position = at
+	parent.add_child(joint)
+	var view := _view(joint, part)
+	view.material_override = Cel.material(Color.WHITE, 1.0, true, true)
+	return joint
+
+
+func _view(parent: Node3D, part: String) -> MeshInstance3D:
 	var view := MeshInstance3D.new()
-	view.mesh = mesh
-	view.position = at
-	view.material_override = material
 	view.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(view)
+	if not _views.has(part):
+		_views[part] = []
+	_views[part].append(view)
 	return view
 
 
+## Builds the body for a team and armour, in the team's colour.
+func set_look(new_team: int, new_armour: Armour) -> void:
+	team = new_team
+	armour = new_armour
+	for part: String in _views:
+		for view: MeshInstance3D in _views[part]:
+			view.mesh = mesh(part, team, armour)
+	set_team_colour(Soldier.TEAM_COLOURS[team % Soldier.TEAM_COLOURS.size()])
+	set_render_layer(_layer)
+
+
 func set_team_colour(colour: Color) -> void:
-	for view: GeometryInstance3D in _meshes(self):
+	for view: GeometryInstance3D in _meshes_under(self):
 		Cel.set_team(view, colour)
 
 
 func set_render_layer(layer: int) -> void:
-	for view: GeometryInstance3D in _meshes(self):
+	_layer = layer
+	for view: GeometryInstance3D in _meshes_under(self):
 		view.layers = layer
 
 
-static func _meshes(node: Node, found: Array[GeometryInstance3D] = []) -> Array[GeometryInstance3D]:
+static func _meshes_under(node: Node, found: Array[GeometryInstance3D] = []) -> Array[GeometryInstance3D]:
 	for child in node.get_children():
 		if child is GeometryInstance3D:
 			found.append(child)
-		_meshes(child, found)
+		_meshes_under(child, found)
 	return found
+
+
+## The merged mesh for one part of a soldier, made once and shared.
+static func mesh(part: String, for_team: int, for_armour: Armour) -> ArrayMesh:
+	var key := "%s/%d/%d" % [part, for_team, for_armour]
+	if not _meshes.has(key):
+		var parts := _parts(part, for_team, BUILDS[for_armour])
+		_meshes[key] = Cel.merged(parts, part == "flame" or part == "sparks")
+	return _meshes[key]
+
+
+static func _at(x: float, y: float, z: float, basis := Basis.IDENTITY) -> Transform3D:
+	return Transform3D(basis, Vector3(x, y, z))
+
+
+## The pieces of each part in its joint's space, as [mesh, transform, colour].
+static func _parts(part: String, for_team: int, b: Dictionary) -> Array:
+	var w: float = b.width
+	var l: float = b.limb
+	var s: float = b.shoulder
+	var p: float = b.pack
+	var h: float = b.helmet
+	var d: float = b.depth
+	var angular := for_team == 0
+	var parts := []
+	match part:
+		"hips":
+			parts.append([Cel.box(Vector3(0.36 * w, 0.18, 0.22 * d)), _at(0, 0, 0), LIMB])
+		"thigh":
+			parts.append([Cel.box(Vector3(0.16 * l, THIGH, 0.18 * l)), _at(0, -THIGH * 0.5, 0), LIMB])
+			parts.append([Cel.box(Vector3(0.19 * l, 0.17, 0.21 * l)), _at(0, -THIGH * 0.35, -0.01), TEAM])
+		"shin":
+			parts.append([Cel.box(Vector3(0.15 * l, SHIN, 0.17 * l)), _at(0, -SHIN * 0.5, 0), PLATE])
+			parts.append([Cel.box(Vector3(0.17 * l, 0.1, 0.28)), _at(0, -SHIN + 0.02, -0.05), LIMB])
+			if l > 1.1:
+				# Heavy: armoured knees.
+				parts.append([Cel.box(Vector3(0.19 * l, 0.14, 0.08)), _at(0, -0.04, -0.1 * l), TEAM])
+		"torso":
+			_torso(parts, angular, w, s, p, d)
+		"head":
+			parts.append([Cel.box(Vector3(0.1, 0.08, 0.1)), _at(0, -0.02, 0), LIMB])
+			if angular:
+				parts.append([Cel.box(Vector3(0.27, 0.25, 0.3) * h), _at(0, 0.13, 0.01), TEAM])
+				parts.append([Cel.box(Vector3(0.05, 0.09, 0.32) * h), _at(0, 0.28 * h, 0.02), LIMB])
+				parts.append([Cel.box(Vector3(0.2, 0.045, 0.04) * h), _at(0, 0.14, -0.15 * h), VISOR])
+			else:
+				parts.append([Cel.sphere(0.16 * h, 0.3 * h, 10), _at(0, 0.13, 0.01), TEAM])
+				parts.append([Cel.box(Vector3(0.27, 0.08, 0.1) * h), _at(0, 0.13, -0.11 * h), VISOR])
+		"arms":
+			for k in 2:
+				var from := Vector3((0.27 if k == 0 else -0.27) * w, 0.0, 0.0)
+				var to: Vector3 = HANDS[k]
+				var basis := Basis.looking_at(to - from, Vector3.UP)
+				parts.append([Cel.box(Vector3(0.12 * l, 0.12 * l, from.distance_to(to) + 0.06)), Transform3D(basis, (from + to) * 0.5), LIMB])
+				parts.append([Cel.box(Vector3(0.13, 0.13, 0.13) * l), _at(to.x, to.y, to.z), PLATE])
+		"flame":
+			for side: float in [1.0, -1.0]:
+				parts.append([Cel.cylinder(0.065 * p, 0.0, 0.55, 8), _at(side * 0.11 * p, -0.275, 0), FLAME])
+				parts.append([Cel.cylinder(0.035 * p, 0.0, 0.3, 6), _at(side * 0.11 * p, -0.15, -0.02), FLAME_CORE])
+		"sparks":
+			# Short streaks fanning back from both feet.
+			for k in 6:
+				var side := 1.0 if k % 2 == 0 else -1.0
+				var fan := Basis(Vector3.UP, side * (0.15 + 0.12 * (k / 2))) * Basis(Vector3.RIGHT, 0.25)
+				var length := 0.25 + 0.12 * ((k * 7) % 3)
+				parts.append([Cel.box(Vector3(0.025, 0.025, length)), Transform3D(fan, Vector3(side * 0.12, 0.0, length * 0.5 + 0.05 * (k / 2))), SPARK])
+	return parts
+
+
+static func _torso(parts: Array, angular: bool, w: float, s: float, p: float, d: float) -> void:
+	parts.append([Cel.box(Vector3(0.34 * w, 0.16, 0.22 * d)), _at(0, 0.1, 0), LIMB])
+	parts.append([Cel.box(Vector3(0.48 * w, 0.42, 0.3 * d)), _at(0, 0.36, 0), TEAM])
+	var front := -0.15 * d - 0.01
+	if angular:
+		# Orange: slab shoulders sloping out, twin fin pack, a chevron.
+		for side: float in [1.0, -1.0]:
+			var slope := Basis(Vector3.BACK, side * -0.35)
+			parts.append([Cel.box(Vector3(0.22, 0.08, 0.28) * Vector3(s, sqrt(s), s)), Transform3D(slope, Vector3(side * (0.27 * w + 0.06 * s), 0.6, 0)), TEAM])
+			parts.append([Cel.box(Vector3(0.11, 0.6, 0.16) * p), _at(side * 0.12 * p, 0.36, 0.24 * d), LIMB])
+			parts.append([Cel.box(Vector3(0.12, 0.08, 0.18) * p), _at(side * 0.12 * p, 0.36 + 0.3 * p, 0.24 * d), TEAM])
+			parts.append([Cel.box(Vector3(0.05, 0.22, 0.02)), Transform3D(Basis(Vector3.BACK, side * 0.75), Vector3(side * 0.065, 0.38, front)), PALE])
+	else:
+		# Blue: round shoulders, twin tank pack, a ring.
+		for side: float in [1.0, -1.0]:
+			parts.append([Cel.sphere(0.12 * s, 0.2 * s, 10), _at(side * (0.27 * w + 0.05 * s), 0.56, 0), TEAM])
+			parts.append([Cel.cylinder(0.09 * p, 0.09 * p, 0.5 * p, 10), _at(side * 0.1 * p, 0.34, 0.25 * d), LIMB])
+			parts.append([Cel.sphere(0.09 * p, 0.12 * p, 10), _at(side * 0.1 * p, 0.34 + 0.25 * p, 0.25 * d), TEAM])
+		var flat := Basis(Vector3.RIGHT, PI * 0.5)
+		parts.append([Cel.cylinder(0.09, 0.09, 0.02, 12), Transform3D(flat, Vector3(0, 0.4, front)), PALE])
+		parts.append([Cel.cylinder(0.05, 0.05, 0.03, 10), Transform3D(flat, Vector3(0, 0.4, front - 0.005)), TEAM])
+	# Nozzles at the bottom of the pack, where the flames come out.
+	for side: float in [1.0, -1.0]:
+		parts.append([Cel.cylinder(0.05 * p, 0.07 * p, 0.12, 8), _at(side * 0.11 * p, 0.06, 0.26), LIMB])
 
 
 func _process(delta: float) -> void:
@@ -185,6 +286,11 @@ func _process(delta: float) -> void:
 		guns[k].visible = k == s.weapon
 	var spinner := guns[Weapon.CHAINGUN].get_node("Spinner") as Node3D
 	spinner.rotation.z += s.spin * delta * 40.0
-	for flame in flames:
-		flame.visible = _jet > 0.5
-		flame.scale = Vector3(1.0, _flicker.randf_range(0.75, 1.15), 1.0)
+	flame.visible = _jet > 0.5
+	flame.scale = Vector3(1.0, _flicker.randf_range(0.75, 1.15), 1.0)
+	sparks.visible = on_ground and s.skiing and speed > 10.0
+	if sparks.visible:
+		var size := clampf(speed / 30.0, 0.6, 1.6)
+		sparks.scale = Vector3(1.0, 1.0, size * _flicker.randf_range(0.6, 1.2))
+		sparks.rotation.y = _flicker.randf_range(-0.15, 0.15)
+		sparks.position.y = 0.04 - drop * 0.2

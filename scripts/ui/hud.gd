@@ -39,6 +39,7 @@ func _init() -> void:
 	name = "Hud"
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	theme = InkUi.theme()
 	_speed_label = _label(26)
 	_ski_label = _label(22)
 	_ski_label.text = "SKI"
@@ -58,6 +59,11 @@ func _make_end_panel() -> void:
 	_end_panel.set_anchors_preset(Control.PRESET_CENTER)
 	_end_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_end_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	var dark := (InkUi.theme().get_stylebox("panel", "PanelContainer") as StyleBoxFlat).duplicate() as StyleBoxFlat
+	dark.bg_color = Color(InkUi.INK, 0.92)
+	dark.border_color = InkUi.PAPER
+	dark.set_content_margin_all(32)
+	_end_panel.add_theme_stylebox_override("panel", dark)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 16)
 	_end_panel.add_child(box)
@@ -80,8 +86,6 @@ func _make_end_panel() -> void:
 func _label(font_size: int) -> Label:
 	var label := Label.new()
 	label.add_theme_font_size_override("font_size", font_size)
-	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-	label.add_theme_constant_override("outline_size", 6)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(label)
 	return label
@@ -174,7 +178,7 @@ func _on_killed(victim_id: int, killer_id: int, weapon_slot: int) -> void:
 	line.autowrap_mode = TextServer.AUTOWRAP_OFF
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	line.add_theme_font_size_override("normal_font_size", 20)
-	line.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	line.add_theme_color_override("font_outline_color", InkUi.INK)
 	line.add_theme_constant_override("outline_size", 5)
 	line.size_flags_horizontal = Control.SIZE_SHRINK_END
 	var weapon := Weapon.all[weapon_slot].short_name
@@ -245,20 +249,18 @@ func _draw() -> void:
 	var gap := short * 0.012
 	var arm := short * 0.022
 	for dir: Vector2 in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
-		draw_line(centre + dir * gap, centre + dir * (gap + arm), Color(0, 0, 0, 0.6), line + 2.0)
-		draw_line(centre + dir * gap, centre + dir * (gap + arm), Color.WHITE, line)
+		InkUi.stroke(self, centre + dir * gap, centre + dir * (gap + arm), InkUi.PAPER, line)
 	if soldier == null:
 		return
 	if game != null:
 		_draw_match(short)
 	if _hit_left > 0.0:
-		var colour := Color(1.0, 0.25, 0.2) if _hit_killed else Color.WHITE
+		var colour := Color(1.0, 0.25, 0.2) if _hit_killed else InkUi.PAPER
 		var near := short * 0.018
 		var far := short * 0.034
 		for dir: Vector2 in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
 			var d := dir.normalized()
-			draw_line(centre + d * near, centre + d * far, Color(0, 0, 0, 0.6), line + 3.0)
-			draw_line(centre + d * near, centre + d * far, colour, line + 1.0)
+			InkUi.stroke(self, centre + d * near, centre + d * far, colour, line + 1.0)
 	# An arc around the crosshair pointing at where each hit came from, up for
 	# ahead.
 	for hurt in _hurts:
@@ -267,42 +269,47 @@ func _draw() -> void:
 		var angle := atan2(local.x, -local.z) - PI * 0.5
 		var radius := short * 0.16
 		var alpha := clampf(hurt.left / HURT_TIME, 0.0, 1.0)
-		draw_arc(centre, radius, angle - 0.35, angle + 0.35, 16, Color(1.0, 0.2, 0.15, 0.85 * alpha), short * 0.014, true)
+		draw_arc(centre, radius, angle - 0.37, angle + 0.37, 16, Color(InkUi.INK, alpha), short * 0.014 + 6.0, true)
+		draw_arc(centre, radius, angle - 0.35, angle + 0.35, 16, Color(1.0, 0.2, 0.15, alpha), short * 0.014, true)
 
 	# Health above jet energy, bottom middle.
 	var bar := Vector2(short * 0.45, short * 0.03)
 	var corner := Vector2(size.x * 0.5 - bar.x * 0.5, size.y - short * 0.1)
 	var health_corner := corner - Vector2(0.0, bar.y + short * 0.02)
 	var health := soldier.health / soldier.tuning.health_max
-	draw_rect(Rect2(health_corner - Vector2(3, 3), bar + Vector2(6, 6)), Color(0, 0, 0, 0.55))
-	var health_colour := Color(0.4, 0.95, 0.45) if health > 0.35 else Color(1.0, 0.3, 0.25)
-	draw_rect(Rect2(health_corner, Vector2(bar.x * health, bar.y)), health_colour)
+	var health_colour := Color(0.45, 0.88, 0.4) if health > 0.35 else Color(1.0, 0.3, 0.22)
+	_bar(Rect2(health_corner, bar), health, health_colour, short)
 	var share := soldier.energy / soldier.tuning.energy_max
-	draw_rect(Rect2(corner - Vector2(3, 3), bar + Vector2(6, 6)), Color(0, 0, 0, 0.55))
-	var colour := Color(0.35, 0.85, 1.0) if soldier.since_jet >= soldier.tuning.refill_delay or soldier.jetting else Color(0.25, 0.55, 0.7)
+	var colour := Color(0.35, 0.82, 1.0) if soldier.since_jet >= soldier.tuning.refill_delay or soldier.jetting else Color(0.25, 0.52, 0.66)
 	if share < 0.2:
 		colour = Color(1.0, 0.45, 0.3)
-	draw_rect(Rect2(corner, Vector2(bar.x * share, bar.y)), colour)
+	_bar(Rect2(corner, bar), share, colour, short)
 
 
-func _text(at: Vector2, text: String, font_size: int, colour := Color.WHITE, align := HORIZONTAL_ALIGNMENT_CENTER) -> void:
-	var font := ThemeDB.fallback_font
-	var width := font.get_string_size(text, align, -1.0, font_size).x
-	var start := at
-	if align == HORIZONTAL_ALIGNMENT_CENTER:
-		start.x -= width * 0.5
-	font.draw_string_outline(get_canvas_item(), start, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size, 6, Color(0, 0, 0, 0.85))
-	font.draw_string(get_canvas_item(), start, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size, colour)
+## A bar in a comic panel, filled to share, with an ink tick every tenth.
+func _bar(rect: Rect2, share: float, colour: Color, short: float) -> void:
+	InkUi.panel(self, rect, Color(InkUi.INK, 0.55), short)
+	draw_rect(Rect2(rect.position, Vector2(rect.size.x * clampf(share, 0.0, 1.0), rect.size.y)), colour)
+	# A pale edge along the top of the fill, like a highlight in ink.
+	draw_rect(Rect2(rect.position, Vector2(rect.size.x * clampf(share, 0.0, 1.0), rect.size.y * 0.22)), Color(1.0, 1.0, 1.0, 0.35))
+	for k in range(1, 10):
+		var x := rect.position.x + rect.size.x * k / 10.0
+		draw_line(Vector2(x, rect.position.y), Vector2(x, rect.position.y + rect.size.y * (0.5 if k != 5 else 1.0)), InkUi.INK, 2.0)
+
+
+func _text(at: Vector2, text: String, font_size: int, colour := InkUi.PAPER, align := HORIZONTAL_ALIGNMENT_CENTER) -> void:
+	InkUi.text(self, at, text, font_size, colour, align)
 
 
 func _diamond(at: Vector2, radius: float, colour: Color, filled := true) -> void:
 	var points := PackedVector2Array([at + Vector2(0, -radius), at + Vector2(radius * 0.75, 0), at + Vector2(0, radius), at + Vector2(-radius * 0.75, 0)])
 	if filled:
-		draw_colored_polygon(points, colour)
+		InkUi.shape(self, points, colour, minf(size.x, size.y))
+		return
 	var closed := points.duplicate()
 	closed.append(points[0])
-	draw_polyline(closed, Color(0, 0, 0, 0.9), 4.0)
-	draw_polyline(closed, Color.WHITE if filled else colour, 2.0)
+	draw_polyline(closed, InkUi.INK, 6.0)
+	draw_polyline(closed, colour, 3.0)
 
 
 func _clock_text() -> String:
@@ -318,7 +325,7 @@ func _draw_match(short: float) -> void:
 	_text(Vector2(size.x * 0.5, y), _clock_text(), font)
 	_text(Vector2(size.x * 0.5 + short * 0.2, y), "%d" % game.scores[1], font, Soldier.TEAM_COLOURS[1].lightened(0.15))
 	if _message_left > 0.0:
-		var colour := Color(1, 1, 1, clampf(_message_left, 0.0, 1.0))
+		var colour := Color(InkUi.PAPER, clampf(_message_left, 0.0, 1.0))
 		_text(Vector2(size.x * 0.5, size.y * 0.3), _message, roundi(short * 0.055), colour)
 	_draw_compass(short)
 	_draw_flag_markers(short)
@@ -336,7 +343,7 @@ func _draw_compass(short: float) -> void:
 	var y := short * 0.1
 	var height := short * 0.035
 	var span := PI * 0.5
-	draw_rect(Rect2(left, y, width, height), Color(0, 0, 0, 0.35))
+	InkUi.panel(self, Rect2(left, y, width, height), Color(InkUi.INK, 0.5), short)
 	var names := ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 	for k in 24:
 		var bearing := k * TAU / 24.0
@@ -345,10 +352,10 @@ func _draw_compass(short: float) -> void:
 			continue
 		var x := size.x * 0.5 + rel / span * width * 0.5
 		var cardinal := k % 3 == 0
-		draw_line(Vector2(x, y + height), Vector2(x, y + height - height * (0.6 if cardinal else 0.3)), Color(1, 1, 1, 0.8), 2.0)
+		draw_line(Vector2(x, y + height), Vector2(x, y + height - height * (0.6 if cardinal else 0.3)), Color(InkUi.PAPER, 0.85), 2.0)
 		if cardinal:
-			_text(Vector2(x, y + height * 0.55), names[k / 3], roundi(height * 0.55), Color(0.9, 0.95, 1.0) if k % 6 == 0 else Color(1, 1, 1, 0.7))
-	draw_line(Vector2(size.x * 0.5, y + height), Vector2(size.x * 0.5, y + height + height * 0.35), Color.WHITE, 3.0)
+			_text(Vector2(x, y + height * 0.55), names[k / 3], roundi(height * 0.55), InkUi.PAPER if k % 6 == 0 else Color(InkUi.PAPER, 0.75))
+	InkUi.stroke(self, Vector2(size.x * 0.5, y + height), Vector2(size.x * 0.5, y + height + height * 0.4), InkUi.PAPER, 3.0)
 	for team in game.flags:
 		var flag := game.flags[team]
 		var rel := clampf(_heading_to(flag.global_position), -span, span)
@@ -386,8 +393,7 @@ func _draw_flag_markers(short: float) -> void:
 			var tip := at + dir * radius * 2.4
 			var side := dir.orthogonal() * radius * 0.9
 			var arrow := PackedVector2Array([tip, at + dir * radius * 1.0 + side, at + dir * radius * 1.0 - side])
-			draw_colored_polygon(arrow, colour)
-			draw_polyline(PackedVector2Array([arrow[0], arrow[1], arrow[2], arrow[0]]), Color(0, 0, 0, 0.9), 3.0)
+			InkUi.shape(self, arrow, colour, short)
 		var state := ""
 		match flag.mode:
 			Flag.Mode.CARRIED:

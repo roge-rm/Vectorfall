@@ -26,12 +26,9 @@ const RAMP_SLOPE := 0.2126
 ## Grid cell size for looking up obstacles, in metres.
 const OBSTACLE_CELL := 10.0
 
-const GRASS := Color(0.45, 0.62, 0.32)
-const GRASS_DARK := Color(0.36, 0.52, 0.28)
-const DIRT := Color(0.62, 0.55, 0.4)
-const ROCK := Color(0.55, 0.53, 0.5)
-const CONCRETE := Color(0.72, 0.72, 0.7)
 
+## The map's colours and light.
+var palette: Palette
 var noise := FastNoiseLite.new()
 var rng := RandomNumberGenerator.new()
 var ground: StaticBody3D
@@ -46,14 +43,15 @@ var heights := PackedFloat32Array()
 var _obstacle_cells := {}
 
 
-func _init() -> void:
+func _init(colours: Palette = null) -> void:
 	name = "TestMap"
+	palette = colours if colours != null else Palette.desert()
 	noise.seed = MAP_SEED
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	noise.frequency = 0.006
 	noise.fractal_octaves = 2
 	rng.seed = MAP_SEED
-	add_child(Atmosphere.new())
+	add_child(Atmosphere.new(palette))
 	_build_ground()
 	for team in 2:
 		_build_base(team)
@@ -280,10 +278,6 @@ func _build_ground() -> void:
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	var material := Cel.ground_material()
-	material.set_shader_parameter("grass", GRASS)
-	material.set_shader_parameter("grass_dark", GRASS_DARK)
-	material.set_shader_parameter("dirt", DIRT)
-	material.set_shader_parameter("rock", ROCK)
 	mesh.surface_set_material(0, material)
 
 	ground = StaticBody3D.new()
@@ -299,26 +293,27 @@ func _build_ground() -> void:
 
 func _build_base(team: int) -> void:
 	var x := base_x(team)
-	var colour := Soldier.TEAM_COLOURS[team]
 	var base := Node3D.new()
 	base.name = "Base%d" % team
 	add_child(base)
 	# The platform, a raised deck with a ramp up its front.
-	_box(base, Vector3(BASE_SIZE, 2.0, BASE_SIZE), Transform3D(Basis.IDENTITY, Vector3(x, BASE_HEIGHT + 1.0, 0.0)), CONCRETE)
+	_box(base, Vector3(BASE_SIZE, 2.0, BASE_SIZE), Transform3D(Basis.IDENTITY, Vector3(x, BASE_HEIGHT + 1.0, 0.0)), Cel.material(palette.structure))
 	var front := 1.0 if team == 0 else -1.0
 	# Its top meets the deck's edge, with no lip to catch on.
 	var tilt := deg_to_rad(12.0)
 	var ramp_basis := Basis(Vector3.FORWARD, front * tilt)
 	var ramp_centre := Vector3(x + front * (BASE_SIZE * 0.5 + 7.0 * cos(tilt) - 0.5 * sin(tilt)), BASE_HEIGHT + 2.0 - 7.0 * sin(tilt) - 0.5 * cos(tilt), 0.0)
-	_box(base, Vector3(14.0, 1.0, 10.0), Transform3D(ramp_basis, ramp_centre), CONCRETE)
-	# A tower at the back with a deck on top, in the team's colour.
+	_box(base, Vector3(14.0, 1.0, 10.0), Transform3D(ramp_basis, ramp_centre), Cel.material(palette.structure))
+	# A tower at the back with a deck on top, in a dark team colour so the
+	# flag in front stands out from it.
+	var team_wall := Cel.team_material(Soldier.TEAM_COLOURS[team].lerp(palette.structure, 0.35).darkened(0.3))
 	_build_stand(base, team)
 	var back := x - front * (BASE_SIZE * 0.5 - 4.0)
-	_box(base, Vector3(4.0, 14.0, 4.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 9.0, 0.0)), colour)
+	_box(base, Vector3(4.0, 14.0, 4.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 9.0, 0.0)), team_wall)
 	obstacles.append(Vector3(back, 0.0, 2.9))
-	_box(base, Vector3(10.0, 1.0, 10.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 16.5, 0.0)), CONCRETE)
+	_box(base, Vector3(10.0, 1.0, 10.0), Transform3D(Basis.IDENTITY, Vector3(back, BASE_HEIGHT + 16.5, 0.0)), Cel.material(palette.structure))
 	for side in [-1.0, 1.0]:
-		_box(base, Vector3(3.0, 4.0, 3.0), Transform3D(Basis.IDENTITY, Vector3(x, BASE_HEIGHT + 4.0, side * (BASE_SIZE * 0.5 - 2.0))), colour)
+		_box(base, Vector3(3.0, 4.0, 3.0), Transform3D(Basis.IDENTITY, Vector3(x, BASE_HEIGHT + 4.0, side * (BASE_SIZE * 0.5 - 2.0))), team_wall)
 		obstacles.append(Vector3(x, side * (BASE_SIZE * 0.5 - 2.0), 2.2))
 
 
@@ -329,7 +324,7 @@ func _build_stand(base: Node3D, team: int) -> void:
 	var top := stand_top(team)
 	var pad := MeshInstance3D.new()
 	pad.mesh = Cel.cylinder(2.0, 2.4, STAND_HEIGHT, 12)
-	pad.material_override = Cel.material(colour.darkened(0.2))
+	pad.material_override = Cel.team_material(colour.darkened(0.2))
 	pad.position = top - Vector3.UP * STAND_HEIGHT * 0.5
 	base.add_child(pad)
 	var ring := MeshInstance3D.new()
@@ -356,7 +351,7 @@ func _build_props() -> void:
 		var heading := rng.randf_range(0.0, TAU)
 		var tilt := deg_to_rad(rng.randf_range(14.0, 24.0))
 		var basis := Basis(Vector3.UP, heading) * Basis(Vector3.RIGHT, tilt)
-		_box(props, Vector3(6.0, 1.0, 14.0), Transform3D(basis, Vector3(x, height_at(x, z) + 1.0, z)), CONCRETE)
+		_box(props, Vector3(6.0, 1.0, 14.0), Transform3D(basis, Vector3(x, height_at(x, z) + 1.0, z)), Cel.material(palette.structure))
 		obstacles.append(Vector3(x, z, 7.5))
 	for k in 18:
 		var x := rng.randf_range(-165.0, 165.0)
@@ -372,12 +367,12 @@ func _build_props() -> void:
 		obstacles.append(Vector3(x, z, 1.6))
 
 
-func _box(parent: Node3D, size: Vector3, where: Transform3D, colour: Color) -> void:
+func _box(parent: Node3D, size: Vector3, where: Transform3D, material: Material) -> void:
 	var body := StaticBody3D.new()
 	body.transform = where
 	var view := MeshInstance3D.new()
 	view.mesh = Cel.box(size)
-	view.material_override = Cel.material(colour)
+	view.material_override = material
 	body.add_child(view)
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
@@ -392,7 +387,7 @@ func _pillar(parent: Node3D, at: Vector3, radius: float, tall: float) -> void:
 	body.position = at
 	var view := MeshInstance3D.new()
 	view.mesh = Cel.cylinder(radius * 0.8, radius, tall)
-	view.material_override = Cel.material(ROCK.lightened(0.15))
+	view.material_override = Cel.material(palette.boulder.lightened(0.15))
 	body.add_child(view)
 	var shape := CollisionShape3D.new()
 	var cylinder := CylinderShape3D.new()
@@ -433,7 +428,7 @@ func _rock(parent: Node3D, at: Vector3, size: float) -> void:
 	body.rotation.y = rng.randf_range(0.0, TAU)
 	var view := MeshInstance3D.new()
 	view.mesh = Cel.hull_mesh(tool.commit())
-	view.material_override = Cel.material(ROCK)
+	view.material_override = Cel.material(palette.boulder)
 	body.add_child(view)
 	var shape := CollisionShape3D.new()
 	var convex := ConvexPolygonShape3D.new()

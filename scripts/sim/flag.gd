@@ -48,20 +48,17 @@ func _init() -> void:
 func _ready() -> void:
 	name = "Flag%d" % entity_id
 	var colour := Soldier.TEAM_COLOURS[team % Soldier.TEAM_COLOURS.size()]
-	var pole := MeshInstance3D.new()
-	pole.mesh = Cel.cylinder(0.07, 0.1, POLE)
-	pole.material_override = Cel.material(Color(0.85, 0.85, 0.82))
-	add_child(pole)
-	var cloth := MeshInstance3D.new()
-	cloth.mesh = Cel.box(Vector3(CLOTH.x, CLOTH.y, 0.06))
-	cloth.material_override = Cel.material(colour, 0.0)
-	cloth.position = Vector3(CLOTH.x * 0.5 + 0.05, POLE * 0.5 - CLOTH.y * 0.5 - 0.1, 0.0)
-	add_child(cloth)
-	var ball := MeshInstance3D.new()
-	ball.mesh = Cel.sphere(0.2, 0.4)
-	ball.material_override = Cel.material(colour)
-	ball.position.y = POLE * 0.5 + 0.1
-	add_child(ball)
+	# Pole, cloth in the full team colour with a pale band across it, and a
+	# ball on top, as one mesh. The band keeps it clear of its own base.
+	var cloth_at := Vector3(CLOTH.x * 0.5 + 0.05, POLE * 0.5 - CLOTH.y * 0.5 - 0.1, 0.0)
+	var pale := Color(0.96, 0.94, 0.88, 0.0)
+	var team_part := Color(1.0, 1.0, 1.0, 1.0)
+	var view := MeshInstance3D.new()
+	view.name = "Look"
+	view.mesh = _look_mesh(cloth_at, pale, team_part)
+	view.material_override = Cel.material(Color.WHITE, 1.0, true, true)
+	add_child(view)
+	Cel.set_team(view, colour)
 	# An upright beam of light that stays vertical however the flag lies.
 	_beam_material = StandardMaterial3D.new()
 	_beam_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -88,6 +85,20 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_update_beam()
+
+
+static var _look_meshes: Dictionary[String, ArrayMesh] = {}
+
+
+static func _look_mesh(cloth_at: Vector3, pale: Color, team_part: Color) -> ArrayMesh:
+	if not _look_meshes.has("flag"):
+		_look_meshes["flag"] = Cel.merged([
+			[Cel.cylinder(0.07, 0.1, POLE), Transform3D.IDENTITY, pale],
+			[Cel.box(Vector3(CLOTH.x, CLOTH.y, 0.06)), Transform3D(Basis.IDENTITY, cloth_at), team_part],
+			[Cel.box(Vector3(CLOTH.x * 0.98, CLOTH.y * 0.22, 0.08)), Transform3D(Basis.IDENTITY, cloth_at), pale],
+			[Cel.sphere(0.2, 0.4), Transform3D(Basis.IDENTITY, Vector3(0.0, POLE * 0.5 + 0.1, 0.0)), team_part],
+		])
+	return _look_meshes["flag"]
 
 
 ## A thin faint beam while it's home, a wide bright one when it's away, so it
