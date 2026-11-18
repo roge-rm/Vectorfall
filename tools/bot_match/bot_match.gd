@@ -8,7 +8,10 @@ extends Node
 ##   --seed N      the match seed (1)
 ##   --minutes N   simulated minutes (5)
 ##   --map NAME    ochre_fold or test (ochre_fold)
-## The capture limit is off, so the match runs the whole time.
+##   --check       exit with an error if the bots stopped playing: fewer than
+##                 2 grabs, no returns, or over 60 s stuck
+## The capture limit is off, so the match runs the whole time. The report has
+## each team's roles every 10 s and its commander's decisions.
 
 const REPORTS := "res://build/bot-reports"
 
@@ -18,12 +21,14 @@ var director: BotDirector
 var bots := 8
 var seed_value := 1
 var minutes := 5.0
+var check := false
 ## Every flag event, in order.
 var flag_events: Array[Dictionary] = []
 
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
+	check = args.has("--check")
 	for k in args.size() - 1:
 		match args[k]:
 			"--bots":
@@ -96,6 +101,12 @@ func _run() -> void:
 	file.store_string(JSON.stringify(report, "  "))
 	file.close()
 	_print_summary(report, path)
+	if check:
+		var totals: Dictionary = report.totals
+		var ok: bool = totals.grabs >= 2 and totals.returns >= 1 and totals.time_stuck < 60.0
+		print("CHECK %s seed %d: %d captures, %d grabs, %d returns, %.1f s stuck" % ["ok" if ok else "FAIL", seed_value, totals.captures, totals.grabs, totals.returns, totals.time_stuck])
+		get_tree().quit(0 if ok else 1)
+		return
 	get_tree().quit()
 
 
@@ -150,9 +161,34 @@ func _report(ticks: int, wall: float) -> Dictionary:
 	# Hits are enemies hurt, so a disc's splash on two counts twice.
 	totals["disc_hit_rate"] = float(totals.disc_hits) / maxf(totals.disc_shots, 1.0)
 	totals["chaingun_hit_rate"] = float(totals.chaingun_hits) / maxf(totals.chaingun_shots, 1.0)
+	# How long each grab lasted, to the drop or the capture.
+	var lives := []
+	var taken := {}
+	for event: Dictionary in flag_events:
+		if event.event == "taken":
+			taken[event.flag_team] = event.seconds
+		elif (event.event == "dropped" or event.event == "captured") and taken.has(event.flag_team):
+			lives.append(snappedf(event.seconds - taken[event.flag_team], 0.1))
+			taken.erase(event.flag_team)
+	var life_sum := 0.0
+	for life: float in lives:
+		life_sum += life
+	totals["carrier_life_avg"] = life_sum / maxf(lives.size(), 1.0)
+	totals["carrier_life_max"] = lives.max() if not lives.is_empty() else 0.0
 	for key in totals:
 		if totals[key] is float:
 			totals[key] = snappedf(totals[key], 0.01)
+	var commanders := {}
+	for team: int in director.commanders:
+		var boss: TeamCommander = director.commanders[team]
+		commanders[team] = {
+			"roles_over_time": boss.history,
+			"decisions": boss.decisions,
+			"attack_lanes": boss.attack_lanes.map(func(w: float) -> float: return snappedf(w, 0.01)),
+			"escape_lanes": boss.escape_lanes.map(func(w: float) -> float: return snappedf(w, 0.01)),
+			"carry_lanes": boss.carry_lanes,
+			"lane_names": boss.lanes.names if boss.lanes != null else [],
+		}
 	return {
 		"map": GameMap.chosen_name(),
 		"seed": seed_value,
@@ -163,6 +199,8 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		"speed_up": snappedf(seconds / maxf(wall, 0.001), 0.01),
 		"scores": game.scores.duplicate(),
 		"flag_events": flag_events,
+		"carrier_lives": lives,
+		"commanders": commanders,
 		"totals": totals,
 		"bots": per_bot,
 	}
@@ -174,6 +212,13 @@ func _print_summary(report: Dictionary, path: String) -> void:
 	print("Routes completed %d, distance %.0f m, average speed %.1f m/s, top %.1f m/s" % [totals.routes, totals.distance, totals.avg_speed, totals.top_speed])
 	print("Time stuck %.1f s over %d stuck spots" % [totals.time_stuck, totals.stuck_spots])
 	print("Score %d to %d: %d captures, %d grabs, %d returns, %d kills, %d deaths" % [report.scores[0], report.scores[1], totals.captures, totals.grabs, totals.returns, totals.kills, totals.deaths])
+	print("Carriers held the flag %.1f s on average, %.1f s at most" % [totals.carrier_life_avg, totals.carrier_life_max])
+	for team: int in report.commanders:
+		var boss: Dictionary = report.commanders[team]
+		print("Team %d commander: %d decisions, lanes %s, attacks by lane %s, enemy carriers home by lane %s, our carriers by lane %s" % [team, boss.decisions.size(), str(boss.lane_names), str(boss.attack_lanes), str(boss.escape_lanes), str(boss.carry_lanes)])
+		for sample: Dictionary in boss.roles_over_time:
+			if int(sample.seconds) % 60 == 0:
+				print("  %4.0f s  %s" % [sample.seconds, sample.plan])
 	print("Disc %d shots, %d hits (%.0f%%), chaingun %d shots, %d hits (%.0f%%)" % [totals.disc_shots, totals.disc_hits, totals.disc_hit_rate * 100.0, totals.chaingun_shots, totals.chaingun_hits, totals.chaingun_hit_rate * 100.0])
 	for bot: Dictionary in report.bots:
 		print("  bot %d team %d %s: %.0f m, avg %.1f m/s, stuck %.1f s, %d spots, %d kills, %d deaths, %d caps, %d grabs, %d returns" % [bot.id, bot.team, bot.role, bot.distance, bot.avg_speed, bot.time_stuck, bot.stuck_spots.size(), bot.kills, bot.deaths, bot.captures, bot.grabs, bot.returns])

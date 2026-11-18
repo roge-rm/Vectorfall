@@ -1,6 +1,6 @@
 # Vectorfall
 
-Vectorfall is a team capture the flag shooter for Android with jetpacks and a cel shaded look. Two teams of 8 fight over each other's flags, on foot or in the air. It's early: for now there's one full size map, Ochre Fold, 1.5 km of ridges, a canyon and a high spine between two bases, a small test map, two weapons, and a full capture the flag match with bots on both teams that ski, jet, fight and play offence, defence or midfield around you.
+Vectorfall is a team capture the flag shooter for Android with jetpacks and a cel shaded look. Two teams of 8 fight over each other's flags, on foot or in the air. It's early: for now there's one full size map, Ochre Fold, 1.5 km of ridges, a canyon and a high spine between two bases, a small test map, two weapons, and a full capture the flag match with bots on both teams that ski, jet, fight and play as a team around you. Each team has a commander that gives its bots roles as the match goes, and it works out what you're doing without being told: head for the enemy flag and bots escort you, stay at home and one fewer bot defends.
 
 ## Controls
 
@@ -82,16 +82,19 @@ Run the headless tests on the computer:
 tools/run-tests.sh
 ```
 
-They check the jetpack, skiing, movement in the air, the chunked terrain (heights, gaps between detail levels, collision under soldiers, shots hitting the ground anywhere), Ochre Fold's spawns and route graph, that soldiers move only from their commands, the touch controls, weapon damage, splash and disc jumps, every capture the flag rule, that shots can't pass through walls, respawning, the test map's ski speed and saving and loading match state. For the bots they check the route graph and planner, what bots see and hear, a bot getting from base to base past 40 m/s, a boxed in bot getting out, leading a moving target, the roles, two bots capturing a flag on their own, and that the same seed plays a match with fighting and flags the same way.
+They check the jetpack, skiing, movement in the air, the chunked terrain (heights, gaps between detail levels, collision under soldiers, shots hitting the ground anywhere), Ochre Fold's spawns and route graph, that soldiers move only from their commands, the touch controls, weapon damage, splash and disc jumps, every capture the flag rule, that shots can't pass through walls, respawning, the test map's ski speed and saving and loading match state. For the bots they check the route graph and planner, what bots see and hear, a bot getting from base to base past 40 m/s, a boxed in bot getting out, leading a moving target, two bots capturing a flag on their own, that the same seed plays a match with fighting and flags the same way, and the team commander: its roles for each score and flag situation, reading a person's role from how they move, learning lanes, and with a scripted stand-in player on Ochre Fold, bots escorting it when it takes the flag, fewer bots defending while it sits at home and bots chasing whoever takes our flag.
 
-The bot match runs bots headless, faster than real time, and writes a report to `build/bot-reports/` with the score, every flag event, and each bot's role, distance, speeds, kills, deaths, flags, shots and hits per weapon and where it got stuck:
+The bot match runs bots headless, faster than real time, and writes a report to `build/bot-reports/` with the score, every flag event, how long carriers held the flag, each team's roles every 10 seconds, its commander's decisions and what it learnt about each lane, and each bot's role, distance, speeds, kills, deaths, flags, shots and hits per weapon and where it got stuck:
 
 ```sh
 tools/bot-match.sh --bots 8 --seed 1 --minutes 5
 tools/bot-match.sh --map test     # on the test map
+tools/bot-check.sh                # the bots' regression check
 ```
 
-F3 in the game shows the bots' route graph (run links white, ski blue, jet orange, walls red, points of interest as yellow posts), each bot's route and a label with its role, goal, what it's doing and who it's fighting. `tools/shots/bots_shot.tscn` takes a picture of it.
+The bot check plays three seeded 4 minute matches on Ochre Fold and fails if the bots stop grabbing flags, returning them or moving, or if none of the matches has a capture. It takes about 4 minutes.
+
+F3 in the game shows the bots' route graph (run links white, ski blue, jet orange, walls red, points of interest as yellow posts), each bot's route and a label with its role (and who it escorts or chases), goal, what it's doing and who it's fighting, and over each flag what that team's commander wants and its last few decisions. `tools/shots/bots_shot.tscn` takes a picture of it.
 
 ## Licence
 

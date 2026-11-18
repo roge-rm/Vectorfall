@@ -2,8 +2,8 @@ extends SceneTree
 
 ## Checks bots fighting and playing capture the flag: the lead puts a disc
 ## where a crossing target will be, an expert bot standing still hits an
-## enemy running back and forth in front of it with half its discs or more, the team roles rule counts a
-## person as offence, bots with no one against them take the enemy flag and
+## enemy running back and forth in front of it with half its discs or more, the commander
+## counts a person not read yet as offence, bots with no one against them take the enemy flag and
 ## capture it, and two seeded matches with fighting and flags play out the
 ## same.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/bot_fight_test.gd
@@ -85,11 +85,15 @@ func _roles() -> void:
 		director.add_bot(0, Transform3D(Basis.IDENTITY, Vector3(k * 2.0, 100.0, 0.0)))
 	for k in 8:
 		director.add_bot(1, Transform3D(Basis.IDENTITY, Vector3(k * 2.0, 100.0, 10.0)))
-	var counts := [[0, 0, 0], [0, 0, 0]]
+	var counts := [[], []]
+	for team in 2:
+		counts[team].resize(BotBrain.ROLE_NAMES.size())
+		counts[team].fill(0)
 	for brain in director.brains:
 		counts[brain.soldier.team][brain.role] += 1
-	checks.check(counts[1] == [5, 1, 2], "8 bots split into 5 offence, 1 defence and 2 midfield (%s)" % str(counts[1]))
-	checks.check(counts[0] == [4, 1, 2], "with a person on the team the bots take one fewer offence (%s)" % str(counts[0]))
+	var R := BotBrain.Role
+	checks.check(counts[1].slice(0, 6) == [6, 1, 0, 0, 1, 0], "the commander splits 8 bots into 6 offence, 1 defence and 1 light defence (%s)" % str(counts[1]))
+	checks.check(counts[0][R.OFFENCE] == 5 and counts[0][R.DEFENCE] == 1, "with a person on the team, not read yet, the bots take one fewer offence (%s)" % str(counts[0]))
 	holder.free()
 
 

@@ -4,17 +4,23 @@ extends CommandSource
 ## A bot: it only ever makes PlayerCommands, like a player's input. It thinks
 ## a few times a second (looks and listens, picks a goal, plans a route over
 ## the route graph) and steers every tick, with BotCombat turning its look to
-## fight on the way. In a match with flags its goal comes from its role and the
-## flags; with none it loops between the flag stands. Everything that changes
+## fight on the way. In a match with flags its goal comes from the role its
+## team's commander gives it and the flags; with none it loops between the
+## flag stands. Everything that changes
 ## what it does is in get_state(), and its only random numbers are the match's.
 
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
 ## goal_target.
-enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY }
-const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally"]
-enum Role { OFFENCE, DEFENCE, MIDFIELD }
-const ROLE_NAMES: Array[String] = ["offence", "defence", "midfield"]
+enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF }
+const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off"]
+## OFFENCE goes for the enemy flag and carries it, DEFENCE holds by the flag,
+## LIGHT_DEFENCE watches the way enemies come in and chases carriers, ESCORT
+## goes with a carrier or a person heading for the flag, CHASE goes after the
+## enemy carrier of our flag. REPAIR, SNIPER and GENERATOR are for later
+## milestones and play midfield for now.
+enum Role { OFFENCE, DEFENCE, MIDFIELD, ESCORT, LIGHT_DEFENCE, CHASE, REPAIR, SNIPER, GENERATOR }
+const ROLE_NAMES: Array[String] = ["offence", "defence", "midfield", "escort", "light defence", "chase", "repair", "sniper", "generator"]
 enum Escape { NONE, JET, BACK_OFF, OTHER_WAY }
 const ESCAPE_NAMES: Array[String] = ["", "jet out", "back off", "other way"]
 
@@ -47,8 +53,10 @@ const REPLAN_TIME := 0.5
 ## offence and midfield.
 const ESCORT_RANGE := 60.0
 const ESCORT_RANGE_FAR := 200.0
-## Enemies this close to the home stand get chased by defence.
+## Enemies this close to the home stand get chased by defence, and this close
+## by light defence.
 const GUARD_RANGE := 45.0
+const WATCH_RANGE := 130.0
 ## A dropped own flag this close is worth going for, whatever the role.
 const RETURN_RANGE := 90.0
 ## Seconds offence waits at the rally point for the others before it goes
@@ -74,6 +82,8 @@ var combat := BotCombat.new()
 var role := Role.OFFENCE
 ## Which of its role's places it takes, such as a defence spot.
 var role_slot := 0
+## Who the role is about: the soldier escorted or chased, or 0.
+var role_target := 0
 
 var goal := Goal.NONE
 ## The route graph point the goal is at.
@@ -171,6 +181,7 @@ func make_command(delta: float) -> PlayerCommand:
 	command.pitch = pitch
 	if soldier == null or game == null:
 		return command
+	director.before_tick()
 	if soldier.dead:
 		was_dead = true
 		return command
@@ -274,30 +285,47 @@ func _choose_goal() -> Array:
 	var theirs: Flag = game.flags.get(1 - team)
 	var pos := soldier.global_position
 	var me := soldier.entity_id
+	var boss := director.commander(team)
 	if theirs != null and theirs.mode == Flag.Mode.CARRIED and theirs.carrier_id == me:
 		if own != null and own.mode == Flag.Mode.DROPPED and own.global_position.distance_to(pos) < 60.0:
 			return [Goal.RETURN_FLAG, own.global_position]
 		return [Goal.CAPTURE, game.stands[team] + Vector3.DOWN * 0.5]
-	# Both flags out: our carrier can't score until ours is back, so everyone
-	# goes after theirs.
+	# Sent by the commander to a dropped flag: ours to send home, theirs to
+	# carry on with.
+	var pickup: int = boss.pickups.get(me, -1) if boss != null else -1
+	if pickup == team and own.mode == Flag.Mode.DROPPED:
+		return [Goal.RETURN_FLAG, own.global_position]
+	if pickup == 1 - team and theirs.mode == Flag.Mode.DROPPED:
+		return [Goal.TAKE_FLAG, theirs.global_position]
 	var holding_theirs := theirs != null and theirs.mode == Flag.Mode.CARRIED
 	if own != null and own.mode == Flag.Mode.DROPPED:
-		if role != Role.OFFENCE or holding_theirs or own.global_position.distance_to(pos) < RETURN_RANGE:
+		if role in [Role.DEFENCE, Role.LIGHT_DEFENCE, Role.CHASE] or own.global_position.distance_to(pos) < RETURN_RANGE:
 			return [Goal.RETURN_FLAG, own.global_position]
-	if own != null and own.mode == Flag.Mode.CARRIED:
+	if theirs != null and theirs.mode == Flag.Mode.DROPPED and role in [Role.OFFENCE, Role.ESCORT] and theirs.global_position.distance_to(pos) < RETURN_RANGE:
+		return [Goal.TAKE_FLAG, theirs.global_position]
+	var own_taken := own != null and own.mode == Flag.Mode.CARRIED
+	if own_taken:
 		var carrier := game.soldier(own.carrier_id)
-		if carrier != null and (role != Role.OFFENCE or holding_theirs or carrier.global_position.distance_to(pos) < 30.0):
-			var lead := clampf(carrier.global_position.distance_to(pos) / 40.0, 0.0, 2.0)
-			return [Goal.CHASE, carrier.global_position + carrier.velocity * lead]
+		if carrier != null:
+			var near := carrier.global_position.distance_to(pos)
+			if role == Role.CHASE and boss != null:
+				var chase: Array = boss.chase_point(role_slot, pos)
+				return [Goal.CUT_OFF if chase[1] else Goal.CHASE, chase[0]]
+			# Anyone close, and light defence from anywhere, goes for it.
+			if role == Role.LIGHT_DEFENCE or (role != Role.DEFENCE and near < 30.0) or (role == Role.DEFENCE and near < GUARD_RANGE) or (role != Role.ESCORT and holding_theirs):
+				var lead := clampf(near / 40.0, 0.0, 2.0)
+				return [Goal.CHASE, carrier.global_position + carrier.velocity * lead]
+	if role == Role.ESCORT:
+		var runner := game.soldier(role_target)
+		if runner != null and not runner.dead:
+			return [Goal.ESCORT, _escort_spot(runner)]
 	# Midfield backs off to defend when hurt. Offence keeps going, since
 	# health doesn't come back and turning round wastes the run.
 	var low := soldier.health < BotCombat.LOW_HEALTH and role == Role.MIDFIELD
-	if theirs != null and theirs.mode == Flag.Mode.CARRIED:
+	if holding_theirs and role != Role.DEFENCE and role != Role.LIGHT_DEFENCE:
 		var carrier := game.soldier(theirs.carrier_id)
-		var reach := ESCORT_RANGE if role == Role.DEFENCE else ESCORT_RANGE_FAR
-		if carrier != null and carrier.global_position.distance_to(pos) < reach:
-			var behind := carrier.velocity.normalized() * -8.0 if carrier.velocity.length() > 2.0 else Vector3.ZERO
-			return [Goal.ESCORT, carrier.global_position + carrier.velocity * 0.5 + behind]
+		if carrier != null and carrier.global_position.distance_to(pos) < ESCORT_RANGE_FAR:
+			return [Goal.ESCORT, _escort_spot(carrier)]
 	if low:
 		return [Goal.RETREAT, _defence_spot(role_slot + 1)]
 	if role == Role.OFFENCE and theirs != null and theirs.mode != Flag.Mode.CARRIED:
@@ -307,8 +335,9 @@ func _choose_goal() -> Array:
 			if not _ready_to_attack():
 				return [Goal.RALLY, _midfield_spot()]
 		return [Goal.TAKE_FLAG, at]
-	if role == Role.DEFENCE:
-		# Anyone coming for the flag gets met.
+	if role == Role.DEFENCE or role == Role.LIGHT_DEFENCE:
+		# Anyone coming for the flag gets met: what this bot knows close in,
+		# and what the team knows further out for light defence.
 		var stand := game.stands[team]
 		var ids := perception.contacts.keys()
 		ids.sort()
@@ -317,12 +346,38 @@ func _choose_goal() -> Array:
 				var guess := perception.guess_position(id, game.tick)
 				if guess.distance_to(stand) < GUARD_RANGE:
 					return [Goal.CHASE, guess]
+		if role == Role.LIGHT_DEFENCE and boss != null:
+			var threats := boss.threats(WATCH_RANGE)
+			if not threats.is_empty():
+				return [Goal.CHASE, threats[0][1]]
+			return [Goal.DEFEND, boss.watch_point(role_slot)]
 		return [Goal.DEFEND, _defence_spot(role_slot)]
-	if role == Role.MIDFIELD:
-		return [Goal.MIDFIELD, _midfield_spot()]
-	# Offence with nothing to take, its flag carried by a teammate out of
-	# escort range: hold the middle.
+	# Midfield, and the roles for later milestones, hold the middle.
 	return [Goal.MIDFIELD, _midfield_spot()]
+
+
+## Where an escort goes round a runner: the first ahead of it, clearing the
+## way, the next two behind to either side, where chasers come from.
+func _escort_spot(runner: Soldier) -> Vector3:
+	var at := runner.global_position
+	var heading := Vector3(runner.velocity.x, 0.0, runner.velocity.z)
+	if heading.length() < 5.0:
+		# Standing or slow: towards where it's going, home with a flag or
+		# their stand without.
+		var carrying := game.carried_flag(runner.entity_id) != null
+		var goal_at := game.stands[runner.team if carrying else 1 - runner.team]
+		heading = Vector3(goal_at.x - at.x, 0.0, goal_at.z - at.z)
+	heading = heading.normalized() if heading.length() > 0.1 else Vector3.FORWARD
+	var side := heading.cross(Vector3.UP)
+	var spot := at + runner.velocity * 0.5
+	match role_slot % 3:
+		0:
+			spot += heading * 25.0
+		1:
+			spot += -heading * 10.0 + side * 12.0
+		2:
+			spot += -heading * 10.0 - side * 12.0
+	return spot
 
 
 ## Offence goes for a flag at home together: it waits at the rally point
@@ -349,11 +404,20 @@ func _ready_to_attack() -> bool:
 	return attacking
 
 
+## A defence spot, those nearest the lane enemies come in by most first.
 func _defence_spot(slot: int) -> Vector3:
-	var spots := director.graph.interest_points(RouteGraph.DEFENCE, soldier.team)
+	var graph := director.graph
+	var spots := graph.interest_points(RouteGraph.DEFENCE, soldier.team)
 	if spots.is_empty():
 		return game.stands[soldier.team]
-	return director.graph.points[spots[slot % spots.size()]]
+	var boss := director.commander(soldier.team)
+	if boss != null and boss.lanes != null and boss.lanes.count > 0:
+		var toward := boss.lanes.approach(soldier.team, boss.main_threat_lane())
+		spots.sort_custom(func(a: int, b: int) -> bool:
+			var da := graph.points[a].distance_to(toward)
+			var db := graph.points[b].distance_to(toward)
+			return da < db or (da == db and a < b))
+	return graph.points[spots[slot % spots.size()]]
 
 
 ## A high spot on the bot's own half.
@@ -375,6 +439,8 @@ func _hold_range() -> float:
 	match goal:
 		Goal.DEFEND, Goal.MIDFIELD, Goal.RETREAT:
 			return ARRIVE_RANGE
+		Goal.CUT_OFF:
+			return 12.0
 		Goal.RALLY:
 			return 15.0
 		Goal.ESCORT:
@@ -480,6 +546,12 @@ func replan() -> void:
 		# A carrier keeps off the enemy's spawn, where they come back to life.
 		for link: RouteGraph.Link in director.links_near_spawns(1 - soldier.team, CARRIER_KEEP_OFF):
 			avoid_links[link] = float(avoid_links.get(link, 0.0)) + CARRIER_AVOID_COST
+		# And keeps to the lanes that worked for the team's carriers.
+		var boss := director.commander(soldier.team)
+		if boss != null:
+			var costs := boss.carry_costs()
+			for link: RouteGraph.Link in costs:
+				avoid_links[link] = float(avoid_links.get(link, 0.0)) + costs[link]
 	var start := graph.start_point(soldier.global_position, soldier.velocity)
 	path = director.plan(start, goal_point, soldier.velocity, soldier.energy, avoid_links)
 	path_start = soldier.global_position
@@ -727,8 +799,10 @@ func describe() -> String:
 	if combat.target_id != 0:
 		fight = "  fights %d with %s" % [combat.target_id, Weapon.all[combat.weapon].short_name]
 	var name_ := ROLE_NAMES[role]
-	if GOAL_NAMES[goal] != name_:
-		name_ += " " + GOAL_NAMES[goal]
+	if role_target != 0:
+		name_ += " %d" % role_target
+	if GOAL_NAMES[goal] != ROLE_NAMES[role]:
+		name_ += ", " + GOAL_NAMES[goal]
 	return "%s: %s%s\n%.0f m/s  energy %.0f  health %.0f  knows %d" % [name_, doing, fight, soldier.velocity.length(), soldier.energy, soldier.health, perception.known_count()]
 
 
@@ -751,6 +825,7 @@ func get_state() -> Dictionary:
 		"rally_tick": rally_tick,
 		"role": role,
 		"role_slot": role_slot,
+		"role_target": role_target,
 		"refilling": refilling,
 		"combat": combat.get_state(),
 		"path": path.duplicate(),
@@ -793,6 +868,7 @@ func set_state(state: Dictionary) -> void:
 	rally_tick = state.rally_tick
 	role = state.role
 	role_slot = state.role_slot
+	role_target = state.role_target
 	refilling = state.refilling
 	combat.set_state(state.combat)
 	path.assign(state.path)

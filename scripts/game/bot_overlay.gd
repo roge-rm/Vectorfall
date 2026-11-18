@@ -4,8 +4,9 @@ extends Node3D
 ## The bots' debug overlay, shown and hidden with F3: the route graph (run
 ## links white, ski blue, jet orange, walls red, points of interest yellow
 ## posts), each bot's planned route in its team's colour, and a label over
-## each bot with its role, goal, what it's doing, who it's fighting, its
-## speed, energy and health.
+## each bot with its role (and who it escorts or chases), goal, what it's
+## doing, who it's fighting, its speed, energy and health, and over each flag
+## stand what that team's commander wants and its last few decisions.
 
 const LIFT := 0.4
 const KIND_COLOURS: Array[Color] = [Color(0.9, 0.9, 0.9, 0.5), Color(0.3, 0.8, 1.0, 0.7), Color(1.0, 0.65, 0.2, 0.7)]
@@ -15,6 +16,7 @@ const INTEREST_COLOUR := Color(1.0, 0.95, 0.2)
 var director: BotDirector
 var _routes := ImmediateMesh.new()
 var _labels: Dictionary[BotBrain, Label3D] = {}
+var _team_labels: Dictionary[int, Label3D] = {}
 
 
 func _init(bots: BotDirector) -> void:
@@ -44,21 +46,14 @@ func _process(_delta: float) -> void:
 	if not visible:
 		return
 	_routes.clear_surfaces()
+	_show_commanders()
 	var graph := director.graph
 	var drew := false
 	for brain in director.brains:
 		var s := brain.soldier
 		var label: Label3D = _labels.get(brain)
 		if label == null:
-			label = Label3D.new()
-			label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			label.no_depth_test = true
-			label.fixed_size = true
-			label.pixel_size = 0.0012
-			label.font_size = 28
-			label.outline_size = 8
-			label.modulate = Palette.team(s.team).lightened(0.4)
-			add_child(label)
+			label = _make_label(s.team)
 			_labels[brain] = label
 		label.visible = not s.dead
 		label.position = s.global_position + Vector3.UP * 2.6
@@ -86,6 +81,36 @@ func _process(_delta: float) -> void:
 			last = next
 	if drew:
 		_routes.surface_end()
+
+
+func _show_commanders() -> void:
+	for team: int in director.commanders:
+		var boss: TeamCommander = director.commanders[team]
+		if not director.game.stands.has(team):
+			continue
+		var label: Label3D = _team_labels.get(team)
+		if label == null:
+			label = _make_label(team)
+			label.font_size = 32
+			_team_labels[team] = label
+		label.position = director.game.stands[team] + Vector3.UP * 14.0
+		var lines: Array[String] = ["%s wants %s" % [Soldier.TEAM_NAMES[team], boss.plan_text]]
+		for k in range(maxi(boss.decisions.size() - 3, 0), boss.decisions.size()):
+			lines.append("%.0f s  %s" % [boss.decisions[k].seconds, boss.decisions[k].text])
+		label.text = "\n".join(lines)
+
+
+func _make_label(team: int) -> Label3D:
+	var label := Label3D.new()
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.fixed_size = true
+	label.pixel_size = 0.0012
+	label.font_size = 28
+	label.outline_size = 8
+	label.modulate = Palette.team(team).lightened(0.4)
+	add_child(label)
+	return label
 
 
 static func _line_material(on_top: bool) -> StandardMaterial3D:

@@ -3,8 +3,8 @@ extends Node
 
 ## Looks after a match's bots: adds them, shares the route graph and planner,
 ## spreads their thinking over the ticks, hands out the ray cast budget and
-## collects the sounds they can hear. It hands out roles with TeamRoles, and
-## keeps each bot's tally of shots, hits, kills and flags for the reports. It
+## collects the sounds they can hear. A TeamCommander per team hands out
+## roles, and the director keeps each bot's tally of shots, hits, kills and flags for the reports. It
 ## adds itself under the match, and goes with it.
 
 ## Line of sight ray casts all the bots may make in one tick.
@@ -32,6 +32,11 @@ var _rays_left := 0
 var _plans := {}
 ## Per team, the links ending near its spawn points, found once.
 var _spawn_links := {}
+## Team to its commander, made with the team's first bot.
+var commanders := {}
+var _lanes: Lanes
+## The last tick the commanders were given, so they run once a tick.
+var _commanded_tick := -1
 
 
 func _init(match_node: Match, route_graph: RouteGraph) -> void:
@@ -63,13 +68,41 @@ func add_bot(team: int, spawn: Transform3D, skill := 0.5) -> BotBrain:
 	brain.soldier.display_name = "Bot %d" % brain.soldier.entity_id
 	brain.reset()
 	brains.append(brain)
+	if not commanders.has(team):
+		commanders[team] = TeamCommander.new(team, self)
+		commanders[team].watch()
 	assign_roles()
 	return brain
 
 
-## Hands out roles on both teams again, counting every soldier, people too.
+## Has both commanders hand out roles again at once, counting every soldier,
+## people too, ignoring how long bots have been in their roles.
 func assign_roles() -> void:
-	TeamRoles.assign(game, brains)
+	for team: int in [0, 1]:
+		if commanders.has(team):
+			commanders[team].think(true)
+
+
+func commander(team: int) -> TeamCommander:
+	return commanders.get(team)
+
+
+## Lets each commander think on its tick. Called by every bot each tick; only
+## the first call in a tick does anything.
+func before_tick() -> void:
+	if _commanded_tick == game.tick:
+		return
+	_commanded_tick = game.tick
+	for team: int in [0, 1]:
+		if commanders.has(team):
+			commanders[team].tick()
+
+
+## The map's lanes, made the first time they're needed.
+func lanes() -> Lanes:
+	if _lanes == null:
+		_lanes = Lanes.new(graph, game.stands)
+	return _lanes
 
 
 func brain_of(id: int) -> BotBrain:
@@ -213,6 +246,8 @@ func get_state() -> Dictionary:
 		"ray_tick": _ray_tick,
 		"rays_left": _rays_left,
 		"brains": brain_states,
+		"commanded_tick": _commanded_tick,
+		"commanders": commanders.keys().map(func(team: int) -> Array: return [team, commanders[team].get_state()]),
 	}
 
 
@@ -221,6 +256,10 @@ func set_state(state: Dictionary) -> void:
 	sound_count = state.sound_count
 	_ray_tick = state.ray_tick
 	_rays_left = state.rays_left
+	_commanded_tick = state.commanded_tick
+	for pair: Array in state.commanders:
+		if commanders.has(pair[0]):
+			commanders[pair[0]].set_state(pair[1])
 	for brain in brains:
 		if state.brains.has(brain.soldier.entity_id):
 			brain.set_state(state.brains[brain.soldier.entity_id])

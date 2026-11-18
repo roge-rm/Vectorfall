@@ -77,6 +77,12 @@ func think(brain: BotBrain) -> void:
 	var theirs: Flag = game.flags.get(1 - s.team)
 	if theirs != null and theirs.mode == Flag.Mode.CARRIED and theirs.carrier_id != s.entity_id:
 		ours = game.soldier(theirs.carrier_id)
+	# Or the runner it escorts, or the person it covers.
+	if ours == null and brain.role == BotBrain.Role.ESCORT and brain.role_target != 0:
+		ours = game.soldier(brain.role_target)
+	var boss := brain.director.commander(s.team)
+	if ours == null and boss != null and boss.covers.has(s.entity_id):
+		ours = game.soldier(boss.covers[s.entity_id])
 	var ids := perception.contacts.keys()
 	ids.sort()
 	for id: int in ids:
