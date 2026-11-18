@@ -2,7 +2,7 @@
 # Builds a debug APK signed with the Android debug key, into build/ and then
 # copied to the drop folder.
 #
-#   tools/build-android.sh             the phone build (arm64)
+#   tools/build-android.sh             the phone build (arm64 and 32-bit arm)
 #   tools/build-android.sh --emulator  the emulator build (x86_64)
 set -euo pipefail
 
