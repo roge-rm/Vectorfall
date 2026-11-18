@@ -18,6 +18,8 @@ static var _figure_outline: ShaderMaterial
 static var _effect_outline: ShaderMaterial
 static var _outlines_on := true
 static var _grain: ImageTexture
+static var _glow_points := Projection(Vector4.ZERO, Vector4.ZERO, Vector4.ZERO, Vector4.ZERO)
+static var _glow_colours := Projection(Vector4.ZERO, Vector4.ZERO, Vector4.ZERO, Vector4.ZERO)
 ## Uniforms every ink material gets, from the palette and the settings.
 static var _shared: Dictionary[String, Variant] = {}
 ## Uniforms only the ground gets.
@@ -141,7 +143,7 @@ static func glow(colour: Color, vertex_colour := false) -> StandardMaterial3D:
 ## material, made now or later.
 static func set_palette(palette: Palette) -> void:
 	var direction := palette.sun_direction.normalized()
-	for key: String in ["sun_colour", "ambient", "ambient_energy", "ink", "paper", "saturation", "grit"]:
+	for key: String in ["sun_colour", "ambient", "ambient_energy", "ink", "paper", "saturation", "grit", "mid_tint", "dark_tint", "hatch_colour", "highlight", "highlight_edge", "team_white_light", "lit_edge", "mid_edge", "deep_edge"]:
 		_shared[key] = palette.get(key)
 	_shared["sun_direction"] = direction
 	for key: String in ["grass", "grass_dark", "dirt", "rock", "low", "low_height", "high", "high_height"]:
@@ -150,6 +152,22 @@ static func set_palette(palette: Palette) -> void:
 	for line: ShaderMaterial in [outline(), near_outline(), figure_outline(), effect_outline()]:
 		line.set_shader_parameter("colour", palette.ink)
 		line.set_shader_parameter("sun_direction", direction)
+
+
+## Lights things near a fire or energy effect: glow point index (0 to 3) at
+## a world position, fading out over radius metres, in a colour whose alpha
+## is its strength. A radius of 0 turns it off. One shared value, so every
+## ink material sees it at no cost on the CPU.
+static func set_glow(index: int, at: Vector3, radius: float, colour := Color(1.0, 0.6, 0.25, 0.6)) -> void:
+	_glow_points[index] = Vector4(at.x, at.y, at.z, radius)
+	_glow_colours[index] = Vector4(colour.r, colour.g, colour.b, colour.a)
+	RenderingServer.global_shader_parameter_set("glow_points", _glow_points)
+	RenderingServer.global_shader_parameter_set("glow_colours", _glow_colours)
+
+
+static func clear_glows() -> void:
+	for k in 4:
+		set_glow(k, Vector3.ZERO, 0.0, Color(0.0, 0.0, 0.0, 0.0))
 
 
 ## The paper grain tile: 64 by 64 random greys, the same every run, which

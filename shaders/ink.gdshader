@@ -67,10 +67,28 @@ uniform float grain_size = 4.0;
 uniform sampler2D paper_grain : hint_default_black, filter_linear, repeat_enable;
 uniform vec4 paper : source_color = vec4(0.98, 0.93, 0.84, 1.0);
 
-varying float height;
+// Warm looks, all off by default. The middle and dark bands are multiplied
+// by these tints, and hatching takes hatch_colour by its alpha instead of
+// ink. Above highlight_edge the lit band gets highlight's colour added by
+// its alpha. Team colours take 75% less of the tints and half the highlight.
+uniform vec4 mid_tint : source_color = vec4(1.0);
+uniform vec4 dark_tint : source_color = vec4(1.0);
+uniform vec4 hatch_colour : source_color = vec4(0.0);
+uniform vec4 highlight : source_color = vec4(0.0);
+uniform float highlight_edge = 0.9;
+// How much team colours ignore the colour of the sun and ambient light, so
+// a gold sun doesn't turn blue grey. 0 lights them like everything else.
+uniform float team_white_light : hint_range(0.0, 1.0) = 0.0;
+// Glow from fire and energy: up to four points set by Cel.set_glow(), each
+// a column, xyz the world position and w the radius in metres (0 for none),
+// with its colour and strength in the same column of glow_colours.
+global uniform mat4 glow_points;
+global uniform mat4 glow_colours;
+
+varying vec3 world_position;
 
 void vertex() {
-	height = (MODEL_MATRIX * vec4(VERTEX, 1.0)).y;
+	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 // 0 to 1 from a pixel: a fine grain over a coarser blotch, both soft.
@@ -101,9 +119,9 @@ void fragment() {
 		float up = COLOR.r;
 		base = COLOR.g > 0.5 ? grass.rgb : grass_dark.rgb;
 		float wobble = (COLOR.g - 0.5) * 6.0;
-		if (height < low_height + wobble) {
+		if (world_position.y < low_height + wobble) {
 			base = low.rgb;
-		} else if (height > high_height + wobble) {
+		} else if (world_position.y > high_height + wobble) {
 			base = high.rgb;
 		}
 		if (up < 0.72) {
@@ -125,7 +143,32 @@ void fragment() {
 	// Team colours shade less, so they stay the strongest colours in shadow.
 	band = mix(band, max(band, 0.8), team);
 	float rim = step(rim_edge, 1.0 - max(dot(NORMAL, VIEW), 0.0)) * step(0.0, n_dot_l) * rim_amount;
-	vec3 lit = colour * (ambient.rgb * ambient_energy + (band + rim) * sun_colour.rgb);
+	vec3 luma = vec3(0.3, 0.55, 0.15);
+	float white = team * team_white_light;
+	vec3 sun = mix(sun_colour.rgb, vec3(dot(sun_colour.rgb, luma)), white);
+	vec3 sky = mix(ambient.rgb, vec3(dot(ambient.rgb, luma)), white);
+	vec3 lit = colour * (sky * ambient_energy + (band + rim) * sun);
+	vec3 tint = n_dot_l > lit_edge ? vec3(1.0) : (n_dot_l > mid_edge ? mid_tint.rgb : dark_tint.rgb);
+	lit *= mix(tint, vec3(1.0), 0.75 * team);
+	lit += colour * highlight.rgb * highlight.a * step(highlight_edge, n_dot_l) * (1.0 - 0.5 * team);
+
+	// Fire and energy light the side facing them, fading out to the radius.
+	vec3 glow = vec3(0.0);
+	for (int i = 0; i < 4; i++) {
+		vec4 point = glow_points[i];
+		if (point.w > 0.0) {
+			vec3 to = (VIEW_MATRIX * vec4(point.xyz, 1.0)).xyz - VERTEX;
+			float d = length(to);
+			float fall = clamp(1.0 - d / point.w, 0.0, 1.0);
+			float facing = clamp(dot(NORMAL, to / max(d, 0.001)) * 0.5 + 0.5, 0.0, 1.0);
+			glow += glow_colours[i].rgb * glow_colours[i].a * fall * (2.0 - fall) * facing;
+		}
+	}
+	// Tints towards the glow's hue as well as brightening, so it shows on
+	// bright sand too. Team colours take half.
+	float glow_amount = clamp(max(glow.r, max(glow.g, glow.b)), 0.0, 1.0);
+	vec3 glow_hue = glow / max(glow_amount, 0.001);
+	lit = mix(lit, lit * glow_hue * 1.6 + glow_hue * 0.15, glow_amount * (1.0 - 0.5 * team));
 
 	vec2 px = FRAGCOORD.xy * 720.0 / VIEWPORT_SIZE.y;
 	float inked = 0.0;
@@ -146,7 +189,9 @@ void fragment() {
 	} else if (shadow_style == 3) {
 		inked = n_dot_l < deep_edge ? 1.0 - 0.75 * team : 0.0;
 	}
-	lit = mix(lit, ink.rgb, inked);
+	// Glow lifts the hatching off what it lights.
+	inked *= 1.0 - 0.7 * glow_amount;
+	lit = mix(lit, mix(ink.rgb, hatch_colour.rgb, hatch_colour.a), inked);
 	lit *= paper.rgb;
 	if (grit > 0.0) {
 		lit *= 1.0 - grit * grain(px);

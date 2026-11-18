@@ -18,10 +18,23 @@ func _init() -> void:
 	var quad := PlaneMesh.new()
 	quad.size = Vector2(SIZE, SIZE)
 	mesh = quad
+	material_override = _shared()
+
+
+static func _shared() -> ShaderMaterial:
 	if _material == null:
 		_material = ShaderMaterial.new()
 		_material.shader = SHADER
-	material_override = _material
+	return _material
+
+
+## Takes the palette's shadow colour, and stretches every blob away from the
+## sun by its blob_length.
+static func set_palette(palette: Palette) -> void:
+	var away := -Vector2(palette.sun_direction.x, palette.sun_direction.z)
+	_shared().set_shader_parameter("colour", palette.blob_colour)
+	_shared().set_shader_parameter("away", away.normalized() if away.length() > 0.01 else Vector2.ZERO)
+	_shared().set_shader_parameter("stretch", maxf(palette.blob_length, 1.0) - 1.0)
 
 
 ## Casts down from the body and lies flat on what it finds. Call from the

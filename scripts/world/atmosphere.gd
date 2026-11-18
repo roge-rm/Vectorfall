@@ -56,6 +56,7 @@ func apply(value: Palette) -> void:
 	environment.fog_light_color = palette.fog_colour
 	environment.fog_density = palette.fog_density
 	Cel.set_palette(palette)
+	BlobShadow.set_palette(palette)
 
 
 func _process(_delta: float) -> void:

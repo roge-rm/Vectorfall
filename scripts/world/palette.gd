@@ -37,6 +37,27 @@ extends Resource
 @export var boulder := Color(0.48, 0.44, 0.4)
 ## Colour strength of everything but the team colours, 0 to 1.
 @export var saturation := 0.75
+## The middle and dark bands are multiplied by these, white for none.
+@export var mid_tint := Color(1.0, 1.0, 1.0)
+@export var dark_tint := Color(1.0, 1.0, 1.0)
+## Hatching in this colour instead of ink, by its alpha.
+@export var hatch_colour := Color(0.0, 0.0, 0.0, 0.0)
+## Added to the lit band above highlight_edge (n.l), by its alpha.
+@export var highlight := Color(0.0, 0.0, 0.0, 0.0)
+@export var highlight_edge := 0.9
+## How much team colours ignore the colour of the light, 0 to 1, so a
+## strongly coloured sun doesn't mute them.
+@export var team_white_light := 0.0
+## Soldiers' blob shadows: colour with alpha as strength, and how many
+## times longer than wide they stretch away from the sun, 1 for round.
+@export var blob_colour := Color(0.0, 0.0, 0.0, 0.45)
+@export var blob_length := 1.0
+## Where the bands change, in n.l: lit above lit_edge, middle above
+## mid_edge, and hatching crosses below deep_edge. A low sun needs them
+## lower, or flat ground falls into shade.
+@export var lit_edge := 0.72
+@export var mid_edge := 0.3
+@export var deep_edge := -0.15
 
 
 ## Dry red rock: gold sand in the valleys, rose dust with sage scrub on the
@@ -99,4 +120,62 @@ static func highland() -> Palette:
 	made.structure = Color(0.7, 0.7, 0.68)
 	made.boulder = Color(0.42, 0.44, 0.5)
 	made.saturation = 0.75
+	return made
+
+
+## The desert at golden hour: a low deep gold sun from the side, a sky from
+## peach at the horizon to dusty rose overhead, warm violet shade and long
+## violet shadows. Team colours ignore most of the sun's colour.
+static func desert_golden_hour() -> Palette:
+	var made := desert()
+	made.title = "Red rock desert, golden hour"
+	made.zenith = Color(0.72, 0.5, 0.58)
+	made.horizon = Color(1.0, 0.78, 0.6)
+	made.sky_ground = Color(0.74, 0.54, 0.46)
+	made.sun_direction = Vector3(-0.72, 0.3, 0.62)
+	made.lit_edge = 0.22
+	made.mid_edge = -0.1
+	made.deep_edge = -0.4
+	made.sun_colour = Color(1.0, 0.72, 0.4)
+	made.ambient = Color(0.6, 0.48, 0.72)
+	made.ambient_energy = 0.55
+	made.fog_colour = Color(0.98, 0.74, 0.6)
+	made.ink = Color(0.12, 0.04, 0.09)
+	made.paper = Color(1.0, 0.95, 0.88)
+	made.mid_tint = Color(0.92, 0.82, 1.0)
+	made.dark_tint = Color(0.78, 0.64, 0.95)
+	made.hatch_colour = Color(0.24, 0.1, 0.3, 0.5)
+	made.highlight = Color(1.0, 0.7, 0.35, 0.18)
+	made.highlight_edge = 0.85
+	made.team_white_light = 0.7
+	# Less colour in the world, so orange stands out from gold sand.
+	made.saturation = 0.6
+	made.blob_colour = Color(0.3, 0.12, 0.42, 0.55)
+	made.blob_length = 5.0
+	return made
+
+
+## A copy with dark brown ink and hatching on cream paper.
+func sepia() -> Palette:
+	var made := duplicate() as Palette
+	made.title = title + ", sepia"
+	made.ink = Color(0.25, 0.13, 0.06)
+	made.paper = Color(1.0, 0.93, 0.8)
+	made.hatch_colour = Color(0.0, 0.0, 0.0, 0.0)
+	# The cream paper turns a blue sky green, so take some green out of it.
+	made.zenith = Color(made.zenith.r + 0.06, made.zenith.g, minf(made.zenith.b + 0.06, 1.0))
+	return made
+
+
+## A copy with shade in burnt sienna and plum and a buttery highlight on
+## the most lit faces.
+func warm_shadows() -> Palette:
+	var made := duplicate() as Palette
+	made.title = title + ", warm shadows"
+	made.mid_tint = Color(1.0, 0.64, 0.44)
+	made.dark_tint = Color(0.78, 0.44, 0.62)
+	made.hatch_colour = Color(0.36, 0.1, 0.16, 0.8)
+	made.highlight = Color(1.0, 0.86, 0.45, 0.25)
+	made.highlight_edge = 0.93
+	made.team_white_light = 0.3
 	return made
