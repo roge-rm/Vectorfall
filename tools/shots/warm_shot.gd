@@ -2,7 +2,7 @@ extends "res://tools/shots/style_shot.gd"
 
 ## The style test scene from one camera in today's look and five warmer
 ## ones, then quits. It needs a screen:
-##   DISPLAY=:0 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/warm_shot.tscn
+##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/warm_shot.tscn
 ## Saves warm-0.png (today) to warm-5.png in /srv/downloads/temp/debug/vectorfall:
 ## 1 golden hour, 2 sepia ink on cream paper, 3 warm shadows, 4 glow from
 ## fire and energy, 5 sepia with warm shadows.

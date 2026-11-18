@@ -2,7 +2,7 @@ extends Node
 
 ## Measures drawing cost in the main scene with 16 soldiers in view, and
 ## quits. It needs a screen:
-##   DISPLAY=:0 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/perf_shot.tscn
+##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/perf_shot.tscn
 ## The match is paused so every run draws the same frame. Prints draw calls
 ## and CPU and GPU frame time with outlines on and off, and with hatching on
 ## and off where the game has it.

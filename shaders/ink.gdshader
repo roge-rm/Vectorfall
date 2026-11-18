@@ -26,6 +26,26 @@ uniform vec4 low : source_color = vec4(0.7, 0.62, 0.45, 1.0);
 uniform vec4 high : source_color = vec4(0.85, 0.8, 0.7, 1.0);
 uniform float low_height = -1000.0;
 uniform float high_height = 1000.0;
+// More colour in the ground, all off by default. soft_noise is a smooth
+// noise tile (Cel.soft_noise()) read in world space, about 8 blobs across.
+// A third patch colour, like wildflowers or bare earth, where its noise is
+// above 1 - patch_amount, in blobs about patch_size metres across.
+uniform sampler2D soft_noise : hint_default_black, filter_linear, repeat_enable;
+uniform vec4 patch_colour : source_color = vec4(1.0);
+uniform float patch_amount = 0.0;
+uniform float patch_size = 6.0;
+// A fourth where the same noise is below patch_alt_amount.
+uniform vec4 patch_alt : source_color = vec4(1.0);
+uniform float patch_alt_amount = 0.0;
+// A soft drift towards variation_colour (multiplied) across every surface
+// of the ground, by up to variation, over about variation_size metres.
+uniform vec4 variation_colour : source_color = vec4(1.0);
+uniform float variation = 0.0;
+uniform float variation_size = 30.0;
+// Steep rock in level bands strata metres high, every other one rock_alt.
+// 0 for none.
+uniform vec4 rock_alt : source_color = vec4(0.5, 0.5, 0.5, 1.0);
+uniform float strata = 0.0;
 
 uniform float lit_edge = 0.72;
 uniform float mid_edge = 0.3;
@@ -79,6 +99,10 @@ uniform float highlight_edge = 0.9;
 // How much team colours ignore the colour of the sun and ambient light, so
 // a gold sun doesn't turn blue grey. 0 lights them like everything else.
 uniform float team_white_light : hint_range(0.0, 1.0) = 0.0;
+// Shade in its own hue: the middle band moves half way and the dark band
+// all the way to shade_colour by its alpha, keeping their brightness, so a
+// warm sun can meet cool shade. Team colours take 60% less. Off at alpha 0.
+uniform vec4 shade_colour : source_color = vec4(0.0);
 // Glow from fire and energy: up to four points set by Cel.set_glow(), each
 // a column, xyz the world position and w the radius in metres (0 for none),
 // with its colour and strength in the same column of glow_colours.
@@ -124,10 +148,22 @@ void fragment() {
 		} else if (world_position.y > high_height + wobble) {
 			base = high.rgb;
 		}
+		vec2 at = world_position.xz;
+		if (patch_amount + patch_alt_amount > 0.0) {
+			float p = texture(soft_noise, at / (patch_size * 8.0)).r;
+			base = p > 1.0 - patch_amount ? patch_colour.rgb : (p < patch_alt_amount ? patch_alt.rgb : base);
+		}
 		if (up < 0.72) {
 			base = rock.rgb;
+			if (strata > 0.0 && fract(world_position.y / strata + wobble * 0.04) > 0.5) {
+				base = rock_alt.rgb;
+			}
 		} else if (up < 0.84) {
 			base = dirt.rgb;
+		}
+		if (variation > 0.0) {
+			float drift = texture(soft_noise, at / (variation_size * 8.0) + 0.37).r;
+			base = mix(base, base * variation_colour.rgb, variation * smoothstep(0.25, 0.75, drift));
 		}
 	} else if (use_vertex_colour) {
 		base *= COLOR.rgb;
@@ -151,6 +187,11 @@ void fragment() {
 	vec3 tint = n_dot_l > lit_edge ? vec3(1.0) : (n_dot_l > mid_edge ? mid_tint.rgb : dark_tint.rgb);
 	lit *= mix(tint, vec3(1.0), 0.75 * team);
 	lit += colour * highlight.rgb * highlight.a * step(highlight_edge, n_dot_l) * (1.0 - 0.5 * team);
+	if (shade_colour.a > 0.0) {
+		float shaded = n_dot_l > lit_edge ? 0.0 : (n_dot_l > mid_edge ? 0.5 : 1.0);
+		vec3 hue = shade_colour.rgb * (dot(lit, luma) / max(dot(shade_colour.rgb, luma), 0.01));
+		lit = mix(lit, hue, shade_colour.a * shaded * (1.0 - 0.6 * team));
+	}
 
 	// Fire and energy light the side facing them, fading out to the radius.
 	vec3 glow = vec3(0.0);

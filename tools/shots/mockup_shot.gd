@@ -2,7 +2,7 @@ extends Node
 
 ## Renders one small scene in four comic ink styles for Dan to pick from, and
 ## quits. It needs a screen:
-##   DISPLAY=:0 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/mockup_shot.tscn
+##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/mockup_shot.tscn
 ## Saves mockup-a.png to mockup-d.png in /srv/downloads/temp/debug/vectorfall.
 ## Each style is only a set of shader and colour settings on the same scene.
 

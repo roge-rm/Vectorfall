@@ -18,6 +18,11 @@ static var _figure_outline: ShaderMaterial
 static var _effect_outline: ShaderMaterial
 static var _outlines_on := true
 static var _grain: ImageTexture
+static var _soft: ImageTexture
+static var _hatching_setting := true
+static var _palette_hatching := true
+## Outline widths before the palette's line_width, by outline material.
+static var _widths: Dictionary[ShaderMaterial, float] = {}
 static var _glow_points := Projection(Vector4.ZERO, Vector4.ZERO, Vector4.ZERO, Vector4.ZERO)
 static var _glow_colours := Projection(Vector4.ZERO, Vector4.ZERO, Vector4.ZERO, Vector4.ZERO)
 ## Uniforms every ink material gets, from the palette and the settings.
@@ -113,6 +118,7 @@ static func ground_material() -> ShaderMaterial:
 	made.set_shader_parameter("ground", true)
 	made.set_shader_parameter("rim_amount", 0.0)
 	made.set_shader_parameter("paper_grain", paper_grain())
+	made.set_shader_parameter("soft_noise", soft_noise())
 	_share(made, _shared)
 	_share(made, _ground_shared)
 	_grounds.append(made)
@@ -143,15 +149,25 @@ static func glow(colour: Color, vertex_colour := false) -> StandardMaterial3D:
 ## material, made now or later.
 static func set_palette(palette: Palette) -> void:
 	var direction := palette.sun_direction.normalized()
-	for key: String in ["sun_colour", "ambient", "ambient_energy", "ink", "paper", "saturation", "grit", "mid_tint", "dark_tint", "hatch_colour", "highlight", "highlight_edge", "team_white_light", "lit_edge", "mid_edge", "deep_edge"]:
+	for key: String in ["sun_colour", "ambient", "ambient_energy", "ink", "paper", "saturation", "grit", "mid_tint", "dark_tint", "hatch_colour", "highlight", "highlight_edge", "team_white_light", "lit_edge", "mid_edge", "deep_edge", "shade_colour"]:
 		_shared[key] = palette.get(key)
+	_shared["shade_mid"] = palette.shade_mid
+	_shared["shade_dark"] = palette.shade_dark
 	_shared["sun_direction"] = direction
-	for key: String in ["grass", "grass_dark", "dirt", "rock", "low", "low_height", "high", "high_height"]:
+	_palette_hatching = palette.hatching
+	_shared["shadow_style"] = 1 if _hatching_setting and _palette_hatching else 0
+	for key: String in ["grass", "grass_dark", "dirt", "rock", "low", "low_height", "high", "high_height", "patch_colour", "patch_amount", "patch_size", "patch_alt", "patch_alt_amount", "variation_colour", "variation", "variation_size", "rock_alt", "strata"]:
 		_ground_shared[key] = palette.get(key)
 	_share_all()
 	for line: ShaderMaterial in [outline(), near_outline(), figure_outline(), effect_outline()]:
+		if not _widths.has(line):
+			_widths[line] = line.get_shader_parameter("width") if line.get_shader_parameter("width") != null else 0.0055
 		line.set_shader_parameter("colour", palette.ink)
 		line.set_shader_parameter("sun_direction", direction)
+		line.set_shader_parameter("width", _widths[line] * palette.line_width)
+		# The near and effect lines never wobble.
+		if line != near_outline() and line != effect_outline():
+			line.set_shader_parameter("brush", palette.line_brush)
 
 
 ## Lights things near a fire or energy effect: glow point index (0 to 3) at
@@ -184,14 +200,30 @@ static func paper_grain() -> ImageTexture:
 	return _grain
 
 
-## Hatching in the shaded bands, on or off.
+## A smooth 256 by 256 noise tile that repeats, the same every run, for
+## soft colour changes across the ground and for clouds and mountains in
+## the sky.
+static func soft_noise() -> ImageTexture:
+	if _soft == null:
+		var noise := FastNoiseLite.new()
+		noise.seed = 11
+		noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		noise.frequency = 1.0 / 32.0
+		noise.fractal_octaves = 2
+		_soft = ImageTexture.create_from_image(noise.get_seamless_image(256, 256))
+	return _soft
+
+
+## Hatching in the shaded bands, on or off. It only shows if the palette
+## has it too.
 static func set_hatching(on: bool) -> void:
-	_shared["shadow_style"] = 1 if on else 0
+	_hatching_setting = on
+	_shared["shadow_style"] = 1 if on and _palette_hatching else 0
 	_share_all()
 
 
 static func hatching_on() -> bool:
-	return _shared.get("shadow_style", 1) == 1
+	return _hatching_setting
 
 
 static func _share_all() -> void:

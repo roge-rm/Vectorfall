@@ -51,21 +51,22 @@ tools/build-android.sh             # phone APK, arm64
 tools/build-android.sh --emulator  # emulator APK, x86_64
 ```
 
-The Linux build is for Debian trixie on amd64 and needs the Godot Linux export templates too. The .deb puts the game in `/usr/lib/vectorfall` with a `vectorfall` launcher and a menu entry. The APKs are signed with the Android debug key and go in `build/`. The code is in `scripts`, shaders in `shaders` and the main scene in `scenes`. Everything in the world is made in code.
+The Android presets aren't runnable (no one-click deploy from the editor), since the editor otherwise keeps running adb to look for devices. The Linux build is for Debian trixie on amd64 and needs the Godot Linux export templates too. The .deb puts the game in `/usr/lib/vectorfall` with a `vectorfall` launcher and a menu entry. The APKs are signed with the Android debug key and go in `build/`. The code is in `scripts`, shaders in `shaders` and the main scene in `scenes`. Everything in the world is made in code.
 
-To take pictures of the test map and of a soldier close up (they need a screen):
+To take pictures of the test map and of a soldier close up (they need a screen). Godot runs adb on our own port 5052 here, as in the tools scripts, so it never starts the shared adb server on 5037:
 
 ```sh
-tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/map_shot.tscn
-tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/combat_shot.tscn
-tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/flag_shot.tscn
-tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/style_shot.tscn
-tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/mockup_shot.tscn
-tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/warm_shot.tscn
-tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/perf_shot.tscn
+ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/map_shot.tscn
+ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/combat_shot.tscn
+ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/flag_shot.tscn
+ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/style_shot.tscn
+ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/mockup_shot.tscn
+ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/warm_shot.tscn
+ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/direction_shot.tscn
+ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/perf_shot.tscn
 ```
 
-The style shot has a soldier of each armour for each team, a base and a fight, in both map palettes, plus a close-up, both guns in your hands for both teams, the six soldiers at 50 m and a picture from the main scene. The mockup shot draws one scene in the four comic ink styles Dan picked from. The warm shot draws the style shot's desert scene in today's look and five warmer ones: golden hour, sepia ink, warm shadows, glow from fire and energy, and sepia with warm shadows. The perf shot prints draw calls and frame times in the main scene with 17 soldiers in view, with outlines and hatching on and off.
+The style shot has a soldier of each armour for each team, a base and a fight, in both map palettes, plus a close-up, both guns in your hands for both teams, the six soldiers at 50 m and a picture from the main scene. The mockup shot draws one scene in the four comic ink styles Dan picked from. The warm shot draws the style shot's desert scene in today's look and five warmer ones: golden hour, sepia ink, warm shadows, glow from fire and energy, and sepia with warm shadows. The direction shot draws the same scene in five art directions: warm sun and cool shade, a 1970s sci-fi paperback, a lush painted meadow, a flat travel poster and a neon frontier at dusk (`Palette.sun_and_shade()`, `paperback()`, `meadow()`, `travel_poster()` and `neon_frontier()`); add `-- 2 5` to take only some of them. The perf shot prints draw calls and frame times in the main scene with 17 soldiers in view, with outlines and hatching on and off.
 
 ## Testing
 

@@ -21,6 +21,7 @@ func _init(from: Palette = null) -> void:
 	add_child(sun)
 	sky_material = ShaderMaterial.new()
 	sky_material.shader = SKY
+	sky_material.set_shader_parameter("soft_noise", Cel.soft_noise())
 	var sky := Sky.new()
 	sky.sky_material = sky_material
 	sky.radiance_size = Sky.RADIANCE_SIZE_32
@@ -51,6 +52,11 @@ func apply(value: Palette) -> void:
 	sky_material.set_shader_parameter("sun_colour", palette.sun_colour)
 	sky_material.set_shader_parameter("ink", palette.ink)
 	sky_material.set_shader_parameter("paper", palette.paper)
+	sky_material.set_shader_parameter("middle", palette.sky_middle)
+	sky_material.set_shader_parameter("middle_height", palette.sky_middle_height)
+	sky_material.set_shader_parameter("bands", palette.sky_bands)
+	for key: String in ["cloud_amount", "cloud_colour", "cloud_shade", "cloud_scale", "far_range", "far_range_height", "near_range", "near_range_height"]:
+		sky_material.set_shader_parameter(key, palette.get(key))
 	environment.ambient_light_color = palette.ambient
 	environment.ambient_light_energy = palette.ambient_energy
 	environment.fog_light_color = palette.fog_colour

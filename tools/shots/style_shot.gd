@@ -6,7 +6,7 @@ extends Node
 ## close-up of the soldiers, both guns in your hands for both teams, the six
 ## soldiers at 50 m, and one from the main scene, then quits. It needs a
 ## screen:
-##   DISPLAY=:0 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/style_shot.tscn
+##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/style_shot.tscn
 ## Saves style-desert.png, style-highland.png, style-soldiers.png,
 ## style-weapons.png, style-silhouettes.png and style-ingame.png in
 ## /srv/downloads/temp/debug/vectorfall.

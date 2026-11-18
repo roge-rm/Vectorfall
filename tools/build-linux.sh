@@ -8,6 +8,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# Our own adb port (see ~/.claude/resources.md), in case Godot runs adb: it
+# must never start the shared server on 5037.
+export ANDROID_ADB_SERVER_PORT=5052
 VERSION=4.7.2
 GODOT="tools/godot/Godot_v${VERSION}-stable_linux.x86_64"
 TEMPLATES="tools/godot/editor_data/export_templates/${VERSION}.stable"
