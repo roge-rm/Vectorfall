@@ -107,7 +107,78 @@ func _run() -> void:
 	fire.pressed = false
 	Input.parse_input_event(fire)
 	await ticks(2)
-	checks.check(touch.buttons == PlayerCommand.JET, "letting go of FIRE leaves JET held")
+	checks.check(touch.buttons & PlayerCommand.FIRE == 0 and touch.buttons & PlayerCommand.JET != 0, "letting go of FIRE leaves JET held")
+
+	# One thumb slides between JET, JUMP and the right FIRE.
+	var lift := jet.duplicate()
+	lift.pressed = false
+	Input.parse_input_event(lift)
+	await ticks(2)
+	checks.check(touch.buttons == 0, "everything is let go before the slide checks")
+	var slide := InputEventScreenTouch.new()
+	slide.index = 6
+	slide.pressed = true
+	slide.position = to_window * touch.button_centre(1)
+	Input.parse_input_event(slide)
+	await ticks(2)
+	checks.check(touch.buttons == PlayerCommand.JET, "a touch on JET holds JET")
+	var moved := InputEventScreenDrag.new()
+	moved.index = 6
+	moved.position = to_window * touch.button_centre(0)
+	Input.parse_input_event(moved)
+	await ticks(2)
+	checks.check(touch.buttons == PlayerCommand.JET | PlayerCommand.FIRE, "sliding from JET onto FIRE holds both")
+	moved = moved.duplicate()
+	moved.position = to_window * touch.button_centre(1)
+	Input.parse_input_event(moved)
+	await ticks(2)
+	checks.check(touch.buttons == PlayerCommand.JET, "sliding off FIRE lets go of fire and keeps jet")
+	slide = slide.duplicate()
+	slide.pressed = false
+	Input.parse_input_event(slide)
+	await ticks(2)
+	checks.check(touch.buttons == 0, "lifting the sliding touch lets go of everything")
+
+	slide = slide.duplicate()
+	slide.pressed = true
+	slide.position = to_window * touch.button_centre(2)
+	Input.parse_input_event(slide)
+	await ticks(3)
+	var skied := player.ski_held
+	moved = moved.duplicate()
+	moved.position = to_window * touch.button_centre(1)
+	Input.parse_input_event(moved)
+	await ticks(3)
+	checks.check(touch.buttons == PlayerCommand.JUMP | PlayerCommand.JET and skied and player.ski_held, "sliding from JUMP onto JET skis and jets")
+	moved = moved.duplicate()
+	moved.position = to_window * touch.button_centre(2)
+	Input.parse_input_event(moved)
+	await ticks(3)
+	checks.check(touch.buttons == PlayerCommand.JUMP and player.ski_held, "sliding back onto JUMP keeps skiing")
+	slide = slide.duplicate()
+	slide.pressed = false
+	Input.parse_input_event(slide)
+	await ticks(2)
+
+	# A touch that starts on the right FIRE looks and doesn't slide.
+	var aim := InputEventScreenTouch.new()
+	aim.index = 7
+	aim.pressed = true
+	aim.position = to_window * touch.button_centre(0)
+	Input.parse_input_event(aim)
+	var aim_drag := InputEventScreenDrag.new()
+	aim_drag.index = 7
+	aim_drag.position = to_window * touch.button_centre(1)
+	aim_drag.relative = to_window.basis_xform(Vector2(30.0, 0.0))
+	touch.take_look()
+	Input.parse_input_event(aim_drag)
+	await ticks(2)
+	checks.check(touch.buttons == PlayerCommand.FIRE, "a touch that starts on FIRE doesn't slide onto JET")
+	checks.check(touch.take_look().x > 0.0 or absf(main.input.source.yaw) > 0.0, "a drag from the right FIRE looks")
+	aim = aim.duplicate()
+	aim.pressed = false
+	Input.parse_input_event(aim)
+	await ticks(2)
 
 	# SWAP switches to the next weapon once per tap.
 	var swap := InputEventScreenTouch.new()

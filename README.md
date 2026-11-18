@@ -8,10 +8,10 @@ Vectorfall is a team capture the flag shooter for Android with jetpacks and a ce
 |---|---|---|---|
 | Move | W A S D | Left stick | Left thumb, the stick appears where you touch |
 | Look | Mouse | Right stick | Drag on the right half |
-| Fire | Left click | Right trigger | FIRE, or the small FIRE on the left; dragging from FIRE also looks |
-| Jetpack (hold) | Right click or Shift | Left trigger or left shoulder | JET |
+| Fire | Left click | Right trigger | FIRE, or the small FIRE on the left; dragging from FIRE also looks, and sliding from JET onto FIRE fires and jets |
+| Jetpack (hold) | Right click or Shift | Left trigger or left shoulder | JET, next to FIRE and JUMP |
 | Jump | Space | A | JUMP |
-| Ski (hold) | Space | A | Hold JUMP |
+| Ski (hold) | Space | A | Hold JUMP, and slide onto JET to ski and jet |
 | Disc launcher, chaingun | 1, 2 | | |
 | Next weapon | Q or mouse wheel | Right shoulder | SWAP |
 | Use | E | X | |
