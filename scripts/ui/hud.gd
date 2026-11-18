@@ -8,6 +8,7 @@ extends Control
 ## soldier and the match and hears the match's signals.
 
 signal restart_requested
+signal menu_requested
 
 const FEED_LINES := 5
 const FEED_TIME := 6.0
@@ -87,6 +88,11 @@ func _make_end_panel() -> void:
 	button.add_theme_font_size_override("font_size", 28)
 	button.pressed.connect(restart_requested.emit)
 	box.add_child(button)
+	var to_menu := Button.new()
+	to_menu.text = "Main menu"
+	to_menu.add_theme_font_size_override("font_size", 28)
+	to_menu.pressed.connect(menu_requested.emit)
+	box.add_child(to_menu)
 	add_child(_end_panel)
 
 

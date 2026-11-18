@@ -21,6 +21,8 @@ func ticks(n: int) -> void:
 
 
 func _run() -> void:
+	# Defaults, not your settings.
+	Settings.path = "user://no-settings.cfg"
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(main)
 	await ticks(300)
@@ -28,7 +30,7 @@ func _run() -> void:
 	checks.check(player.grounded, "the player is standing after five seconds")
 	var from_flag := Vector2(player.global_position.x - main.map.base_x(0), player.global_position.z).length()
 	checks.check(from_flag > 190.0 and from_flag < 215.0, "the player starts 190 to 215 m beside their flag (%.1f m)" % from_flag)
-	checks.check(main.game.entities.size() == 1 + main.OWN_BOTS + main.ENEMY_BOTS, "the match has you and the bots")
+	checks.check(main.game.entities.size() == 1 + main.setup.own_bots + main.setup.enemy_bots, "the match has you and the bots")
 	checks.check(main.enemy.team != player.team and not main.enemy.dead, "the enemy bots are on the other team")
 	var moving := 0
 	var leaving := 0

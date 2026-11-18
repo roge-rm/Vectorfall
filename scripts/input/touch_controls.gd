@@ -10,8 +10,11 @@ extends Control
 ## and fire or ski and jet. A touch that starts on a FIRE button also looks
 ## when dragged, and doesn't slide onto other buttons. ORDERS, above the
 ## right FIRE, opens the order menu, and while it's open a tap on it picks;
-## the menu sits clear of the stick's half and the buttons.
-## Sizes follow the shorter side of the screen.
+## the menu sits clear of the stick's half and the buttons. A small pause
+## button sits at the top, left of the score.
+## Sizes follow the shorter side of the screen, times Settings.touch_size.
+
+signal pause_pressed
 
 ## Left thumb movement in pixels for a full push, as a share of the short side.
 const STICK_REACH := 0.1
@@ -49,6 +52,8 @@ var _stick_origin := Vector2.ZERO
 var _stick_at := Vector2.ZERO
 ## The order menu, opened by ORDERS and picked from by taps.
 var menu: OrderMenu
+## Size of the controls, times the normal size.
+var scale_factor := 1.0
 
 
 func _init() -> void:
@@ -75,15 +80,29 @@ func _short_side() -> float:
 	return minf(size.x, size.y)
 
 
+## The short side times the size setting, which buttons and the stick follow.
+func _unit() -> float:
+	return _short_side() * scale_factor
+
+
 func button_centre(k: int) -> Vector2:
-	var s := _short_side()
+	var s := _unit()
 	var from_corner: Vector2 = BUTTONS[k][2]
 	var x := from_corner.x * s if BUTTONS[k][4] else size.x - from_corner.x * s
 	return Vector2(x, size.y - from_corner.y * s)
 
 
 func button_radius(k: int) -> float:
-	return BUTTONS[k][3] * _short_side()
+	return BUTTONS[k][3] * _unit()
+
+
+func pause_centre() -> Vector2:
+	var s := _short_side()
+	return Vector2(size.x * 0.5 - 0.42 * s, 0.065 * s)
+
+
+func pause_radius() -> float:
+	return 0.042 * _short_side()
 
 
 # Touches are tracked even while hidden, since the first touch is what shows
@@ -105,7 +124,7 @@ func _input(event: InputEvent) -> void:
 			_look += event.relative
 		elif role is String and role == "stick":
 			_stick_at = event.position
-			var reach := STICK_REACH * _short_side()
+			var reach := STICK_REACH * _unit()
 			var offset: Vector2 = (_stick_at - _stick_origin).limit_length(reach) / reach
 			stick = Vector2(offset.x, -offset.y)
 			queue_redraw()
@@ -136,6 +155,10 @@ func _slide_bits(start: int, at: Vector2) -> int:
 func _press(index: int, at: Vector2) -> void:
 	# Buttons come first, then the open menu, so a tap meant for a button
 	# never picks an order.
+	if at.distance_to(pause_centre()) < pause_radius() * START_REACH:
+		_touches[index] = "pause"
+		pause_pressed.emit()
+		return
 	var k := _button_at(at, START_REACH)
 	if k < 0 and menu != null and menu.covers(at):
 		_touches[index] = "menu"
@@ -194,7 +217,7 @@ func _notification(what: int) -> void:
 
 
 func _draw() -> void:
-	var s := _short_side()
+	var s := _unit()
 	var font := InkUi.font()
 	var font_size := int(s * 0.035)
 	var line := maxf(2.0, s * 0.005)
@@ -229,3 +252,12 @@ func _draw() -> void:
 	var knob_at := origin + (knob - origin).limit_length(reach)
 	draw_circle(knob_at, reach * 0.4 + line, Color(InkUi.INK, 0.7))
 	draw_circle(knob_at, reach * 0.4, Color(InkUi.PAPER, 0.45))
+	# The pause button: two bars in a ring.
+	var pause := pause_centre()
+	var pause_r := pause_radius()
+	draw_circle(pause, pause_r, Color(InkUi.PAPER, 0.18))
+	draw_arc(pause, pause_r, 0.0, TAU, 32, Color(InkUi.INK, 0.8), line * 2.0, true)
+	for side: float in [-1.0, 1.0]:
+		var bar := Rect2(pause + Vector2(side * pause_r * 0.3 - pause_r * 0.12, -pause_r * 0.42), Vector2(pause_r * 0.24, pause_r * 0.84))
+		draw_rect(bar.grow(line * 0.8), Color(InkUi.INK, 0.85))
+		draw_rect(bar, Color(InkUi.PAPER, 0.9))

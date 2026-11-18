@@ -1,0 +1,244 @@
+class_name GameAudio
+extends Node3D
+
+## A match's sounds. It hears the match's signals and reads the soldiers, and
+## never changes either. World sounds (shots, blasts) are placed in 3D on a
+## pool of VOICES players: when they're all busy a new sound takes the one
+## that started longest ago, or is dropped if it matters less. Your own jet,
+## skis, footsteps and landings, hit markers and flag jingles play flat. The
+## jets of the JET_VOICES nearest other soldiers loop in 3D.
+
+const VOICES := 10
+const JET_VOICES := 3
+const FLAT_VOICES := 4
+## How far world sounds carry, in metres.
+const REACH := 260.0
+const STEP_TIME := 0.33
+## Seconds between one soldier's chaingun sounds, so a burst doesn't take
+## every voice.
+const CHAINGUN_GAP := 0.06
+
+var game: Match
+var soldier: Soldier
+var _pool: Array[AudioStreamPlayer3D] = []
+## When each pool voice started and finishes, in msec, and how much it matters.
+var _started: Array[int] = []
+var _ends: Array[int] = []
+var _priority: Array[int] = []
+var _flat: Array[AudioStreamPlayer] = []
+var _next_flat := 0
+var _jet: AudioStreamPlayer
+var _ski: AudioStreamPlayer
+var _jets: Array[AudioStreamPlayer3D] = []
+var _step_left := 0.0
+var _was_grounded := true
+var _fall_speed := 0.0
+var _last_chaingun: Dictionary[int, int] = {}
+## Sounds dropped because every voice was busy with something that mattered more.
+var dropped := 0
+
+
+func _init() -> void:
+	name = "GameAudio"
+	SoundBank.build()
+	Sound.make_buses()
+	for k in VOICES:
+		var player := AudioStreamPlayer3D.new()
+		player.bus = Sound.EFFECTS_BUS
+		player.max_distance = REACH
+		player.unit_size = 12.0
+		player.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+		player.doppler_tracking = AudioStreamPlayer3D.DOPPLER_TRACKING_DISABLED
+		add_child(player)
+		_pool.append(player)
+		_started.append(0)
+		_ends.append(0)
+		_priority.append(0)
+	for k in FLAT_VOICES:
+		var flat := AudioStreamPlayer.new()
+		flat.bus = Sound.EFFECTS_BUS
+		add_child(flat)
+		_flat.append(flat)
+	_jet = _loop_player("jet")
+	_ski = _loop_player("ski")
+	for k in JET_VOICES:
+		var jet := AudioStreamPlayer3D.new()
+		jet.bus = Sound.EFFECTS_BUS
+		jet.stream = SoundBank.get_stream("jet")
+		jet.max_distance = 120.0
+		jet.unit_size = 6.0
+		jet.volume_db = -10.0
+		add_child(jet)
+		_jets.append(jet)
+
+
+func _loop_player(sound_name: String) -> AudioStreamPlayer:
+	var player := AudioStreamPlayer.new()
+	player.bus = Sound.EFFECTS_BUS
+	player.stream = SoundBank.get_stream(sound_name)
+	add_child(player)
+	return player
+
+
+## Listens to a match, with you as `who`.
+func watch(match_node: Match, who: Soldier) -> void:
+	game = match_node
+	soldier = who
+	game.fired.connect(_on_fired)
+	game.impacted.connect(_on_impacted)
+	game.hit.connect(_on_hit)
+	game.flag_taken.connect(_on_flag.bind("taken"))
+	game.flag_dropped.connect(_on_flag.bind("dropped"))
+	game.flag_returned.connect(_on_flag.bind("returned"))
+	game.flag_captured.connect(_on_flag.bind("captured"))
+
+
+## Plays a sound at a point on a free voice, or the oldest one if they're all
+## busy and it matters as much. False if it was dropped.
+func play_at(sound_name: String, at: Vector3, volume_db := 0.0, priority := 1, pitch := 1.0) -> bool:
+	var now := Time.get_ticks_msec()
+	var pick := -1
+	var oldest := now + 1
+	for k in VOICES:
+		if _ends[k] <= now:
+			pick = k
+			break
+		if _priority[k] <= priority and _started[k] < oldest:
+			oldest = _started[k]
+			pick = k
+	if pick == -1:
+		dropped += 1
+		return false
+	var stream := SoundBank.get_stream(sound_name)
+	var player := _pool[pick]
+	player.stream = stream
+	player.global_position = at
+	player.volume_db = volume_db
+	player.pitch_scale = pitch
+	player.play()
+	_started[pick] = now
+	_ends[pick] = now + int(stream.get_length() * 1000.0 / pitch) + 1
+	_priority[pick] = priority
+	return true
+
+
+## Voices busy now.
+func voices_in_use() -> int:
+	var now := Time.get_ticks_msec()
+	var busy := 0
+	for k in VOICES:
+		if _ends[k] > now:
+			busy += 1
+	return busy
+
+
+## A sound with no place, for your own things and the flag jingles.
+func play_flat(sound_name: String, volume_db := 0.0, pitch := 1.0) -> void:
+	var player := _flat[_next_flat]
+	_next_flat = (_next_flat + 1) % FLAT_VOICES
+	player.stream = SoundBank.get_stream(sound_name)
+	player.volume_db = volume_db
+	player.pitch_scale = pitch
+	player.play()
+
+
+func _on_fired(soldier_id: int, weapon: int) -> void:
+	var who := game.soldier(soldier_id)
+	if who == null:
+		return
+	var at := who.eye_transform().origin
+	if weapon == Weapon.CHAINGUN:
+		var now := Time.get_ticks_msec()
+		if now - _last_chaingun.get(soldier_id, -1000) < int(CHAINGUN_GAP * 1000.0):
+			return
+		_last_chaingun[soldier_id] = now
+		play_at("chaingun", at, -4.0 if who == soldier else -6.0, 0, 0.95 + 0.1 * randf())
+	else:
+		play_at("disc_fire", at, -2.0, 2 if who == soldier else 1)
+
+
+func _on_impacted(weapon: int, at: Vector3, _normal: Vector3) -> void:
+	if weapon == Weapon.DISC:
+		play_at("disc_blast", at, 0.0, 3)
+
+
+func _on_hit(attacker_id: int, victim_id: int, _weapon: int) -> void:
+	if soldier == null or attacker_id != soldier.entity_id or victim_id == attacker_id:
+		return
+	# The hit comes before the death, so a kill shows as no health left.
+	var victim := game.soldier(victim_id)
+	play_flat("kill" if victim != null and victim.health <= 0.0 else "hit", -6.0)
+
+
+func _on_flag(team: int, _soldier_id: int, what: String) -> void:
+	if soldier == null:
+		return
+	var ours := team == soldier.team
+	match what:
+		"taken":
+			play_flat("flag_alarm" if ours else "flag_grab", -4.0)
+		"dropped":
+			play_flat("flag_dropped", -4.0)
+		"returned":
+			play_flat("flag_returned" if ours else "flag_dropped", -4.0)
+		"captured":
+			# team is the scorer's.
+			play_flat("flag_captured" if ours else "flag_lost", -2.0)
+
+
+func _process(delta: float) -> void:
+	if soldier == null or game == null:
+		return
+	_own_sounds(delta)
+	_other_jets()
+
+
+func _own_sounds(delta: float) -> void:
+	var alive := not soldier.dead
+	var speed := Vector2(soldier.velocity.x, soldier.velocity.z).length()
+	_set_loop(_jet, alive and soldier.jetting, -8.0, 1.0)
+	var skiing := alive and soldier.skiing and speed > 3.0
+	# The hiss rises with speed.
+	_set_loop(_ski, skiing, linear_to_db(clampf(speed / 40.0, 0.15, 1.0)) - 10.0, 0.8 + clampf(speed / 60.0, 0.0, 0.6))
+	if not alive:
+		_was_grounded = true
+		return
+	if soldier.grounded and not _was_grounded and _fall_speed > 6.0:
+		play_flat("land", linear_to_db(clampf(_fall_speed / 25.0, 0.3, 1.0)) - 6.0)
+		_step_left = STEP_TIME
+	elif soldier.grounded and not soldier.skiing and speed > 2.0:
+		_step_left -= delta
+		if _step_left <= 0.0:
+			_step_left = STEP_TIME
+			play_flat("step", -14.0, 0.9 + 0.2 * randf())
+	_was_grounded = soldier.grounded
+	_fall_speed = maxf(-soldier.velocity.y, 0.0)
+
+
+func _set_loop(player: AudioStreamPlayer, on: bool, volume_db: float, pitch: float) -> void:
+	if on:
+		player.volume_db = volume_db
+		player.pitch_scale = pitch
+		if not player.playing:
+			player.play()
+	elif player.playing:
+		player.stop()
+
+
+## The nearest other soldiers jetting get the 3D jet loops.
+func _other_jets() -> void:
+	var listener := soldier.global_position
+	var jetting: Array[Soldier] = []
+	for id: int in game.entities:
+		var other := game.entities[id] as Soldier
+		if other != null and other != soldier and other.jetting and not other.dead and other.global_position.distance_to(listener) < 120.0:
+			jetting.append(other)
+	jetting.sort_custom(func(a: Soldier, b: Soldier) -> bool: return a.global_position.distance_squared_to(listener) < b.global_position.distance_squared_to(listener))
+	for k in JET_VOICES:
+		var jet := _jets[k]
+		if k < jetting.size():
+			jet.global_position = jetting[k].global_position
+			if not jet.playing:
+				jet.play()
+		elif jet.playing:
+			jet.stop()

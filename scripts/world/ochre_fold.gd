@@ -59,7 +59,8 @@ var terrain_seconds := 0.0
 var _mesa_tops: Array[float] = []
 
 
-func _init(colours: Palette = null) -> void:
+## with_graph false leaves out the route graph, for a backdrop with no bots.
+func _init(colours: Palette = null, with_graph := true) -> void:
 	name = "OchreFold"
 	title = "Ochre Fold"
 	var started := Time.get_ticks_usec()
@@ -94,7 +95,8 @@ func _init(colours: Palette = null) -> void:
 	_build_props()
 	_build_walls()
 	var graph_started := Time.get_ticks_usec()
-	route_graph = build_route_graph()
+	if with_graph:
+		route_graph = build_route_graph()
 	graph_seconds = (Time.get_ticks_usec() - graph_started) / 1000000.0
 	build_seconds = (Time.get_ticks_usec() - started) / 1000000.0
 

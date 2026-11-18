@@ -61,15 +61,15 @@ static func make(map_name: String) -> GameMap:
 
 
 ## The map asked for: chosen, else --map NAME after -- on the command line,
-## else DEFAULT.
-static func chosen_name() -> String:
+## else fallback.
+static func chosen_name(fallback := DEFAULT) -> String:
 	if chosen != "":
 		return chosen
 	var args := OS.get_cmdline_user_args()
 	for k in args.size() - 1:
 		if args[k] == "--map":
 			return args[k + 1]
-	return DEFAULT
+	return fallback
 
 
 ## The ground's height, smooth, from the map's shape.

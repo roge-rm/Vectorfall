@@ -3,11 +3,14 @@ extends Node
 
 ## Turns keyboard and mouse, gamepad and touch into PlayerCommands for the
 ## local soldier, and keeps track of which kind of device was used last so the
-## touch controls show only when you're using touch.
+## touch controls show only when you're using touch. Look speeds, invert
+## look and auto ski come from Settings each tick, so changes apply at once.
 
 enum Device { KEYBOARD, GAMEPAD, TOUCH }
 
 signal device_changed(device: Device)
+## Esc, the gamepad's Start or the touch pause button, with the order menu shut.
+signal pause_requested
 
 ## Radians per mouse pixel.
 @export var mouse_sensitivity := 0.0025
@@ -19,6 +22,8 @@ signal device_changed(device: Device)
 var device := Device.KEYBOARD
 var source := Source.new()
 var touch: TouchControls
+## The soldier these commands drive, read for auto ski.
+var soldier: Soldier
 ## The order menu, which the number keys and D-pad drive while it's open.
 var menu: OrderMenu
 var _mouse_look := Vector2.ZERO
@@ -125,7 +130,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("weapon_2"):
 		_slot_wanted = 1
 	if event.is_action_pressed("pause"):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		get_viewport().set_input_as_handled()
+		pause_requested.emit()
 	elif event is InputEventMouseButton and event.pressed and event.device != InputEvent.DEVICE_ID_EMULATION:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and not DisplayServer.get_name() == "headless":
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -142,13 +148,15 @@ func set_device(value: Device) -> void:
 
 func make_command(delta: float) -> PlayerCommand:
 	var command := PlayerCommand.new()
-	var look := -_mouse_look * mouse_sensitivity
+	var look := -_mouse_look * mouse_sensitivity * Settings.look_mouse
 	_mouse_look = Vector2.ZERO
 	var stick := Input.get_vector("look_left", "look_right", "look_up", "look_down")
 	# Squared response, finer near the middle of the stick.
-	look -= stick * stick.abs() * stick_look_speed * delta
+	look -= stick * stick.abs() * stick_look_speed * Settings.look_pad * delta
 	if touch != null:
-		look -= touch.take_look() * touch_sensitivity
+		look -= touch.take_look() * touch_sensitivity * Settings.look_touch
+	if Settings.invert_look:
+		look.y = -look.y
 	source.yaw = wrapf(source.yaw + look.x, -PI, PI)
 	source.pitch = clampf(source.pitch + look.y, -Soldier.PITCH_LIMIT, Soldier.PITCH_LIMIT)
 	command.yaw = source.yaw
@@ -166,6 +174,7 @@ func make_command(delta: float) -> PlayerCommand:
 			# Holding jump skis, like space and the gamepad A button.
 			if command.buttons & PlayerCommand.JUMP:
 				command.buttons |= PlayerCommand.SKI
+		_auto_ski(command)
 		return command
 	command.weapon = _slot_wanted
 	_slot_wanted = -1
@@ -179,4 +188,15 @@ func make_command(delta: float) -> PlayerCommand:
 	for pair: Array in [["fire", PlayerCommand.FIRE], ["jump", PlayerCommand.JUMP], ["jet", PlayerCommand.JET], ["use", PlayerCommand.USE], ["deploy", PlayerCommand.DEPLOY], ["ski", PlayerCommand.SKI]]:
 		if Input.is_action_pressed(pair[0]):
 			command.buttons |= pair[1]
+	_auto_ski(command)
 	return command
+
+
+## With auto ski on, skis whenever you're faster than a run or in the air,
+## unless you're pulling back to brake.
+func _auto_ski(command: PlayerCommand) -> void:
+	if not Settings.auto_ski or soldier == null or command.move.y < -0.3:
+		return
+	var speed := Vector2(soldier.velocity.x, soldier.velocity.z).length()
+	if not soldier.grounded or speed > soldier.tuning.run_speed + 1.0:
+		command.buttons |= PlayerCommand.SKI
