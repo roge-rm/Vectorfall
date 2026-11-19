@@ -27,6 +27,12 @@ const COLLISION_REACH := 36.0
 ## Ticks a collision chunk stays after nothing needs it, so one on the edge
 ## of someone's reach isn't added and taken away every tick.
 const COLLISION_LINGER := 30
+## Cells per side of the blocks raycast() checks before sampling, and samples
+## it checks together, big then small. Samples are half a cell apart.
+const BLOCK_CELLS := 8
+const RAY_RUN := 16
+const SMALL_CELLS := 2
+const SMALL_RUN := 4
 
 var cells := 0
 ## Metres per cell.
@@ -44,11 +50,20 @@ var chunk_views: Array[Array] = []
 var skirt_depths: Array[PackedFloat32Array] = []
 var view_distance := 1200.0
 var material: ShaderMaterial
-## Collision chunk key to its StaticBody3D, made the first time it's needed.
-var _collision: Dictionary[Vector2i, StaticBody3D] = {}
+## Per collision chunk (row by row along x), its StaticBody3D, made on the
+## main thread when first needed, or null.
+var _bodies: Array = []
+## Per collision chunk, its worker task, or -1 once waited for.
+var _tasks := PackedInt64Array()
+## Per collision chunk, its faces from the worker task until the body is made.
+var _faces: Array = []
 ## Collision chunk key to the tick it was last needed, for those in the tree.
 var _active: Dictionary[Vector2i, int] = {}
 var _tick := 0
+## Highest corner per block of cells, big and small, for raycast() to skip
+## blocks with.
+var _block_max := PackedFloat32Array()
+var _small_max := PackedFloat32Array()
 
 
 ## Builds the drawn chunks from a heightfield. height_values and
@@ -64,7 +79,9 @@ func _init(cell_count := 0, cell_size := 4.0, corner := Vector2.ZERO, height_val
 	patches = patch_values
 	material = Cel.ground_material()
 	_build_normals()
+	_build_block_max()
 	_build_chunks()
+	_start_collision_tasks()
 
 
 func size() -> float:
@@ -119,26 +136,92 @@ func normal_at(x: float, z: float) -> Vector3:
 func raycast(a: Vector3, b: Vector3) -> Dictionary:
 	if a.y < height_at(a.x, a.z):
 		return { "position": a, "normal": normal_at(a.x, a.z) }
+	if _block_max.is_empty():
+		_build_block_max()
 	var length := a.distance_to(b)
 	var count := maxi(ceili(length / (cell * 0.5)), 1)
 	var last := 0.0
-	for k in range(1, count + 1):
-		var t := float(k) / count
-		var p := a.lerp(b, t)
-		if p.y < height_at(p.x, p.z):
-			var lo := last
-			var hi := t
-			for n in 10:
-				var mid := (lo + hi) * 0.5
-				var q := a.lerp(b, mid)
-				if q.y < height_at(q.x, q.z):
-					hi = mid
-				else:
-					lo = mid
-			var at := a.lerp(b, hi)
-			return { "position": at, "normal": normal_at(at.x, at.z) }
-		last = t
+	# Runs of samples above the highest ground under them can't hit, checked
+	# in long runs over big blocks, then short runs over small blocks.
+	var k0 := 1
+	while k0 <= count:
+		var k1 := mini(k0 + RAY_RUN - 1, count)
+		var p0 := a.lerp(b, last)
+		var p1 := a.lerp(b, float(k1) / count)
+		if minf(p0.y, p1.y) > _highest_under(p0, p1, _block_max, BLOCK_CELLS) + 0.01:
+			last = float(k1) / count
+			k0 = k1 + 1
+			continue
+		var s0 := k0
+		while s0 <= k1:
+			var s1 := mini(s0 + SMALL_RUN - 1, k1)
+			var q0 := a.lerp(b, last)
+			var q1 := a.lerp(b, float(s1) / count)
+			if minf(q0.y, q1.y) > _highest_under(q0, q1, _small_max, SMALL_CELLS) + 0.01:
+				last = float(s1) / count
+				s0 = s1 + 1
+				continue
+			for k in range(s0, s1 + 1):
+				var t := float(k) / count
+				var p := a.lerp(b, t)
+				if p.y < height_at(p.x, p.z):
+					var lo := last
+					var hi := t
+					for n in 10:
+						var mid := (lo + hi) * 0.5
+						var q := a.lerp(b, mid)
+						if q.y < height_at(q.x, q.z):
+							hi = mid
+						else:
+							lo = mid
+					var at := a.lerp(b, hi)
+					return { "position": at, "normal": normal_at(at.x, at.z) }
+				last = t
+			s0 = s1 + 1
+		k0 = k1 + 1
 	return {}
+
+
+## The highest corner of any block the flat box round two points touches,
+## clamped to the edge as height_at() is.
+func _highest_under(p: Vector3, q: Vector3, block_max: PackedFloat32Array, size: int) -> float:
+	var top := cells - 0.0001
+	var i0 := int(clampf((minf(p.x, q.x) - 0.01 - origin.x) / cell, 0.0, top)) / size
+	var i1 := int(clampf((maxf(p.x, q.x) + 0.01 - origin.x) / cell, 0.0, top)) / size
+	var j0 := int(clampf((minf(p.z, q.z) - 0.01 - origin.y) / cell, 0.0, top)) / size
+	var j1 := int(clampf((maxf(p.z, q.z) + 0.01 - origin.y) / cell, 0.0, top)) / size
+	var blocks := ceili(float(cells) / size)
+	var highest := -INF
+	for j in range(j0, j1 + 1):
+		for i in range(i0, i1 + 1):
+			highest = maxf(highest, block_max[j * blocks + i])
+	return highest
+
+
+## The highest corner per small block, then per big block from those.
+func _build_block_max() -> void:
+	var row := cells + 1
+	var small := ceili(float(cells) / SMALL_CELLS)
+	_small_max.resize(small * small)
+	for bj in small:
+		var j_end := mini(bj * SMALL_CELLS + SMALL_CELLS, cells) + 1
+		for bi in small:
+			var i_end := mini(bi * SMALL_CELLS + SMALL_CELLS, cells) + 1
+			var highest := -INF
+			for j in range(bj * SMALL_CELLS, j_end):
+				for i in range(bi * SMALL_CELLS, i_end):
+					highest = maxf(highest, heights[j * row + i])
+			_small_max[bj * small + bi] = highest
+	var per := BLOCK_CELLS / SMALL_CELLS
+	var big := ceili(float(cells) / BLOCK_CELLS)
+	_block_max.resize(big * big)
+	for bj in big:
+		for bi in big:
+			var highest := -INF
+			for j in range(bj * per, mini(bj * per + per, small)):
+				for i in range(bi * per, mini(bi * per + per, small)):
+					highest = maxf(highest, _small_max[j * small + i])
+			_block_max[bj * big + bi] = highest
 
 
 ## Sets how far the ground is drawn, in metres.
@@ -151,9 +234,11 @@ func set_view_distance(metres: float) -> void:
 
 ## Puts collision under every point in points, with speeds (m/s, one per
 ## point) widening the reach, and takes it away from where nothing is.
-## Call it once a tick, before anything moves.
-func keep_collision_near(points: PackedVector3Array, speeds: PackedFloat32Array) -> void:
-	_tick += 1
+## Call it once a tick, before anything moves. With next_tick false it adds
+## what's needed without counting a tick, to have it ready before the first.
+func keep_collision_near(points: PackedVector3Array, speeds: PackedFloat32Array, next_tick := true) -> void:
+	if next_tick:
+		_tick += 1
 	var span := COLLISION_CELLS * cell
 	var count := ceili(float(cells) / COLLISION_CELLS)
 	for k in points.size():
@@ -167,12 +252,20 @@ func keep_collision_near(points: PackedVector3Array, speeds: PackedFloat32Array)
 			for i in range(i0, i1 + 1):
 				var key := Vector2i(i, j)
 				if not _active.has(key):
-					add_child(_collision_body(key))
+					if Prof.on:
+						var prof_t := Time.get_ticks_usec()
+						Prof.count("chunk_built" if _bodies[_collision_index(key)] == null else "chunk_readded")
+						add_child(_collision_body(key))
+						Prof.add("chunk_add", Time.get_ticks_usec() - prof_t)
+					else:
+						add_child(_collision_body(key))
 				_active[key] = _tick
 	for key: Vector2i in _active.keys():
 		if _tick - _active[key] > COLLISION_LINGER:
-			remove_child(_collision[key])
+			remove_child(_bodies[_collision_index(key)])
 			_active.erase(key)
+			if Prof.on:
+				Prof.count("chunk_removed")
 
 
 ## Collision chunks in the tree now.
@@ -190,26 +283,72 @@ func collision_key(x: float, z: float) -> Vector2i:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
-		for key in _collision:
-			if not _active.has(key):
-				_collision[key].free()
+		for k in _tasks.size():
+			if _tasks[k] >= 0:
+				WorkerThreadPool.wait_for_task_completion(_tasks[k])
+		for k in _bodies.size():
+			var body := _bodies[k] as StaticBody3D
+			if body != null and body.get_parent() == null:
+				body.free()
 
 
+func _collision_index(key: Vector2i) -> int:
+	return key.y * ceili(float(cells) / COLLISION_CELLS) + key.x
+
+
+func _start_collision_tasks() -> void:
+	var count := ceili(float(cells) / COLLISION_CELLS)
+	_bodies.resize(count * count)
+	_faces.resize(count * count)
+	_tasks.resize(count * count)
+	for k in count * count:
+		_tasks[k] = WorkerThreadPool.add_task(_make_collision.bind(k, count))
+
+
+## Worker side: only the faces, as physics server calls from workers aren't
+## safe with physics on the main thread.
+func _make_collision(k: int, count: int) -> void:
+	_faces[k] = _make_faces(Vector2i(k % count, k / count))
+
+
+## The chunk's body, made on the main thread the first time it's needed,
+## waiting for its faces if their worker task hasn't finished.
 func _collision_body(key: Vector2i) -> StaticBody3D:
-	if _collision.has(key):
-		return _collision[key]
-	var faces := PackedVector3Array()
+	var k := _collision_index(key)
+	if _bodies[k] == null:
+		if _tasks[k] >= 0:
+			WorkerThreadPool.wait_for_task_completion(_tasks[k])
+			_tasks[k] = -1
+		_bodies[k] = _make_body(key, _faces[k])
+		_faces[k] = null
+	return _bodies[k]
+
+
+func _make_faces(key: Vector2i) -> PackedVector3Array:
 	var i0 := key.x * COLLISION_CELLS
 	var j0 := key.y * COLLISION_CELLS
 	var i1 := mini(i0 + COLLISION_CELLS, cells)
 	var j1 := mini(j0 + COLLISION_CELLS, cells)
+	var faces := PackedVector3Array()
+	faces.resize((i1 - i0) * (j1 - j0) * 6)
+	var n := 0
 	for j in range(j0, j1):
 		for i in range(i0, i1):
 			var a := _point(i, j)
 			var b := _point(i + 1, j)
 			var c := _point(i, j + 1)
 			var d := _point(i + 1, j + 1)
-			faces.append_array([a, b, c, b, d, c])
+			faces[n] = a
+			faces[n + 1] = b
+			faces[n + 2] = c
+			faces[n + 3] = b
+			faces[n + 4] = d
+			faces[n + 5] = c
+			n += 6
+	return faces
+
+
+func _make_body(key: Vector2i, faces: PackedVector3Array) -> StaticBody3D:
 	var shape := ConcavePolygonShape3D.new()
 	shape.set_faces(faces)
 	var body := StaticBody3D.new()
@@ -219,7 +358,6 @@ func _collision_body(key: Vector2i) -> StaticBody3D:
 	var holder := CollisionShape3D.new()
 	holder.shape = shape
 	body.add_child(holder)
-	_collision[key] = body
 	return body
 
 

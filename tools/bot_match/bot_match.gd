@@ -11,6 +11,10 @@ extends Node
 ##   --skill0 N    team 0's skill level, 0 beginner to 4 expert (2, normal)
 ##   --skill1 N    team 1's (2)
 ##   --plain       every bot the default personality
+##   --serial-bots bots work one after another on the main thread instead of
+##                 on worker threads, for comparing; the match is the same
+##   --profile     time each part of every tick and the map build, and print
+##                 a table of them at the end
 ##   --check       print a CHECK line for tools/bot-check.sh, and exit with an
 ##                 error if the bots stopped moving: 60 s or more stuck
 ## The capture limit is off, so the match runs the whole time. The report has
@@ -27,6 +31,10 @@ var minutes := 5.0
 var check := false
 var skills: Array[int] = [BotDirector.NORMAL, BotDirector.NORMAL]
 var plain := false
+var profile := false
+## Map build parts timed with --profile, name to microseconds, and counts.
+var build_parts := {}
+var build_counts := {}
 ## Every flag event, in order.
 var flag_events: Array[Dictionary] = []
 
@@ -35,6 +43,9 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	check = args.has("--check")
 	plain = args.has("--plain")
+	profile = args.has("--profile")
+	Prof.on = profile
+	BotDirector.threads = not args.has("--serial-bots")
 	for k in args.size() - 1:
 		match args[k]:
 			"--bots":
@@ -48,6 +59,11 @@ func _ready() -> void:
 			"--skill1":
 				skills[1] = clampi(int(args[k + 1]), 0, BotDirector.SKILLS.size() - 1)
 	map = GameMap.make(GameMap.chosen_name())
+	if profile:
+		build_parts = Prof._now.duplicate()
+		build_counts = Prof._counts.duplicate()
+		Prof._now.clear()
+		Prof._counts.clear()
 	add_child(map)
 	print("Map %s built in %.2f s, its route graph in %.2f s (%d points, %d links)" % [map.title, map.build_seconds, map.graph_seconds, map.route_graph.points.size(), map.route_graph.links.size()])
 	game = Match.new(seed_value)
@@ -71,6 +87,11 @@ func _ready() -> void:
 	game.killed.connect(_on_killed)
 	for event in ["taken", "dropped", "returned", "captured"]:
 		game.connect("flag_" + event, _on_flag_event.bind(event))
+	var prepared := Time.get_ticks_usec()
+	game.prepare_terrain()
+	print("Terrain collision made for the start in %.0f ms" % ((Time.get_ticks_usec() - prepared) / 1000.0))
+	Prof._now.clear()
+	Prof._counts.clear()
 	_run.call_deferred()
 
 
@@ -114,8 +135,18 @@ func _near_counts(s: Soldier) -> Array:
 func _run() -> void:
 	var ticks := int(minutes * 60.0 * 60.0)
 	var started := Time.get_ticks_usec()
+	var last := -1
 	while game.tick < ticks:
 		await get_tree().physics_frame
+		if profile:
+			# physics_frame comes before the nodes' physics ticks and the physics
+			# step, so the time since the last one is a whole frame.
+			var now := Time.get_ticks_usec()
+			if last >= 0 and game.tick > 0:
+				Prof.add("frame", now - last)
+				Prof.add("physics_process_monitor", int(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000000.0))
+				Prof.end_tick()
+			last = now
 	var wall := (Time.get_ticks_usec() - started) / 1000000.0
 	var report := _report(ticks, wall)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(REPORTS))
@@ -125,6 +156,8 @@ func _run() -> void:
 	file.store_string(JSON.stringify(report, "  "))
 	file.close()
 	_print_summary(report, path)
+	if profile:
+		_print_profile()
 	if check:
 		var totals: Dictionary = report.totals
 		var ok: bool = totals.time_stuck < 60.0
@@ -264,3 +297,75 @@ func _print_summary(report: Dictionary, path: String) -> void:
 	for bot: Dictionary in report.bots:
 		print("  bot %d team %d %s %s: %.0f m, avg %.1f m/s, stuck %.1f s, %d spots, %d kills, %d deaths, %d caps, %d grabs, %d returns" % [bot.id, bot.team, bot.personality, bot.role, bot.distance, bot.avg_speed, bot.time_stuck, bot.stuck_spots.size(), bot.kills, bot.deaths, bot.captures, bot.grabs, bot.returns])
 	print("Report: ", path)
+
+
+## The --profile tables: the map build in parts, then each tick's parts and
+## counts.
+func _print_profile() -> void:
+	print("\nMap build (ms):")
+	var total := map.build_seconds * 1000.0
+	var named := 0.0
+	var keys := build_parts.keys()
+	keys.sort()
+	for key: String in keys:
+		var ms: float = build_parts[key] / 1000.0
+		print("  %-40s %9.1f" % [key, ms])
+		if key.count(".") == 1 or key == "build.graph.auto_link_pairs" or key == "build.graph.points" or key == "build.graph.mirrors" or key == "build.graph.mesas_towers":
+			named += ms
+	print("  %-40s %9.1f" % ["whole build", total])
+	print("  %-40s %9.1f" % ["rest (atmosphere, noise setup, ...)", total - named])
+	var counts := build_counts.keys()
+	counts.sort()
+	for key: String in counts:
+		print("  %-40s %9d" % [key, build_counts[key]])
+	# Single calls of the graph's ground samplers.
+	var n := 200000
+	var t := Time.get_ticks_usec()
+	for k in n:
+		map.surface_at(k * 0.37 - 400.0, (k % 500) * 0.8 - 200.0)
+	var surface_us := float(Time.get_ticks_usec() - t) / n
+	t = Time.get_ticks_usec()
+	for k in n:
+		map.blocked_at(k * 0.37 - 400.0, (k % 500) * 0.8 - 200.0)
+	var blocked_us := float(Time.get_ticks_usec() - t) / n
+	var surf_call := Callable(map, "surface_at")
+	t = Time.get_ticks_usec()
+	for k in n:
+		surf_call.call(k * 0.37 - 400.0, (k % 500) * 0.8 - 200.0)
+	var callable_us := float(Time.get_ticks_usec() - t) / n
+	print("  surface_at %.2f us a call (%.2f us through a Callable), blocked_at %.2f us" % [surface_us, callable_us, blocked_us])
+
+	var ticks := Prof.ticks
+	var tick_mean: float = Prof.stats("t:tick").mean
+	print("\nBots on %s" % ("worker threads" if BotDirector.threads else "the main thread (--serial-bots)"))
+	print("Per tick over %d ticks (us): mean, p95, max, share of the Match tick, ticks it ran in" % ticks)
+	var order := [
+		"frame", "physics_process_monitor", "tick",
+		"terrain_collision", "chunk_add",
+		"bots", "bots.serial_before", "bots.snapshot", "bots.work", "bots.work_sum", "bots.starts", "bots.serial_after", "bot.commander", "commander0", "commander1", "bot.think", "bot.perception", "bot.combat_think",
+		"bot.replan", "bot.replan.nearest", "bot.replan.start_point", "bot.replan.astar",
+		"bot.check_stuck", "bot.steering", "bot.combat_aim",
+		"soldier_sim", "move_and_slide", "blob_shadow_ray",
+		"projectiles", "flags", "ray_physics", "ray_terrain",
+	]
+	for key: String in Prof.series:
+		if key.begins_with("t:") and not order.has(key.substr(2)):
+			order.append(key.substr(2))
+	for part: String in order:
+		var s := Prof.stats("t:" + part)
+		var ran := 0
+		for v: int in Prof.series.get("t:" + part, []):
+			if v > 0:
+				ran += 1
+		print("  %-26s %8.1f %7d %7d %6.1f%% %6d" % [part, s.mean, s.p95, s.max, 100.0 * s.mean / maxf(tick_mean, 0.001), ran])
+	var f: Dictionary = Prof.stats("t:frame")
+	print("  outside the Match tick (Jolt step, engine): mean %.1f us" % [f.mean - tick_mean])
+	print("\nCounts per tick: mean, p95, max, total")
+	var names := []
+	for key: String in Prof.series:
+		if key.begins_with("n:"):
+			names.append(key.substr(2))
+	names.sort()
+	for what: String in names:
+		var s := Prof.stats("n:" + what)
+		print("  %-26s %8.2f %7d %7d %9d" % [what, s.mean, s.p95, s.max, s.sum])

@@ -61,6 +61,9 @@ var winner := -1
 ## soldiers and flags each tick, and shots and sight lines are checked
 ## against its heights everywhere.
 var terrain: Terrain
+## The match's bots, if it has any. They work out their commands for the tick
+## before anything moves.
+var bots: BotDirector
 
 
 func _init(match_seed := 1) -> void:
@@ -76,11 +79,16 @@ func _physics_process(delta: float) -> void:
 
 
 func step(delta: float) -> void:
+	if Prof.on:
+		_profiled_step(delta)
+		return
 	tick += 1
 	var ids := entities.keys()
 	ids.sort()
 	if terrain != null:
 		_keep_terrain_collision(ids)
+	if bots != null:
+		bots.run_bots(delta)
 	for id: int in ids:
 		var source: CommandSource = sources.get(id)
 		var command := source.make_command(delta) if source != null else PlayerCommand.new()
@@ -91,8 +99,51 @@ func step(delta: float) -> void:
 	_step_flags(delta)
 
 
+## step() with each part timed for Prof. Does the same in the same order.
+func _profiled_step(delta: float) -> void:
+	var t0 := Time.get_ticks_usec()
+	tick += 1
+	var ids := entities.keys()
+	ids.sort()
+	var t := Time.get_ticks_usec()
+	if terrain != null:
+		_keep_terrain_collision(ids)
+	Prof.add("terrain_collision", Time.get_ticks_usec() - t)
+	t = Time.get_ticks_usec()
+	if bots != null:
+		bots.run_bots(delta)
+	Prof.add("bots", Time.get_ticks_usec() - t)
+	for id: int in ids:
+		var source: CommandSource = sources.get(id)
+		t = Time.get_ticks_usec()
+		var command := source.make_command(delta) if source != null else PlayerCommand.new()
+		Prof.add("bots" if source is BotBrain else "other_sources", Time.get_ticks_usec() - t)
+		if command.order != 0:
+			ordered.emit(id, command.order, command.order_arg)
+		t = Time.get_ticks_usec()
+		entities[id].simulate(command, delta)
+		Prof.add("soldier_sim", Time.get_ticks_usec() - t)
+	t = Time.get_ticks_usec()
+	_step_projectiles(delta)
+	Prof.add("projectiles", Time.get_ticks_usec() - t)
+	Prof.count("projectiles_live", projectiles.size())
+	t = Time.get_ticks_usec()
+	_step_flags(delta)
+	Prof.add("flags", Time.get_ticks_usec() - t)
+	Prof.add("tick", Time.get_ticks_usec() - t0)
+
+
+## Makes the terrain collision under everything now, before the first tick,
+## so the match doesn't start with a hitch.
+func prepare_terrain() -> void:
+	if terrain != null:
+		var ids := entities.keys()
+		ids.sort()
+		_keep_terrain_collision(ids, false)
+
+
 ## Collision under every soldier, living or dead, and every flag.
-func _keep_terrain_collision(ids: Array) -> void:
+func _keep_terrain_collision(ids: Array, next_tick := true) -> void:
 	var points := PackedVector3Array()
 	var speeds := PackedFloat32Array()
 	for id: int in ids:
@@ -102,18 +153,27 @@ func _keep_terrain_collision(ids: Array) -> void:
 			speeds.append((body as Soldier).velocity.length())
 	for team: int in flags:
 		points.append(flags[team].global_position)
-		speeds.append(flags[team].linear_velocity.length())
-	terrain.keep_collision_near(points, speeds)
+		# A frozen flag reports the jump it was moved by as a speed.
+		speeds.append(0.0 if flags[team].freeze else flags[team].linear_velocity.length())
+	terrain.keep_collision_near(points, speeds, next_tick)
 
 
 ## The first thing in the world on the segment from a to b, from the physics
 ## world and the terrain's heights, as intersect_ray() gives it. The terrain
 ## has no collider.
 func world_ray(a: Vector3, b: Vector3, mask: int, exclude: Array[RID] = []) -> Dictionary:
+	var t := Time.get_ticks_usec() if Prof.on else 0
 	var query := PhysicsRayQueryParameters3D.create(a, b, mask, exclude)
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if Prof.on:
+		Prof.count("intersect_ray")
+		Prof.add("ray_physics", Time.get_ticks_usec() - t)
+		t = Time.get_ticks_usec()
 	if terrain != null and mask & WORLD_LAYER:
 		var ground := terrain.raycast(a, b)
+		if Prof.on:
+			Prof.count("terrain_raycast")
+			Prof.add("ray_terrain", Time.get_ticks_usec() - t)
 		if not ground.is_empty() and (hit.is_empty() or a.distance_squared_to(ground.position) < a.distance_squared_to(hit.position)):
 			ground["collider"] = null
 			return ground
@@ -310,6 +370,8 @@ func _step_projectiles(delta: float) -> void:
 		var owner_body := soldier(shot.shooter)
 		if owner_body != null:
 			exclude.append(owner_body.get_rid())
+		if Prof.on:
+			Prof.count("ray_by_projectile")
 		var hit := world_ray(shot.position, to, WORLD_LAYER | SOLDIER_LAYER, exclude)
 		shot.age += delta
 		if not hit.is_empty():
@@ -356,6 +418,8 @@ func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = nu
 		if distance > weapon.splash_radius:
 			continue
 		# Walls and ground between the blast and the soldier block it.
+		if Prof.on:
+			Prof.count("ray_by_blast")
 		if not line_clear(at, target.centre()):
 			continue
 		var away := target.centre() - at

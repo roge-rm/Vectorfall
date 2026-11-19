@@ -7,6 +7,8 @@ extends RefCounted
 ## from memory when it's neither seen nor heard for a while. A soldier coming
 ## into view is only noticed after the bot's reaction time. Line of sight
 ## takes ray casts from the director's budget, shared by every bot each tick.
+## look() runs on the main thread; listen() and the rest may run on a bot
+## thread.
 
 const VIEW_RANGE := 300.0
 ## Half the view cone's angle, 65°.
@@ -40,29 +42,43 @@ var danger_at := Vector3.ZERO
 var danger_tick := -1
 
 
-## Looks and listens. Called when the bot thinks.
+## Looks and listens. Called when the bot thinks, all on one thread.
 func update(me: Soldier, game: Match, director: BotDirector) -> void:
+	look(me, game, director)
+	listen(me, game, director)
+
+
+## Looks along sight lines to enemies in view, with ray casts. Main thread,
+## before listen().
+func look(me: Soldier, game: Match, director: BotDirector) -> void:
+	var prof_t := Time.get_ticks_usec() if Prof.on else 0
 	var now := game.tick
 	var eye := me.eye_transform()
 	var forward := -eye.basis.z
 	var enemies: Array[Soldier] = []
-	var ids := game.entities.keys()
-	ids.sort()
-	for id: int in ids:
-		var other := game.soldier(id)
-		if other != null and other.team != me.team and not other.dead:
+	for other in director.soldiers():
+		if other.team != me.team and not other.dead:
 			enemies.append(other)
 	var count := enemies.size()
 	var checked := 0
+	if Prof.on:
+		Prof.add("perc.list", Time.get_ticks_usec() - prof_t)
 	for k in count:
 		var other := enemies[(cursor + k) % count]
-		var to := other.global_position + Vector3.UP * 1.2 - eye.origin
+		var to := other.at() + Vector3.UP * 1.2 - eye.origin
 		var distance := to.length()
 		var in_view := distance < NEAR_SENSE or (distance < view_range and forward.angle_to(to) < VIEW_HALF_ANGLE)
 		if in_view:
 			if not director.take_ray():
+				if Prof.on:
+					Prof.count("sight_budget_out")
 				break
+			if Prof.on:
+				Prof.count("ray_by_sight")
+			var prof_r := Time.get_ticks_usec() if Prof.on else 0
 			in_view = game.line_clear(eye.origin, eye.origin + to)
+			if Prof.on:
+				Prof.add("perc.ray", Time.get_ticks_usec() - prof_r)
 		checked += 1
 		if in_view:
 			_see(other, now)
@@ -71,13 +87,25 @@ func update(me: Soldier, game: Match, director: BotDirector) -> void:
 			contacts[other.entity_id].since = -1
 	if count > 0:
 		cursor = (cursor + checked) % count
-	# Jets nearby.
-	for other in enemies:
-		if other.jetting and other.global_position.distance_to(me.global_position) < JET_RANGE:
-			_hear(other.entity_id, other.global_position, other.velocity, now)
+	if Prof.on:
+		Prof.add("perc.sight", Time.get_ticks_usec() - prof_t)
+
+
+## Listens for jets, shots and blasts, and forgets what's gone. May run on a
+## bot thread.
+func listen(me: Soldier, game: Match, director: BotDirector) -> void:
+	var prof_t := Time.get_ticks_usec() if Prof.on else 0
+	var now := game.tick
+	# Jets nearby. No typed array of soldiers here: filling one reads each
+	# node's script, which Godot only allows on the main thread.
+	for other in director.soldiers():
+		if other.team == me.team or other.dead:
+			continue
+		if other.jetting and other.at().distance_to(me.at()) < JET_RANGE:
+			_hear(other.entity_id, other.at(), other.vel(), now)
 	# Shots and blasts since the last think.
 	for sound: Dictionary in director.sounds:
-		if sound.seq <= heard_up_to or me.global_position.distance_to(sound.position) > sound.range:
+		if sound.seq <= heard_up_to or me.at().distance_to(sound.position) > sound.range:
 			continue
 		var source := game.soldier(sound.source)
 		if source != null and source.team != me.team:
@@ -86,6 +114,9 @@ func update(me: Soldier, game: Match, director: BotDirector) -> void:
 			danger_at = sound.position
 			danger_tick = sound.tick
 	heard_up_to = director.sound_count
+	if Prof.on:
+		Prof.add("perc.hear", Time.get_ticks_usec() - prof_t)
+		Prof.count("sounds_scanned", director.sounds.size())
 	# Gone dead or out of memory.
 	for id: int in contacts.keys():
 		var contact: Dictionary = contacts[id]
@@ -102,8 +133,8 @@ func _see(other: Soldier, now: int) -> void:
 		contacts[other.entity_id] = contact
 	if contact.since < 0:
 		contact.since = now
-	contact.position = other.global_position
-	contact.velocity = other.velocity
+	contact.position = other.at()
+	contact.velocity = other.vel()
 	contact.tick = now
 	contact.visible = true
 	contact.heard = false

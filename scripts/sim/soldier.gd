@@ -59,6 +59,17 @@ var shots := 0
 var body: SoldierBody
 var blob: BlobShadow
 
+## While true, at(), vel() and the rest give the copy take_snapshot() made at
+## the start of the tick instead of reading the node. BotDirector sets it for
+## the bot phase, so bot code on worker threads never touches a node. The copy
+## isn't in the state: it's made again each tick.
+static var use_snapshot := false
+var _seen_pos := Vector3.ZERO
+var _seen_vel := Vector3.ZERO
+var _seen_back := Vector3.BACK
+## Normals of the walls the last move slid along.
+var _seen_walls := PackedVector3Array()
+
 
 func _init() -> void:
 	energy = tuning.energy_max
@@ -163,11 +174,59 @@ func _set_alive_layers(alive: bool) -> void:
 
 func eye_transform() -> Transform3D:
 	var basis := Basis.from_euler(Vector3(pitch, yaw, 0.0))
-	return Transform3D(basis, global_position + Vector3.UP * tuning.eye_height)
+	return Transform3D(basis, at() + Vector3.UP * tuning.eye_height)
 
 
 func horizontal_speed() -> float:
-	return Vector2(velocity.x, velocity.z).length()
+	var v := vel()
+	return Vector2(v.x, v.z).length()
+
+
+## Copies what bot threads read from the node. Main thread only.
+func take_snapshot() -> void:
+	_seen_pos = global_position
+	_seen_vel = velocity
+	_seen_back = transform.basis.z
+	_seen_walls = _wall_normals()
+
+
+## The position, from the snapshot in the bot phase. Off it, main thread only.
+func at() -> Vector3:
+	if use_snapshot:
+		return _seen_pos
+	assert(OS.get_thread_caller_id() == OS.get_main_thread_id(), "a node read off the main thread")
+	return global_position
+
+
+func vel() -> Vector3:
+	if use_snapshot:
+		return _seen_vel
+	assert(OS.get_thread_caller_id() == OS.get_main_thread_id(), "a node read off the main thread")
+	return velocity
+
+
+## The body's back, its basis z.
+func back() -> Vector3:
+	if use_snapshot:
+		return _seen_back
+	assert(OS.get_thread_caller_id() == OS.get_main_thread_id(), "a node read off the main thread")
+	return transform.basis.z
+
+
+## Normals of the walls the last move slid along.
+func wall_normals() -> PackedVector3Array:
+	if use_snapshot:
+		return _seen_walls
+	assert(OS.get_thread_caller_id() == OS.get_main_thread_id(), "a node read off the main thread")
+	return _wall_normals()
+
+
+func _wall_normals() -> PackedVector3Array:
+	var normals := PackedVector3Array()
+	if is_on_wall():
+		for k in get_slide_collision_count():
+			normals.append(get_slide_collision(k).get_normal())
+	return normals
 
 
 func simulate(command: PlayerCommand, delta: float) -> void:
@@ -244,7 +303,13 @@ func simulate(command: PlayerCommand, delta: float) -> void:
 	floor_snap_length = t.ski_snap if ski_held and before.length() > t.ski_launch_speed else t.floor_snap
 	floor_stop_on_slope = not skiing
 	floor_constant_speed = not skiing
-	move_and_slide()
+	if Prof.on:
+		var prof_t := Time.get_ticks_usec()
+		move_and_slide()
+		Prof.add("move_and_slide", Time.get_ticks_usec() - prof_t)
+		Prof.count("move_and_slide")
+	else:
+		move_and_slide()
 	grounded = is_on_floor()
 	floor_normal = get_floor_normal() if grounded else Vector3.UP
 	if grounded and ski_held:
@@ -261,7 +326,6 @@ func simulate(command: PlayerCommand, delta: float) -> void:
 		if kept.length() > horizontal_speed():
 			velocity.x = kept.x
 			velocity.z = kept.z
-	blob.follow(self)
 	if dead:
 		respawn_in -= delta
 		if respawn_in <= 0.0 and game != null:

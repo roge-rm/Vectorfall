@@ -106,7 +106,7 @@ func think(brain: BotBrain) -> void:
 		var keep := KEEP_AIM_AGGRESSIVE if brain.personality == BotBrain.Personality.AGGRESSIVE else KEEP_AIM
 		if not seen and last_seen > keep:
 			continue
-		var distance := s.global_position.distance_to(perception.guess_position(id, game.tick))
+		var distance := s.at().distance_to(perception.guess_position(id, game.tick))
 		if distance > disc_range(brain):
 			continue
 		# Closer is more of a threat, a carrier of our flag matters most, and
@@ -115,9 +115,9 @@ func think(brain: BotBrain) -> void:
 		if game.carried_flag(id) != null:
 			score -= 120.0
 		# Going for a flag, whoever guards it comes first.
-		if (brain.goal == BotBrain.Goal.TAKE_FLAG or brain.goal == BotBrain.Goal.CAPTURE) and other.global_position.distance_to(brain.goal_target) < 30.0:
+		if (brain.goal == BotBrain.Goal.TAKE_FLAG or brain.goal == BotBrain.Goal.CAPTURE) and other.at().distance_to(brain.goal_target) < 30.0:
 			score -= 60.0
-		if ours != null and other.global_position.distance_to(ours.global_position) < 50.0:
+		if ours != null and other.at().distance_to(ours.at()) < 50.0:
 			score -= 80.0
 		if id == hurt_by and (game.tick - hurt_tick) / 60.0 < HURT_MEMORY:
 			score -= 40.0
@@ -131,18 +131,18 @@ func think(brain: BotBrain) -> void:
 	if best != target_id:
 		target_id = best
 		var spread := lerpf(0.35, 0.06, brain.skill)
-		lead_share = 1.0 + clampf(game.rng.randfn(0.0, spread), -0.6, 0.6)
+		lead_share = 1.0 + clampf(brain.rng.randfn(0.0, spread), -0.6, 0.6)
 	var sigma := error_for(brain.skill)
 	if target_id != 0:
 		# A target crossing fast is harder to keep on.
 		var other := game.soldier(target_id)
-		var to := other.global_position - s.global_position
-		var across := (other.velocity - s.velocity).slide(to.normalized()).length()
+		var to := other.at() - s.at()
+		var across := (other.vel() - s.vel()).slide(to.normalized()).length()
 		sigma += across / maxf(to.length(), 5.0) * lerpf(0.12, 0.04, brain.skill)
-	aim_error = aim_error * 0.5 + Vector2(game.rng.randfn(0.0, sigma), game.rng.randfn(0.0, sigma * 0.5))
+	aim_error = aim_error * 0.5 + Vector2(brain.rng.randfn(0.0, sigma), brain.rng.randfn(0.0, sigma * 0.5))
 	if target_id != 0:
 		var other := game.soldier(target_id)
-		var distance := s.global_position.distance_to(other.global_position)
+		var distance := s.at().distance_to(other.at())
 		var disc_reach := disc_range(brain) if other.grounded else DISC_AIR_RANGE
 		var has_disc := s.ammo[Weapon.DISC] > 0
 		var has_chain := s.ammo[Weapon.CHAINGUN] > 0
@@ -152,8 +152,8 @@ func think(brain: BotBrain) -> void:
 			weapon = Weapon.CHAINGUN
 		elif has_disc:
 			weapon = Weapon.DISC
-		if dodge_ticks <= 0 and game.rng.randf() < 0.3:
-			dodge_ticks = game.rng.randi_range(20, 50)
+		if dodge_ticks <= 0 and brain.rng.randf() < 0.3:
+			dodge_ticks = brain.rng.randi_range(20, 50)
 			dodge_side = -dodge_side
 
 
@@ -175,14 +175,14 @@ func apply(brain: BotBrain, command: PlayerCommand, delta: float) -> void:
 	var seen := brain.perception.can_see(target_id)
 	# What a player sees: where the target is now if it's in view, or where
 	# it was going if not.
-	var at := other.global_position if seen else brain.perception.guess_position(target_id, game.tick)
-	var velocity := other.velocity if seen else Vector3.ZERO
+	var at := other.at() if seen else brain.perception.guess_position(target_id, game.tick)
+	var velocity := other.vel() if seen else Vector3.ZERO
 	var w := Weapon.all[weapon]
 	if weapon == Weapon.CHAINGUN:
 		# Tracking lags behind a target that moves across, more for a beginner.
 		at -= velocity * lerpf(0.25, 0.06, brain.skill)
 	var fall := s.tuning.gravity if seen and not other.grounded and not other.jetting else 0.0
-	var aim_at := lead(eye, s.velocity, at, velocity, fall, w)
+	var aim_at := lead(eye, s.vel(), at, velocity, fall, w)
 	aim_at = at + (aim_at - at) * lead_share if lead_share != 1.0 else aim_at
 	var below := atan2(eye.y - aim_at.y, Vector2(aim_at.x - eye.x, aim_at.z - eye.z).length())
 	if weapon == Weapon.DISC and other.grounded and below > FEET_ANGLE:
@@ -232,12 +232,10 @@ func apply(brain: BotBrain, command: PlayerCommand, delta: float) -> void:
 		var keep := DISC_MIN if s.health > LOW_HEALTH else DISC_MIN * 1.5
 		if s.cooldown > 0.0 or distance < keep:
 			return
-		# Not into a wall or the ground right in front.
-		if not brain.director.take_ray():
-			return
+		# Not into a wall or the ground right in front, which the bot checks
+		# with a ray after the bot phase's work, taking the fire back if not.
 		var forward := -Basis.from_euler(Vector3(aim_pitch, aim_yaw, 0.0)).z
-		if not s.game.line_clear(eye, eye + forward * DISC_MIN):
-			return
+		brain.check_disc(eye, eye + forward * DISC_MIN)
 	command.buttons |= PlayerCommand.FIRE
 
 

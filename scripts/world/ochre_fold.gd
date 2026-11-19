@@ -38,8 +38,13 @@ const WALL := 742.0
 ## Route graph lattice spacing, and how far its links reach, in metres.
 const LATTICE := 32.0
 const LINK_REACH := 74.0
+## Ground sampling steps for links, near buildings and elsewhere, in metres.
+const LINK_STEP := 1.5
+const LINK_FLAT_STEP := 4.0
 ## Rock and spire views stop being drawn this far away, in metres.
 const PROP_RANGE := 380.0
+## Where the baked route links are kept (tools/bake-routes.sh).
+const ROUTES_FILE := "res://maps/ochre_fold.routes"
 
 ## Mesas as (x, z, top height above the ground round them).
 const MESAS: Array[Vector3] = [Vector3(250.0, -105.0, 16.0), Vector3(-250.0, -105.0, 16.0), Vector3(150.0, 120.0, 14.0), Vector3(-150.0, 120.0, 14.0)]
@@ -57,6 +62,13 @@ var patch_noise := FastNoiseLite.new()
 var terrain_seconds := 0.0
 ## Each mesa's top height, worked out from the ground round it.
 var _mesa_tops: Array[float] = []
+## False builds the route links from the ground, as the baking tool does.
+static var use_baked_routes := true
+## The key the baked links must match, the range of them in the graph, and whether they were loaded from the file.
+var route_key := ""
+var route_first_link := 0
+var route_end_link := 0
+var routes_loaded := false
 
 
 ## with_graph false leaves out the route graph, for a backdrop with no bots.
@@ -89,11 +101,24 @@ func _init(colours: Palette = null, with_graph := true) -> void:
 		_mesa_tops.append(_shape(mesa.x, mesa.y, false) + mesa.z)
 	atmosphere = Atmosphere.new(palette)
 	add_child(atmosphere)
+	var t := Time.get_ticks_usec()
 	_build_ground()
+	if Prof.on:
+		Prof.add("build.ground_heights", int(Time.get_ticks_usec() - t - terrain_seconds * 1000000.0))
+		Prof.add("build.terrain_chunks", int(terrain_seconds * 1000000.0))
+		t = Time.get_ticks_usec()
 	for team in 2:
 		_build_base(team)
+	if Prof.on:
+		Prof.add("build.bases", Time.get_ticks_usec() - t)
+		t = Time.get_ticks_usec()
 	_build_props()
+	if Prof.on:
+		Prof.add("build.props", Time.get_ticks_usec() - t)
+		t = Time.get_ticks_usec()
 	_build_walls()
+	if Prof.on:
+		Prof.add("build.walls", Time.get_ticks_usec() - t)
 	var graph_started := Time.get_ticks_usec()
 	if with_graph:
 		route_graph = build_route_graph()
@@ -172,20 +197,33 @@ func _build_ground() -> void:
 	var row := CELLS + 1
 	var heights := PackedFloat32Array()
 	var patches := PackedFloat32Array()
-	heights.resize(row * row)
-	patches.resize(row * row)
 	var middle := CELLS / 2
-	# The map is mirrored in x, so work out the +x half and copy it over.
-	for j in row:
+	# The map is mirrored in x, so work out the +x half and copy it over. Rows
+	# are worked out on worker threads, which only read the noise and each
+	# fill their own slot of rows.
+	var rows: Array = []
+	rows.resize(row)
+	var fill_row := func(j: int) -> void:
 		var z := -HALF + j * CELL
+		var h := PackedFloat32Array()
+		var p := PackedFloat32Array()
+		h.resize(row)
+		p.resize(row)
 		for i in range(middle, row):
 			var x := -HALF + i * CELL
-			var h := _shape(x, z)
-			var p := patch_noise.get_noise_2d(x, z) * 0.5 + 0.5
-			heights[j * row + i] = h
-			patches[j * row + i] = p
-			heights[j * row + CELLS - i] = h
-			patches[j * row + CELLS - i] = p
+			var hv := _shape(x, z)
+			var pv := patch_noise.get_noise_2d(x, z) * 0.5 + 0.5
+			h[i] = hv
+			p[i] = pv
+			h[CELLS - i] = hv
+			p[CELLS - i] = pv
+		rows[j] = [h, p]
+	WorkerThreadPool.wait_for_group_task_completion(WorkerThreadPool.add_group_task(fill_row, row))
+	heights.clear()
+	patches.clear()
+	for j in row:
+		heights.append_array(rows[j][0])
+		patches.append_array(rows[j][1])
 	var shaped := Time.get_ticks_usec()
 	terrain = Terrain.new(CELLS, CELL, Vector2(-HALF, -HALF), heights, patches)
 	add_child(terrain)
@@ -288,6 +326,17 @@ func _mirrors(graph: RouteGraph) -> PackedInt32Array:
 	return twins
 
 
+## The ground's height and whether it's blocked at a spread of spots between
+## the route points, and the link rules, as text for the baked links' key.
+func _probe() -> String:
+	var text := "%s %s %s %s %s %s" % [RouteGraph.WALL_SLOPE, RouteGraph.STEEP_SLOPE, RouteGraph.WALL_KINK, RouteGraph.SIDE_CHECK, RouteGraph.JET_SLOPE, RouteGraph.SKI_SLOPE]
+	for k in 97:
+		var x := fposmod(k * 137.5, 1380.0) - 690.0 + 0.37 * k
+		var z := fposmod(k * 71.3, 1180.0) - 590.0 + 0.11 * k
+		text += " %.3f %d" % [surface_at(x, z), 1 if blocked_at(x, z) else 0]
+	return text
+
+
 ## True for a link near a base or a mesa, where the ground beside it can
 ## hide a wall, so it's checked in finer steps and to each side. The rest of
 ## the ground is too smooth to.
@@ -305,6 +354,7 @@ func _needs_sides(a: Vector3, b: Vector3) -> bool:
 ## base points, and the points of interest, linked to neighbours up to 74 m
 ## away.
 func build_route_graph() -> RouteGraph:
+	var graph_t := Time.get_ticks_usec()
 	var graph := RouteGraph.new()
 	graph.lane_titles.assign(["north canyon", "middle", "south spine"])
 	var reach_x := int(PLAY_X / LATTICE)
@@ -350,7 +400,24 @@ func build_route_graph() -> RouteGraph:
 			graph.add_interest(RouteGraph.HIGH_GROUND, -1, graph.add_point(Vector3(x, surface_at(x, spot.y), spot.y)))
 		var on_spine := Vector2(side * 300.0, spine_z(300.0))
 		graph.add_interest(RouteGraph.SNIPER, -1, graph.add_point(Vector3(on_spine.x, surface_at(on_spine.x, on_spine.y), on_spine.y)))
-	graph.auto_link_pairs(LINK_REACH, surface_at, blocked_at, 1.5, 4.0, _needs_sides, _mirrors(graph))
+	if Prof.on:
+		Prof.add("build.graph.points", Time.get_ticks_usec() - graph_t)
+		graph_t = Time.get_ticks_usec()
+	var twins := _mirrors(graph)
+	if Prof.on:
+		Prof.add("build.graph.mirrors", Time.get_ticks_usec() - graph_t)
+		graph_t = Time.get_ticks_usec()
+	route_first_link = graph.links.size()
+	route_key = RouteBake.key_for(graph.points, "%d %d %s %s %s %s" % [MAP_SEED, graph.links.size(), LINK_REACH, LINK_STEP, LINK_FLAT_STEP, _probe()])
+	routes_loaded = use_baked_routes and RouteBake.load_into(ROUTES_FILE, route_key, graph)
+	if not routes_loaded:
+		if use_baked_routes:
+			push_warning("Ochre Fold: baked route links missing or out of date, building them (run tools/bake-routes.sh)")
+		graph.auto_link_pairs(LINK_REACH, surface_at, blocked_at, LINK_STEP, LINK_FLAT_STEP, _needs_sides, twins)
+	route_end_link = graph.links.size()
+	if Prof.on:
+		Prof.add("build.graph.auto_link_pairs", Time.get_ticks_usec() - graph_t)
+		graph_t = Time.get_ticks_usec()
 	# Each mesa top, jetted up to from a point at its foot on the side
 	# facing the middle, and dropped off back to it.
 	for k in MESAS.size():
@@ -363,4 +430,6 @@ func build_route_graph() -> RouteGraph:
 		graph.add_link(foot, top, RouteGraph.Kind.JET, true)
 		graph.add_link(top, foot, RouteGraph.Kind.SKI)
 	link_tower_tops(graph)
+	if Prof.on:
+		Prof.add("build.graph.mesas_towers", Time.get_ticks_usec() - graph_t)
 	return graph

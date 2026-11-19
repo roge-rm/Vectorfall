@@ -13,13 +13,17 @@ const RENDER_SCALES: Array[float] = [0.5, 0.67, 0.8, 1.0]
 const LOOK_SPEEDS: Array[float] = [0.25, 0.4, 0.55, 0.7, 0.85, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
 const TOUCH_SIZES: Array[float] = [0.8, 0.9, 1.0, 1.15, 1.3]
 
-static var outlines := true
-static var hatching := true
+## Graphics a slow device starts with, until the player picks their own.
+const WEAK_VIEW_DISTANCE := 900.0
+const WEAK_RENDER_SCALE := 0.5
+
+static var outlines := not weak_device()
+static var hatching := not weak_device()
 ## How far you can see, in metres: the camera's far plane, where the fog is
 ## nearly solid, and how far chunked ground is drawn.
-static var view_distance := 1200.0
+static var view_distance := WEAK_VIEW_DISTANCE if weak_device() else 1200.0
 ## Share of the screen's resolution the 3D view is drawn at.
-static var render_scale := 1.0
+static var render_scale := WEAK_RENDER_SCALE if weak_device() else 1.0
 ## Look speed for each input scheme, times the normal speed.
 static var look_touch := 1.0
 static var look_mouse := 1.0
@@ -36,12 +40,22 @@ static var sound_volume := 0.8
 static var voice_volume := 0.8
 
 
+## True on a slow device, which starts with lower graphics: Android with 4
+## cores or fewer, or under 3 GB of memory, like the Fire HD 8.
+static func weak_device() -> bool:
+	if not OS.has_feature("android"):
+		return false
+	var memory: int = OS.get_memory_info().get("physical", -1)
+	return OS.get_processor_count() <= 4 or (memory > 0 and memory < 3 * 1024 * 1024 * 1024)
+
+
 ## Puts every setting back to how it starts.
 static func reset() -> void:
-	outlines = true
-	hatching = true
-	view_distance = 1200.0
-	render_scale = 1.0
+	var weak := weak_device()
+	outlines = not weak
+	hatching = not weak
+	view_distance = WEAK_VIEW_DISTANCE if weak else 1200.0
+	render_scale = WEAK_RENDER_SCALE if weak else 1.0
 	look_touch = 1.0
 	look_mouse = 1.0
 	look_pad = 1.0

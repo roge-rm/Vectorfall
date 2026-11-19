@@ -3,11 +3,18 @@ extends CommandSource
 
 ## A bot: it only ever makes PlayerCommands, like a player's input. It thinks
 ## a few times a second (looks and listens, picks a goal, plans a route over
-## the route graph) and steers every tick, with BotCombat turning its look to
-## fight on the way. In a match with flags its goal comes from the role its
+## the route graph) and steers every WORK_TICKS ticks, with BotCombat turning
+## its look to fight on the way every tick. In a match with flags its goal comes from the role its
 ## team's commander gives it and the flags; with none it loops between the
 ## flag stands. Everything that changes
-## what it does is in get_state(), and its only random numbers are the match's.
+## what it does is in get_state(), and its random numbers are its own, seeded
+## from the match's seed and its id.
+##
+## BotDirector.run_bots() runs it each tick in three parts: before_work() and
+## after_work() on the main thread in bot order, and work() between them,
+## maybe on a worker thread at the same time as other bots. work() writes only
+## this bot's own fields and reads soldiers and flags through their snapshot
+## (Soldier.at() and the like), never a node, ray or signal.
 
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
@@ -29,6 +36,10 @@ const PERSONALITY_NAMES: Array[String] = ["default", "aggressive", "careful", "s
 enum Escape { NONE, JET, BACK_OFF, OTHER_WAY }
 const ESCAPE_NAMES: Array[String] = ["", "jet out", "back off", "other way"]
 
+## Bots steer, check their goal and route and carry searches on every this
+## many ticks, half of them on even ticks and half on odd. In between they
+## keep the steering they had, with combat aim and fire still every tick.
+const WORK_TICKS := 2
 ## Seconds with no progress towards the next point before the bot is stuck.
 const STUCK_TIME := 2.5
 ## Metres closer to the next point that count as progress, or a speed
@@ -107,6 +118,8 @@ var skill := 0.5
 var personality := Personality.DEFAULT
 ## Which tick of every BotDirector.THINK_TICKS this bot thinks on.
 var think_offset := 0
+## Which tick of every WORK_TICKS this bot steers on.
+var work_parity := 0
 var perception := BotPerception.new()
 var steering := BotSteering.new()
 var combat := BotCombat.new()
@@ -140,8 +153,16 @@ var path: Array[int] = []
 var path_index := 0
 ## Where the bot was when it planned, the start of the first leg.
 var path_start := Vector3.ZERO
+## A route search still going, carried on each tick, with the tick it was
+## last carried on. The bot keeps to its old route meanwhile.
+var _search: RoutePlanner.Search
+var _search_tick := -1
 ## Links got stuck on, as "from:to", to the tick they stop being avoided.
 var avoid := {}
+## current_link() for the last pair of points asked about.
+var _link_from := -1
+var _link_to := -1
+var _link: RouteGraph.Link
 ## Closest the bot has been to the point it's steering towards.
 var best_distance := INF
 ## The point the stuck check is timing, and ticks spent heading for it.
@@ -162,6 +183,28 @@ var last_position := Vector3.ZERO
 var goal_started := 0
 ## For the bot match report.
 var stats := {}
+## The bot's own random numbers, seeded by the director.
+var rng := RandomNumberGenerator.new()
+## The command work() made for this tick.
+var _command: PlayerCommand
+## The last steering command, before combat, as PlayerCommand.to_dict(),
+## kept for the ticks in between, or empty.
+var _steer := {}
+## Points of the route search it may take this tick, handed out by the
+## director before work().
+var _search_allow := 0
+## A search began in work() this tick, waiting for allow_start().
+var _search_new := false
+## Searches work() finished, for run_bots() to keep in the route store.
+var found: Array[RoutePlanner.Search] = []
+## Ready to go for the flag, as it was before work() this tick, read by the
+## team's other offence bots.
+var ready_seen := false
+## The disc's way out, from and to, for after_work() to check with a ray
+## before the shot.
+var _disc_check := false
+var _disc_from := Vector3.ZERO
+var _disc_to := Vector3.ZERO
 
 
 ## Back to the start of the goal loop, after spawning or respawning.
@@ -170,6 +213,7 @@ func reset() -> void:
 	goal_point = -1
 	path.clear()
 	path_index = 0
+	_search = null
 	escape = Escape.NONE
 	escape_ticks = 0
 	refilling = false
@@ -181,10 +225,11 @@ func reset() -> void:
 	at_goal = false
 	attacking = false
 	rally_tick = -1
+	_steer = {}
 	steering.reset()
 	combat.reset()
 	if soldier != null:
-		last_position = soldier.global_position
+		last_position = soldier.at()
 		yaw = soldier.yaw
 	if stats.is_empty():
 		stats = {
@@ -206,22 +251,146 @@ func reset() -> void:
 		}
 
 
-func make_command(delta: float) -> PlayerCommand:
+## The command work() made for this tick.
+func make_command(_delta: float) -> PlayerCommand:
+	if _command == null:
+		var command := PlayerCommand.new()
+		command.yaw = yaw
+		command.pitch = pitch
+		return command
+	return _command
+
+
+## True on the ticks it steers.
+func _works_now() -> bool:
+	return (game.tick + work_parity) % WORK_TICKS == 0
+
+
+## True on the first tick it steers at or after each of its think ticks, one
+## every BotDirector.THINK_TICKS.
+func _thinks_now() -> bool:
+	if not _works_now():
+		return false
+	for back in WORK_TICKS:
+		if posmod(game.tick - back + think_offset, BotDirector.THINK_TICKS) == 0:
+			return true
+	return false
+
+
+## True if it thinks or carries a route search on this tick, after
+## before_work(): the bots with the most work.
+func busy() -> bool:
+	return _command == null and soldier != null and not soldier.dead and (_thinks_now() or _search_allow > 0)
+
+
+## True if it began a route search in work() this tick, which took no points
+## yet, for the director to hand points to.
+func started_search() -> bool:
+	return _search_new and _search != null and not _search.done
+
+
+## Main thread, in bot order, before work(): looks along its sight lines if it
+## thinks this tick.
+func before_work() -> void:
+	ready_seen = attacking or (goal == Goal.RALLY and at_goal)
+	_command = null
+	_search_allow = 0
+	_search_new = false
+	_disc_check = false
+	if soldier == null or game == null or soldier.dead:
+		return
+	if _thinks_now():
+		perception.look(soldier, game, director)
+
+
+## True if it carries a search on this tick, after before_work().
+func wants_points() -> bool:
+	return soldier != null and game != null and not soldier.dead and _search != null and not _search.done and not was_dead and _works_now()
+
+
+## Main thread, before work(): takes points for the search it carries on from
+## the pool left. Returns what's left of the pool.
+func allow_carry(pool: int) -> int:
+	_search_allow = mini(BotDirector.SEARCH_POINTS * WORK_TICKS, pool)
+	return pool - _search_allow
+
+
+## Main thread, after work(): takes points from what's left of the pool for a
+## search work() began. Returns what's left of the pool.
+func allow_start(pool: int) -> int:
+	_search_allow = mini(BotDirector.SEARCH_FIRST, pool)
+	return pool - _search_allow
+
+
+## Runs a search work() began with the points allow_start() gave, and follows
+## the route if it's done. May run on a worker thread, like work().
+func work_start() -> void:
+	if _run_search(_search_allow):
+		_take_route()
+
+
+## Main thread, in bot order, after work(): the ray for a disc shot, which
+## holds the shot if the way out is blocked.
+func after_work() -> void:
+	if not _disc_check:
+		return
+	_disc_check = false
+	if Prof.on:
+		Prof.count("ray_by_disc_check")
+	if not director.take_ray(true) or not game.line_clear(_disc_from, _disc_to):
+		_command.buttons &= ~PlayerCommand.FIRE
+
+
+## Works out this tick's command. May run on a worker thread: see the class
+## notes.
+func work(delta: float) -> void:
 	var command := PlayerCommand.new()
 	command.yaw = yaw
 	command.pitch = pitch
+	_command = command
 	if soldier == null or game == null:
-		return command
-	director.before_tick()
+		return
 	if soldier.dead:
 		was_dead = true
-		return command
+		return
 	if was_dead:
 		was_dead = false
 		reset()
 	_track(delta)
-	if (game.tick + think_offset) % BotDirector.THINK_TICKS == 0:
-		think()
+	if _works_now():
+		command = _steer_tick(delta)
+		_steer = command.to_dict()
+	elif not _steer.is_empty():
+		command = PlayerCommand.from_dict(_steer)
+	if Prof.on:
+		var prof_t := Time.get_ticks_usec()
+		combat.apply(self, command, delta)
+		Prof.add("bot.combat_aim", Time.get_ticks_usec() - prof_t)
+	else:
+		combat.apply(self, command, delta)
+	yaw = command.yaw
+	pitch = command.pitch
+	_command = command
+
+
+## Thinks if it's time, carries its route search on and steers, on the ticks
+## it works. The steering command, before combat.
+func _steer_tick(delta: float) -> PlayerCommand:
+	var command := PlayerCommand.new()
+	command.yaw = yaw
+	command.pitch = pitch
+	if _thinks_now():
+		if Prof.on:
+			var prof_t := Time.get_ticks_usec()
+			think()
+			Prof.add("bot.think", Time.get_ticks_usec() - prof_t)
+			Prof.count("bot_thinks")
+		else:
+			think()
+	if _search != null and _search_tick != game.tick:
+		_search_tick = game.tick
+		if _run_search(_search_allow):
+			_take_route()
 	if _ctf():
 		_check_goal()
 	elif goal_point >= 0 and _near(director.graph.points[goal_point]):
@@ -231,29 +400,59 @@ func make_command(delta: float) -> PlayerCommand:
 	elif path.is_empty() and not direct:
 		pass
 	else:
-		_check_stuck(delta)
+		if Prof.on:
+			var prof_t := Time.get_ticks_usec()
+			_check_stuck(delta)
+			Prof.add("bot.check_stuck", Time.get_ticks_usec() - prof_t)
+		else:
+			_check_stuck(delta)
 		if escape_ticks > 0:
 			command = _escape_command()
-			escape_ticks -= 1
+			escape_ticks = maxi(escape_ticks - WORK_TICKS, 0)
 			if escape_ticks == 0 and escape == Escape.OTHER_WAY:
 				if direct:
 					direct = false
 					no_direct_until = game.tick + 300
 				replan()
+		elif Prof.on:
+			var prof_t := Time.get_ticks_usec()
+			command = steering.steer(self, delta)
+			Prof.add("bot.steering", Time.get_ticks_usec() - prof_t)
 		else:
 			command = steering.steer(self, delta)
-	combat.apply(self, command, delta)
-	yaw = command.yaw
-	pitch = command.pitch
 	return command
+
+
+## Carries the search on by up to budget points, noting a route found for the
+## route store. True once it's done.
+func _run_search(budget: int) -> bool:
+	var done := director.run_plan(_search, budget)
+	if done and Soldier.use_snapshot and not _search.key.is_empty():
+		found.append(_search)
+	return done
+
+
+## The way out of a disc shot, for after_work() to check with a ray.
+func check_disc(from: Vector3, to: Vector3) -> void:
+	_disc_check = true
+	_disc_from = from
+	_disc_to = to
 
 
 ## Looks and listens, picks a goal and plans a route to it when it needs one.
 func think() -> void:
-	perception.update(soldier, game, director)
-	combat.think(self)
+	if Prof.on:
+		var prof_t := Time.get_ticks_usec()
+		perception.listen(soldier, game, director)
+		Prof.add("bot.perception", Time.get_ticks_usec() - prof_t)
+		prof_t = Time.get_ticks_usec()
+		combat.think(self)
+		Prof.add("bot.combat_think", Time.get_ticks_usec() - prof_t)
+	else:
+		perception.listen(soldier, game, director)
+		combat.think(self)
 	if goal == Goal.HOLD or goal == Goal.POINT:
-		if goal == Goal.POINT and (path.is_empty() or _off_route() or _cant_turn()):
+		if goal == Goal.POINT and _needs_route():
 			replan()
 		return
 	if _ctf():
@@ -263,7 +462,7 @@ func think() -> void:
 		_set_goal(Goal.ENEMY_STAND)
 	elif goal == Goal.HOLD:
 		return
-	elif path.is_empty() or _off_route() or _cant_turn():
+	elif _needs_route():
 		replan()
 
 
@@ -275,7 +474,10 @@ func _ctf() -> bool:
 ## Picks a goal from the role and the flags, and plans to it when it changes
 ## or moves.
 func _think_ctf() -> void:
+	var prof_t := Time.get_ticks_usec() if Prof.on else 0
 	var next := _choose_goal()
+	if Prof.on:
+		Prof.add("bot.choose_goal", Time.get_ticks_usec() - prof_t)
 	var kind: Goal = next[0]
 	var where: Vector3 = next[1]
 	var moved := where.distance_to(planned_for) > 12.0 and (game.tick - planned_tick) / 60.0 >= REPLAN_TIME
@@ -293,7 +495,7 @@ func _think_ctf() -> void:
 		var carrier_due := goal == Goal.CAPTURE and (game.tick - planned_tick) / 60.0 >= CARRIER_REPLAN and no_progress < 0.5 and escape_ticks == 0 and not steering.resting and not steering.climbing and boss != null and not boss.known.is_empty()
 		if (moved or carrier_due) and not direct:
 			replan()
-	var pos := soldier.global_position
+	var pos := soldier.at()
 	var to := goal_target - pos
 	var close := Vector2(to.x, to.z).length() < DIRECT_RANGE and absf(to.y) < DIRECT_HEIGHT
 	var route_done := not path.is_empty() and path_index >= path.size() - 1 and _near(director.graph.points[path[path_index]])
@@ -309,7 +511,7 @@ func _think_ctf() -> void:
 	elif not want_direct and direct:
 		direct = false
 		replan()
-	elif not direct and (path.is_empty() or _off_route() or _cant_turn()):
+	elif not direct and _needs_route():
 		replan()
 
 
@@ -318,12 +520,12 @@ func _choose_goal() -> Array:
 	var team := soldier.team
 	var own: Flag = game.flags.get(team)
 	var theirs: Flag = game.flags.get(1 - team)
-	var pos := soldier.global_position
+	var pos := soldier.at()
 	var me := soldier.entity_id
 	var boss := director.commander(team)
 	if theirs != null and theirs.mode == Flag.Mode.CARRIED and theirs.carrier_id == me:
-		if own != null and own.mode == Flag.Mode.DROPPED and own.global_position.distance_to(pos) < 60.0:
-			return [Goal.RETURN_FLAG, own.global_position]
+		if own != null and own.mode == Flag.Mode.DROPPED and own.at().distance_to(pos) < 60.0:
+			return [Goal.RETURN_FLAG, own.at()]
 		if own != null and own.mode == Flag.Mode.CARRIED and pos.distance_to(game.stands[team]) < HIDE_RANGE and boss != null:
 			# It can't score until our flag is back, so it waits out of the way.
 			return [Goal.HIDE, boss.hide_point()]
@@ -332,27 +534,27 @@ func _choose_goal() -> Array:
 	# carry on with.
 	var pickup: int = boss.pickups.get(me, -1) if boss != null else -1
 	if pickup == team and own.mode == Flag.Mode.DROPPED:
-		return [Goal.RETURN_FLAG, own.global_position]
+		return [Goal.RETURN_FLAG, own.at()]
 	if pickup == 1 - team and theirs.mode == Flag.Mode.DROPPED:
-		return [Goal.TAKE_FLAG, theirs.global_position]
+		return [Goal.TAKE_FLAG, theirs.at()]
 	var holding_theirs := theirs != null and theirs.mode == Flag.Mode.CARRIED
 	if own != null and own.mode == Flag.Mode.DROPPED:
-		if role in [Role.DEFENCE, Role.LIGHT_DEFENCE, Role.CHASE] or own.global_position.distance_to(pos) < RETURN_RANGE:
-			return [Goal.RETURN_FLAG, own.global_position]
-	if theirs != null and theirs.mode == Flag.Mode.DROPPED and role in [Role.OFFENCE, Role.ESCORT] and theirs.global_position.distance_to(pos) < RETURN_RANGE:
-		return [Goal.TAKE_FLAG, theirs.global_position]
+		if role in [Role.DEFENCE, Role.LIGHT_DEFENCE, Role.CHASE] or own.at().distance_to(pos) < RETURN_RANGE:
+			return [Goal.RETURN_FLAG, own.at()]
+	if theirs != null and theirs.mode == Flag.Mode.DROPPED and role in [Role.OFFENCE, Role.ESCORT] and theirs.at().distance_to(pos) < RETURN_RANGE:
+		return [Goal.TAKE_FLAG, theirs.at()]
 	var own_taken := own != null and own.mode == Flag.Mode.CARRIED
 	if own_taken:
 		var carrier := game.soldier(own.carrier_id)
 		if carrier != null:
-			var near := carrier.global_position.distance_to(pos)
+			var near := carrier.at().distance_to(pos)
 			if role == Role.CHASE and boss != null:
 				var chase: Array = boss.chase_point(role_slot, pos)
 				return [Goal.CUT_OFF if chase[1] else Goal.CHASE, chase[0]]
 			# Anyone close, and light defence from anywhere, goes for it.
 			if role == Role.LIGHT_DEFENCE or (role != Role.DEFENCE and near < 30.0) or (role == Role.DEFENCE and near < GUARD_RANGE) or (role != Role.ESCORT and holding_theirs):
 				var lead := clampf(near / 40.0, 0.0, 2.0)
-				return [Goal.CHASE, carrier.global_position + carrier.velocity * lead]
+				return [Goal.CHASE, carrier.at() + carrier.vel() * lead]
 	if role == Role.ESCORT:
 		var runner := game.soldier(role_target)
 		if runner != null and not runner.dead:
@@ -364,15 +566,15 @@ func _choose_goal() -> Array:
 	var low := soldier.health < low_health() and backs_off
 	if holding_theirs and role != Role.DEFENCE:
 		var carrier := game.soldier(theirs.carrier_id)
-		if carrier != null and role == Role.LIGHT_DEFENCE and carrier.global_position.distance_to(game.stands[team]) < MEET_RANGE:
+		if carrier != null and role == Role.LIGHT_DEFENCE and carrier.at().distance_to(game.stands[team]) < MEET_RANGE:
 			# Out to meet it on the way in, clearing whoever waits for it.
 			return [Goal.ESCORT, _escort_spot(carrier)]
-		if carrier != null and role != Role.LIGHT_DEFENCE and carrier.global_position.distance_to(pos) < ESCORT_RANGE_FAR:
+		if carrier != null and role != Role.LIGHT_DEFENCE and carrier.at().distance_to(pos) < ESCORT_RANGE_FAR:
 			return [Goal.ESCORT, _escort_spot(carrier)]
 	if low:
 		return [Goal.RETREAT, _defence_spot(role_slot + 1)]
 	if role == Role.OFFENCE and theirs != null and theirs.mode != Flag.Mode.CARRIED:
-		var at := theirs.global_position
+		var at := theirs.at()
 		if theirs.mode == Flag.Mode.HOME:
 			at = game.stands[1 - team] + Vector3.DOWN * 0.5
 			if not _ready_to_attack():
@@ -418,8 +620,8 @@ func low_health() -> float:
 ## Where an escort goes round a runner: the first ahead of it, clearing the
 ## way, the next two behind to either side, where chasers come from.
 func _escort_spot(runner: Soldier) -> Vector3:
-	var at := runner.global_position
-	var heading := Vector3(runner.velocity.x, 0.0, runner.velocity.z)
+	var at := runner.at()
+	var heading := Vector3(runner.vel().x, 0.0, runner.vel().z)
 	if heading.length() < 5.0:
 		# Standing or slow: towards where it's going, home with a flag or
 		# their stand without.
@@ -428,7 +630,7 @@ func _escort_spot(runner: Soldier) -> Vector3:
 		heading = Vector3(goal_at.x - at.x, 0.0, goal_at.z - at.z)
 	heading = heading.normalized() if heading.length() > 0.1 else Vector3.FORWARD
 	var side := heading.cross(Vector3.UP)
-	var spot := at + runner.velocity * 0.5
+	var spot := at + runner.vel() * 0.5
 	match role_slot % 3:
 		0:
 			spot += heading * 25.0
@@ -457,11 +659,14 @@ func _ready_to_attack() -> bool:
 		rally_tick = game.tick
 	var waiting := 0
 	var ready := 0
+	# Other bots as they were before this tick's work, which they may be
+	# doing now on other threads.
 	for brain in director.brains:
 		if brain.soldier.team != soldier.team or brain.role != Role.OFFENCE or brain.soldier.dead:
 			continue
 		waiting += 1
-		if brain.attacking or (brain.goal == Goal.RALLY and brain.at_goal):
+		var is_ready := brain.ready_seen if brain != self else (attacking or (goal == Goal.RALLY and at_goal))
+		if is_ready:
 			ready += 1
 	if ready >= waiting or (game.tick - rally_tick) / 60.0 > RALLY_WAIT:
 		attacking = true
@@ -527,7 +732,7 @@ func wants_jet_in() -> bool:
 	var theirs: Flag = game.flags.get(1 - soldier.team)
 	if theirs == null or theirs.mode != Flag.Mode.HOME:
 		return false
-	var to := goal_target - soldier.global_position
+	var to := goal_target - soldier.at()
 	var flat := Vector2(to.x, to.z).length()
 	return flat < JET_IN_FAR and flat > JET_IN_NEAR
 
@@ -542,7 +747,7 @@ func _check_goal() -> void:
 	if reach < 0.0:
 		at_goal = false
 		return
-	var to := goal_target - soldier.global_position
+	var to := goal_target - soldier.at()
 	var near := Vector2(to.x, to.z).length() < reach and absf(to.y) < ARRIVE_HEIGHT
 	if near and not at_goal:
 		stats.routes += 1
@@ -562,7 +767,7 @@ func _hold_command() -> PlayerCommand:
 	command.yaw = yaw
 	command.pitch = 0.0
 	if _ctf():
-		var to := game.stands[1 - soldier.team] - soldier.global_position
+		var to := game.stands[1 - soldier.team] - soldier.at()
 		command.yaw = atan2(-to.x, -to.z)
 	return command
 
@@ -591,30 +796,51 @@ func _arrived() -> void:
 		goal = Goal.HOLD
 		goal_point = -1
 		path.clear()
+		_search = null
 		return
 	_set_goal(Goal.HOME_STAND if goal == Goal.ENEMY_STAND else Goal.ENEMY_STAND)
 
 
 func _near(point: Vector3) -> bool:
-	var to := point - soldier.global_position
+	var to := point - soldier.at()
 	return Vector2(to.x, to.z).length() < ARRIVE_RANGE and absf(to.y) < ARRIVE_HEIGHT
 
 
 ## Plans a route to the goal from the nearest point ahead, at the bot's speed and
 ## energy, keeping away from links it got stuck on.
 func replan() -> void:
-	var old_target: int = path[path_index] if path_index < path.size() else -1
-	var old_best := best_distance
-	var old_no_progress := no_progress
-	path.clear()
-	path_index = 0
+	if Prof.on:
+		var prof_t := Time.get_ticks_usec()
+		_replan()
+		Prof.add("bot.replan", Time.get_ticks_usec() - prof_t)
+		Prof.count("replans")
+	else:
+		_replan()
+
+
+## No route, or off it or unable to make its turn, and no search going that
+## will bring a new one.
+func _needs_route() -> bool:
+	return _search == null and (path.is_empty() or _off_route() or _cant_turn())
+
+
+## Starts a search for a new route, dropping any still going. One done at
+## once is taken now; otherwise the bot keeps its old route until it's done.
+func _replan() -> void:
+	_search = null
 	var graph := director.graph
 	if _ctf() and goal >= Goal.TAKE_FLAG:
+		var prof_t0 := Time.get_ticks_usec() if Prof.on else 0
 		goal_point = graph.nearest(goal_target)
+		if Prof.on:
+			Prof.add("bot.replan.nearest", Time.get_ticks_usec() - prof_t0)
 		planned_for = goal_target
 		planned_tick = game.tick
 	if goal_point < 0:
+		path.clear()
+		path_index = 0
 		return
+	var prof_a := Time.get_ticks_usec() if Prof.on else 0
 	var avoid_links := {}
 	for key: String in avoid.keys():
 		if avoid[key] <= game.tick:
@@ -638,9 +864,35 @@ func replan() -> void:
 			for point in boss.points_near_enemies(ENEMY_REACH):
 				for link: RouteGraph.Link in graph.out_links[point]:
 					avoid_links[link] = float(avoid_links.get(link, 0.0)) + ENEMY_COST
-	var start := graph.start_point(soldier.global_position, soldier.velocity)
-	path = director.plan(start, goal_point, soldier.velocity, soldier.energy, avoid_links)
-	path_start = soldier.global_position
+	if Prof.on:
+		Prof.add("bot.replan.avoid", Time.get_ticks_usec() - prof_a)
+	var prof_t := Time.get_ticks_usec() if Prof.on else 0
+	var start := graph.start_point(soldier.at(), soldier.vel())
+	if Prof.on:
+		Prof.add("bot.replan.start_point", Time.get_ticks_usec() - prof_t)
+	# In the bot phase the search takes its first points after work(), from
+	# the tick's shared pool; outside it, at once.
+	var first := 0 if Soldier.use_snapshot else BotDirector.SEARCH_FIRST
+	_search = director.begin_plan(start, goal_point, soldier.vel(), soldier.energy, avoid_links, first)
+	if not Soldier.use_snapshot:
+		director.owe_points(_search.expanded)
+	_search_tick = game.tick
+	_search_new = Soldier.use_snapshot and not _search.done
+	if _search.done:
+		if Soldier.use_snapshot and not _search.key.is_empty() and _search.expanded > 0:
+			found.append(_search)
+		_take_route()
+
+
+## Follows the route the search found.
+func _take_route() -> void:
+	var old_target: int = path[path_index] if path_index < path.size() else -1
+	var old_best := best_distance
+	var old_no_progress := no_progress
+	path.assign(_search.result)
+	path_index = 0
+	_search = null
+	path_start = soldier.at()
 	best_distance = INF
 	no_progress = 0.0
 	advance()
@@ -673,7 +925,13 @@ func is_last() -> bool:
 func current_link() -> RouteGraph.Link:
 	if direct or path_index == 0:
 		return null
-	return director.graph.link_between(path[path_index - 1], path[path_index])
+	var from := path[path_index - 1]
+	var to := path[path_index]
+	if from != _link_from or to != _link_to:
+		_link_from = from
+		_link_to = to
+		_link = director.graph.link_between(from, to)
+	return _link
 
 
 ## Moves on to the next point once the bot is close to this one, or past it
@@ -682,7 +940,7 @@ func advance() -> void:
 	if direct:
 		return
 	var graph := director.graph
-	var pos := soldier.global_position
+	var pos := soldier.at()
 	var speed := soldier.horizontal_speed()
 	while path_index < path.size() - 1:
 		var p := graph.points[path[path_index]]
@@ -715,7 +973,7 @@ func aim_point(lookahead: float) -> Vector3:
 	if direct:
 		return goal_target
 	var graph := director.graph
-	var pos := soldier.global_position
+	var pos := soldier.at()
 	var a := leg_start()
 	var b := target()
 	var ab := Vector2(b.x - a.x, b.z - a.z)
@@ -750,13 +1008,13 @@ func aim_point(lookahead: float) -> Vector3:
 ## Going too fast to make the turn to the next point, so a route that
 ## carries on more the way it's going is better.
 func _cant_turn() -> bool:
-	var v := Vector2(soldier.velocity.x, soldier.velocity.z)
-	var to := Vector2(target().x - soldier.global_position.x, target().z - soldier.global_position.z)
+	var v := Vector2(soldier.vel().x, soldier.vel().z)
+	var to := Vector2(target().x - soldier.at().x, target().z - soldier.at().z)
 	return v.length() > 20.0 and to.length() > 1.0 and absf(v.angle_to(to)) > deg_to_rad(70.0)
 
 
 func _off_route() -> bool:
-	var pos := soldier.global_position
+	var pos := soldier.at()
 	var a := leg_start()
 	var b := target()
 	var closest := Geometry3D.get_closest_point_to_segment(Vector3(pos.x, 0.0, pos.z), Vector3(a.x, 0.0, a.z), Vector3(b.x, 0.0, b.z))
@@ -769,22 +1027,27 @@ func _off_route() -> bool:
 
 ## Counts no progress towards the next point, and picks an escape move when
 ## there's been none for STUCK_TIME: a hop with the jet, then backing off to
-## one side, then another way round with the link avoided.
+## one side, then another way round with the link avoided. Runs on the
+## ticks the bot works, after moving on along the route.
 func _check_stuck(delta: float) -> void:
+	var prof_t := Time.get_ticks_usec() if Prof.on else 0
 	advance()
-	var to := target() - soldier.global_position
+	if Prof.on:
+		Prof.add("stuck.advance", Time.get_ticks_usec() - prof_t)
+	delta *= WORK_TICKS
+	var to := target() - soldier.at()
 	var distance := to.length()
 	# Heading back after going wide is progress too. Only across the ground,
 	# so bobbing up and down under a ledge isn't.
 	var flat := Vector3(to.x, 0.0, to.z)
-	var closing := Vector3(soldier.velocity.x, 0.0, soldier.velocity.z).dot(flat / maxf(flat.length(), 0.01))
+	var closing := Vector3(soldier.vel().x, 0.0, soldier.vel().z).dot(flat / maxf(flat.length(), 0.01))
 	# Too long on one leg is stuck too, say sliding back down each time it
 	# nearly makes a climb.
 	var leg_key := -2 if direct else path[path_index]
 	if leg_key != leg_target:
 		leg_target = leg_key
 		leg_ticks = 0
-	leg_ticks += 1
+	leg_ticks += WORK_TICKS
 	var leg_limit := maxf(LEG_TIME, leg_start().distance_to(target()) / 3.0)
 	if leg_ticks > int(leg_limit * 60.0) and escape_ticks == 0:
 		leg_ticks = 0
@@ -807,9 +1070,9 @@ func _check_stuck(delta: float) -> void:
 	escapes += 1
 	escape = [Escape.JET, Escape.BACK_OFF, Escape.OTHER_WAY][(escapes - 1) % 3]
 	escape_ticks = ESCAPE_TICKS
-	escape_side = -1.0 if game.rng.randf() < 0.5 else 1.0
+	escape_side = -1.0 if rng.randf() < 0.5 else 1.0
 	var from := path[path_index - 1] if path_index > 0 and not direct else -1
-	var pos := soldier.global_position
+	var pos := soldier.at()
 	stats.stuck_spots.append({
 		"tick": game.tick,
 		"bot": soldier.entity_id,
@@ -823,7 +1086,7 @@ func _check_stuck(delta: float) -> void:
 
 func _escape_command() -> PlayerCommand:
 	var command := PlayerCommand.new()
-	var to := target() - soldier.global_position
+	var to := target() - soldier.at()
 	var heading := atan2(-to.x, -to.z)
 	command.yaw = heading
 	command.pitch = 0.0
@@ -834,18 +1097,19 @@ func _escape_command() -> PlayerCommand:
 				# Out of energy: stand still, which holds on any slope a soldier
 				# can stand on, until there's enough to jet out.
 				refilling = soldier.energy < BotSteering.REST_UNTIL and soldier.grounded
-				escape_ticks += 1
+				escape_ticks += WORK_TICKS
 				if refilling:
 					var down := BotSteering.rest_wish(soldier)
 					if down != Vector3.ZERO:
 						var local := Basis(Vector3.UP, command.yaw).inverse() * down
 						command.move = Vector2(local.x, -local.z)
 					return command
+				# Full enough: the jet out starts now, with its jump.
 				escape_ticks = ESCAPE_TICKS
 				return command
 			if done == 0 and soldier.energy < ESCAPE_ENERGY and soldier.grounded:
 				refilling = true
-				escape_ticks += 1
+				escape_ticks += WORK_TICKS
 				return command
 			# Jump and jet up towards the next point, a little to one side.
 			command.move = Vector2(escape_side * 0.3, 1.0).normalized()
@@ -862,13 +1126,13 @@ func _escape_command() -> PlayerCommand:
 
 
 func _track(delta: float) -> void:
-	var pos := soldier.global_position
+	var pos := soldier.at()
 	var moved := pos.distance_to(last_position)
 	# Respawning or being set somewhere isn't travel.
 	if moved < soldier.tuning.max_speed * delta * 2.0:
 		stats.distance += moved
 	last_position = pos
-	var speed := soldier.velocity.length()
+	var speed := soldier.vel().length()
 	stats.speed_sum += speed
 	stats.ticks += 1
 	stats.top_speed = maxf(stats.top_speed, speed)
@@ -893,7 +1157,7 @@ func describe() -> String:
 	if GOAL_NAMES[goal] != ROLE_NAMES[role]:
 		name_ += ", " + GOAL_NAMES[goal]
 	var who := "%s, %s" % [BotDirector.SKILL_NAMES[BotDirector.skill_level(skill)], PERSONALITY_NAMES[personality]]
-	return "%s: %s%s\n%s  %.0f m/s  energy %.0f  health %.0f  knows %d" % [name_, doing, fight, who, soldier.velocity.length(), soldier.energy, soldier.health, perception.known_count()]
+	return "%s: %s%s\n%s  %.0f m/s  energy %.0f  health %.0f  knows %d" % [name_, doing, fight, who, soldier.vel().length(), soldier.energy, soldier.health, perception.known_count()]
 
 
 func get_state() -> Dictionary:
@@ -903,6 +1167,8 @@ func get_state() -> Dictionary:
 		"skill": skill,
 		"personality": personality,
 		"think_offset": think_offset,
+		"work_parity": work_parity,
+		"steer": _steer.duplicate(),
 		"goal": goal,
 		"goal_point": goal_point,
 		"goal_target": goal_target,
@@ -922,6 +1188,8 @@ func get_state() -> Dictionary:
 		"path": path.duplicate(),
 		"path_index": path_index,
 		"path_start": path_start,
+		"search": _search.to_state() if _search != null else null,
+		"search_tick": _search_tick,
 		"avoid": avoid.duplicate(),
 		"best_distance": best_distance,
 		"leg_target": leg_target,
@@ -938,6 +1206,8 @@ func get_state() -> Dictionary:
 		"perception": perception.get_state(),
 		"steering": steering.get_state(),
 		"stats": stats.duplicate(true),
+		"rng_seed": rng.seed,
+		"rng_state": rng.state,
 	}
 
 
@@ -947,6 +1217,8 @@ func set_state(state: Dictionary) -> void:
 	skill = state.skill
 	personality = state.get("personality", Personality.DEFAULT)
 	think_offset = state.think_offset
+	work_parity = state.get("work_parity", 0)
+	_steer = state.get("steer", {}).duplicate()
 	goal = state.goal
 	goal_point = state.goal_point
 	goal_target = state.goal_target
@@ -966,6 +1238,9 @@ func set_state(state: Dictionary) -> void:
 	path.assign(state.path)
 	path_index = state.path_index
 	path_start = state.path_start
+	var search = state.get("search")
+	_search = RoutePlanner.Search.from_state(director.graph, search) if search != null else null
+	_search_tick = state.get("search_tick", -1)
 	avoid = state.avoid.duplicate()
 	best_distance = state.best_distance
 	leg_target = state.leg_target
@@ -982,3 +1257,6 @@ func set_state(state: Dictionary) -> void:
 	perception.set_state(state.perception)
 	steering.set_state(state.steering)
 	stats = state.stats.duplicate(true)
+	if state.has("rng_seed"):
+		rng.seed = state.rng_seed
+		rng.state = state.rng_state

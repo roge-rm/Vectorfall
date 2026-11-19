@@ -24,7 +24,7 @@ const REST_UNTIL := 95.0
 ## on and wait for energy, about 30°.
 const FLAT_ENOUGH := 0.86
 ## Ticks of jetting to get over something in the way, and the energy it
-## needs to start.
+## needs to start. steer() runs every BotBrain.WORK_TICKS ticks.
 const HOP_TICKS := 40
 const HOP_ENERGY := 15.0
 
@@ -56,14 +56,17 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 	var command := PlayerCommand.new()
 	var s := brain.soldier
 	var t := s.tuning
-	var pos := s.global_position
-	var vh := Vector3(s.velocity.x, 0.0, s.velocity.z)
+	var pos := s.at()
+	var vh := Vector3(s.vel().x, 0.0, s.vel().z)
 	var speed := vh.length()
 	var lookahead := clampf(speed * 0.7, 6.0, 30.0)
+	var prof_t := Time.get_ticks_usec() if Prof.on else 0
 	var aim := brain.aim_point(lookahead)
+	if Prof.on:
+		Prof.add("steer.aim_point", Time.get_ticks_usec() - prof_t)
 	var to_aim := aim - pos
 	var flat := Vector3(to_aim.x, 0.0, to_aim.z)
-	var dir := flat.normalized() if flat.length() > 0.1 else -s.transform.basis.z
+	var dir := flat.normalized() if flat.length() > 0.1 else -s.back()
 	var target := brain.target()
 	var link := brain.current_link()
 	var last := brain.is_last()
@@ -115,7 +118,12 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 	var rise := maxf(aim.y, target.y) - pos.y
 	var carries := speed * speed / (2.0 * t.gravity)
 	var wall_ahead := link != null and link.must_jet and to_target < 15.0 and target.y > pos.y - 0.5
-	if hop_ticks == 0 and _blocked(s, dir):
+	if Prof.on:
+		prof_t = Time.get_ticks_usec()
+	var blocked := hop_ticks == 0 and _blocked(s, dir)
+	if Prof.on:
+		Prof.add("steer.blocked", Time.get_ticks_usec() - prof_t)
+	if blocked:
 		# A jump clears about a metre, the jet more if there's energy for it.
 		jump = s.grounded
 		if s.energy > HOP_ENERGY:
@@ -142,7 +150,7 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 		brain.no_progress = 0.0
 		doing = "wait for energy"
 	elif hop_ticks > 0:
-		hop_ticks -= 1
+		hop_ticks = maxi(hop_ticks - BotBrain.WORK_TICKS, 0)
 		jet = s.energy > 2.0
 		doing = "hop"
 	elif wall_ahead and s.grounded and s.energy < link.energy and not climbing:
@@ -156,18 +164,18 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 		jet = climbing
 		jump = s.grounded
 		doing = "jet over"
-	elif rise > (0.3 if climbing else 1.5) and (carries < rise + 3.0 or speed < CLIMB_SPEED) and (climbing or s.velocity.y > -3.0):
+	elif rise > (0.3 if climbing else 1.5) and (carries < rise + 3.0 or speed < CLIMB_SPEED) and (climbing or s.vel().y > -3.0):
 		if climbing:
 			climbing = s.energy > 2.0
 		else:
 			climbing = s.energy > CLIMB_RESERVE
 		jet = climbing
 		doing = "jet climb" if jet else "climb"
-	elif not s.grounded and s.velocity.y < -2.0 and pos.y < target.y - 1.0 and s.energy > 10.0:
+	elif not s.grounded and s.vel().y < -2.0 and pos.y < target.y - 1.0 and s.energy > 10.0:
 		# Falling short of a point above.
 		jet = true
 		doing = "jet gap"
-	elif not braking and speed < JET_IN_SPEED and s.energy > JET_IN_ENERGY and s.velocity.y < 4.0 and brain.wants_jet_in():
+	elif not braking and speed < JET_IN_SPEED and s.energy > JET_IN_ENERGY and s.vel().y < 4.0 and brain.wants_jet_in():
 		# Builds speed on the run in to their flag.
 		jet = true
 		ski = true
@@ -211,8 +219,9 @@ static func rest_wish(s: Soldier) -> Vector3:
 
 ## True if the soldier ran into a wall last tick while heading into it.
 func _blocked(s: Soldier, dir: Vector3) -> bool:
-	for k in s.get_slide_collision_count():
-		var normal := s.get_slide_collision(k).get_normal()
+	# Walls are what's steeper than the floor angle (50°), which takes in
+	# everything this counts.
+	for normal in s.wall_normals():
 		if absf(normal.y) < 0.4 and normal.dot(dir) < -0.5:
 			return true
 	return false

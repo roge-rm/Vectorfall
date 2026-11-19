@@ -72,8 +72,37 @@ var links: Array[Link] = []
 var out_links: Array[Array] = []
 ## Each is { kind, team, point }.
 var interest: Array[Dictionary] = []
+## interest_points() answers by "kind:team", kept while interest has
+## _interest_seen entries.
+var _interest_found := {}
+var _interest_seen := -1
+## Guards the lazy caches, interest points and reach, for bot threads.
+var _cache_lock := Mutex.new()
 ## While linking, whether there were links already to keep from doubling.
 var _check_existing := true
+
+## The links in packed arrays for the planner, made by packed() when the
+## graph has changed. Point k's links are slots out_first[k] to
+## out_first[k + 1] - 1, in out_links order.
+var out_first := PackedInt32Array()
+var slot_to := PackedInt32Array()
+var slot_link: Array[Link] = []
+## The flat way along the link, Vector2(dx, dz) / length, or zero when the
+## link is 0.1 m long or less.
+var slot_dir := PackedVector2Array()
+var slot_distance := PackedFloat64Array()
+var slot_climb := PackedFloat64Array()
+var slot_steep := PackedFloat64Array()
+var slot_energy := PackedFloat64Array()
+var slot_must_jet := PackedByteArray()
+## Strongly connected component of each point: you can get from any point
+## to any other in the same one.
+var component := PackedInt32Array()
+## Component to a PackedByteArray of the components you can get to from it.
+var _reach := {}
+## Points and links the packed arrays were made for.
+var _packed_points := -1
+var _packed_links := -1
 
 
 func add_point(at: Vector3) -> int:
@@ -105,12 +134,24 @@ func add_interest(kind: String, team: int, point: int) -> void:
 
 
 ## Points of interest of one kind for a team, with those for either team.
+## A new list each time, which the caller may change.
+## Safe from bot threads while the graph doesn't change.
 func interest_points(kind: String, team := -1) -> Array[int]:
-	var found: Array[int] = []
-	for entry in interest:
-		if entry.kind == kind and (team < 0 or entry.team == team or entry.team < 0):
-			found.append(entry.point)
-	return found
+	_cache_lock.lock()
+	if _interest_seen != interest.size():
+		_interest_seen = interest.size()
+		_interest_found.clear()
+	var key := "%s:%d" % [kind, team]
+	if not _interest_found.has(key):
+		var found: Array[int] = []
+		for entry in interest:
+			if entry.kind == kind and (team < 0 or entry.team == team or entry.team < 0):
+				found.append(entry.point)
+		_interest_found[key] = found
+	var copy: Array[int] = []
+	copy.assign(_interest_found[key])
+	_cache_lock.unlock()
+	return copy
 
 
 func link_between(from: int, to: int) -> Link:
@@ -170,6 +211,152 @@ func connected(from: int, to: int) -> bool:
 				seen[link.to] = true
 				queue.append(link.to)
 	return false
+
+
+## Makes the packed link arrays and components if the graph changed since.
+func packed() -> void:
+	if _packed_points == points.size() and _packed_links == links.size():
+		return
+	_packed_points = points.size()
+	_packed_links = links.size()
+	var n := points.size()
+	out_first.resize(n + 1)
+	slot_to.resize(links.size())
+	slot_link.resize(links.size())
+	slot_dir.resize(links.size())
+	slot_distance.resize(links.size())
+	slot_climb.resize(links.size())
+	slot_steep.resize(links.size())
+	slot_energy.resize(links.size())
+	slot_must_jet.resize(links.size())
+	var s := 0
+	for k in n:
+		out_first[k] = s
+		for link: Link in out_links[k]:
+			slot_to[s] = link.to
+			slot_link[s] = link
+			# Worked out as the planner did per link, so it's the same value.
+			var p := points[link.to] - points[k]
+			slot_dir[s] = Vector2(p.x, p.z) / link.length if link.length > 0.1 else Vector2.ZERO
+			slot_distance[s] = link.distance
+			slot_climb[s] = link.climb
+			slot_steep[s] = link.steep
+			slot_energy[s] = link.energy
+			slot_must_jet[s] = 1 if link.must_jet else 0
+			s += 1
+	out_first[n] = s
+	_find_components()
+
+
+## True if some route leads from one point to the other. Safe from bot
+## threads once packed() has run and while the graph doesn't change.
+func reachable(from: int, to: int) -> bool:
+	packed()
+	var a := component[from]
+	var b := component[to]
+	if a == b:
+		return true
+	_cache_lock.lock()
+	if not _reach.has(a):
+		_reach[a] = _reach_from(a)
+	var seen: PackedByteArray = _reach[a]
+	_cache_lock.unlock()
+	return seen[b] != 0
+
+
+## Kosaraju's components, without recursion: points in the order their
+## search finishes, then a search over the links backwards from the last.
+func _find_components() -> void:
+	var n := points.size()
+	_reach.clear()
+	var order := PackedInt32Array()
+	var seen := PackedByteArray()
+	seen.resize(n)
+	var stack := PackedInt32Array()
+	var next_slot := PackedInt32Array()
+	next_slot.resize(n)
+	for root in n:
+		if seen[root] != 0:
+			continue
+		seen[root] = 1
+		stack.append(root)
+		next_slot[root] = out_first[root]
+		while not stack.is_empty():
+			var at := stack[stack.size() - 1]
+			var s := next_slot[at]
+			if s < out_first[at + 1]:
+				next_slot[at] = s + 1
+				var to := slot_to[s]
+				if seen[to] == 0:
+					seen[to] = 1
+					next_slot[to] = out_first[to]
+					stack.append(to)
+			else:
+				stack.resize(stack.size() - 1)
+				order.append(at)
+	# Links backwards.
+	var in_first := PackedInt32Array()
+	in_first.resize(n + 1)
+	for s in slot_to.size():
+		in_first[slot_to[s] + 1] += 1
+	for k in n:
+		in_first[k + 1] += in_first[k]
+	var fill := in_first.duplicate()
+	var in_from := PackedInt32Array()
+	in_from.resize(slot_to.size())
+	for k in n:
+		for s in range(out_first[k], out_first[k + 1]):
+			var to := slot_to[s]
+			in_from[fill[to]] = k
+			fill[to] += 1
+	component.resize(n)
+	component.fill(-1)
+	var count := 0
+	for o in range(n - 1, -1, -1):
+		var root := order[o]
+		if component[root] >= 0:
+			continue
+		component[root] = count
+		stack.append(root)
+		while not stack.is_empty():
+			var at := stack[stack.size() - 1]
+			stack.resize(stack.size() - 1)
+			for s in range(in_first[at], in_first[at + 1]):
+				var from := in_from[s]
+				if component[from] < 0:
+					component[from] = count
+					stack.append(from)
+		count += 1
+
+
+## The components you can get to from component c, as one byte each.
+func _reach_from(c: int) -> PackedByteArray:
+	var count := 0
+	for k in component.size():
+		count = maxi(count, component[k] + 1)
+	var seen := PackedByteArray()
+	seen.resize(count)
+	seen[c] = 1
+	# Points of the components found so far, searched along their links.
+	var queue := PackedInt32Array()
+	for k in component.size():
+		if component[k] == c:
+			queue.append(k)
+	var head := 0
+	var point_seen := PackedByteArray()
+	point_seen.resize(component.size())
+	for k in queue:
+		point_seen[k] = 1
+	while head < queue.size():
+		var at := queue[head]
+		head += 1
+		for s in range(out_first[at], out_first[at + 1]):
+			var to := slot_to[s]
+			if point_seen[to] == 0:
+				point_seen[to] = 1
+				seen[component[to]] = 1
+				queue.append(to)
+	return seen
 
 
 ## Links every pair of points closer than max_length both ways, unless the
@@ -241,6 +428,24 @@ func auto_link_pairs(max_length: float, surface: Callable, blocked: Callable, st
 			var mb := mirror[b] if twins else -1
 			# The twin pair, if it comes first, has done this one already.
 			if ma >= 0 and mb >= 0 and mini(ma, mb) * points.size() + maxi(ma, mb) < a * points.size() + b:
+				continue
+			if Prof.on:
+				var t := Time.get_ticks_usec()
+				var fine_p: bool = near.call(pa, pb)
+				var t1 := Time.get_ticks_usec()
+				var both_p := _profile_both(pa, pb, surface, blocked, step if fine_p else coarse_step, fine_p)
+				var t2 := Time.get_ticks_usec()
+				_add_pair(a, b, both_p)
+				if ma >= 0 and mb >= 0 and not (ma == a and mb == b) and not (ma == b and mb == a):
+					_add_pair(ma, mb, both_p)
+					Prof.count("graph.pairs_mirrored")
+				Prof.add("build.graph.link.near_check", t1 - t)
+				Prof.add("build.graph.link.sample_and_walk", t2 - t1)
+				Prof.add("build.graph.link.add_pair", Time.get_ticks_usec() - t2)
+				var samples := maxi(int(ceil(Vector2(pb.x - pa.x, pb.z - pa.z).length() / (step if fine_p else coarse_step))), 1) + 1
+				Prof.count("graph.pairs_fine" if fine_p else "graph.pairs_coarse")
+				Prof.count("graph.surface_calls", samples * (3 if fine_p else 1))
+				Prof.count("graph.blocked_calls", samples)
 				continue
 			var fine: bool = near.call(pa, pb)
 			var both := _profile_both(pa, pb, surface, blocked, step if fine else coarse_step, fine)

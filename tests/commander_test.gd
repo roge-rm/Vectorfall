@@ -249,6 +249,10 @@ func _person_defends() -> void:
 	var warnings := []
 	boss.warned.connect(func(_team: int, person: int, enemy: int) -> void: warnings.append([person, enemy]))
 	boss.known[999] = { "position": behind, "velocity": Vector3.ZERO, "tick": game.tick, "approach": -1 }
+	# After 12 s the nearest bot is about COVER_RANGE away, give or take its
+	# route, so one is put 40 m off to have a bot in range.
+	var near: BotBrain = setup.director.brains[0]
+	near.soldier.global_position = me.global_position + Vector3(0.0, 0.0, 40.0)
 	var enemy := Soldier.new()
 	enemy.team = 1
 	game.entities[999] = enemy
@@ -256,7 +260,7 @@ func _person_defends() -> void:
 	game.entities.erase(999)
 	enemy.free()
 	checks.check(warnings == [[me.entity_id, 999]], "an enemy the team knows of behind it sends it a warning")
-	checks.check(boss.covers.values().has(me.entity_id), "and a bot nearby covers it")
+	checks.check(boss.covers.get(near.soldier.entity_id, 0) == me.entity_id, "and a bot nearby covers it")
 	await _done(setup)
 
 

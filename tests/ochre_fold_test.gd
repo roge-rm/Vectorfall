@@ -25,6 +25,23 @@ func _run() -> void:
 	var graph := map.route_graph
 	print("  Ochre Fold built in %.2f s: terrain chunks %.2f s, route graph %.2f s, %d points, %d links" % [map.build_seconds, map.terrain_seconds, map.graph_seconds, graph.points.size(), graph.links.size()])
 	checks.check(map.build_seconds < 20.0, "the map builds in %.1f s" % map.build_seconds)
+	checks.check(map.routes_loaded, "the route links came from the baked file")
+	OchreFold.use_baked_routes = false
+	var fresh := OchreFold.new(null, true)
+	OchreFold.use_baked_routes = true
+	var other := fresh.route_graph
+	var same := other.points == graph.points and other.links.size() == graph.links.size() and other.interest == graph.interest
+	var first_bad := -1
+	if same:
+		for k in graph.links.size():
+			var a := graph.links[k]
+			var b := other.links[k]
+			if a.from != b.from or a.to != b.to or a.kind != b.kind or a.must_jet != b.must_jet or a.steep != b.steep or a.length != b.length or a.climb != b.climb or a.distance != b.distance or a.energy != b.energy:
+				first_bad = k
+				break
+	checks.check(same and first_bad < 0, "baked links equal freshly built ones (%d points, %d links, first difference %d)" % [graph.points.size(), graph.links.size(), first_bad])
+	checks.check(fresh.route_key == map.route_key, "the baked links' key is the same as a fresh build's")
+	fresh.free()
 	checks.check(map.terrain.size() >= 1500.0, "the terrain is %.0f m across" % map.terrain.size())
 
 	for team in 2:

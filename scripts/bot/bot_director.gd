@@ -9,8 +9,25 @@ extends Node
 
 ## Line of sight ray casts all the bots may make in one tick.
 const RAYS_PER_TICK := 8
+## Ray casts for disc shot checks in one tick, on top of RAYS_PER_TICK, so
+## sight rays never use them all. Disc checks take these first, then what
+## sight rays left.
+const DISC_RAYS_PER_TICK := 4
 ## Bots think every this many ticks, 4 times a second, each on its own tick.
 const THINK_TICKS := 15
+## Points of a route search taken when it starts, which finishes most, and
+## on each tick after, so a long search spreads over ticks instead of holding
+## one up. All of a tick's search points share SEARCH_POINTS_PER_TICK: searches
+## carried on from earlier ticks are handed theirs before the bots work, and
+## searches begun in the work get what's left after it. Both go round the bots
+## from a turn that moves on to the first bot left without points, kept for
+## each of the WORK_TICKS ticks, so every search gets its go. Points a search
+## takes outside the bot phase, as go_to() does, come off the next tick's
+## pool. A point is about 40 us on a desktop and several times that on a
+## Fire HD 8.
+const SEARCH_FIRST := 250
+const SEARCH_POINTS := 50
+const SEARCH_POINTS_PER_TICK := 250
 ## Seconds a sound is kept for bots to hear.
 const SOUND_TIME := 1.0
 ## Bot skill for each level, beginner to expert, and the levels' names.
@@ -22,6 +39,13 @@ const PERSONALITY_ROUND: Array[int] = [BotBrain.Personality.DEFAULT, BotBrain.Pe
 ## How far shots and blasts are heard, in metres.
 const SHOT_RANGE := 120.0
 const BLAST_RANGE := 160.0
+
+## Bots work out their commands on WorkerThreadPool when true, one after
+## another on the main thread when false. Both give the same match.
+static var threads := true
+## Threads the bots' work is spread over at most. More is slower here: GDScript
+## threads fight over Godot's object lookups, and the work is small.
+const MAX_THREADS := 4
 
 var game: Match
 var graph: RouteGraph
@@ -38,12 +62,32 @@ var sounds: Array[Dictionary] = []
 var sound_count := 0
 var _ray_tick := -1
 var _rays_left := 0
+var _disc_rays_left := 0
+## Per tick of every BotBrain.WORK_TICKS, the bot index the search points are
+## handed out from.
+var _search_turns: Array[int] = []
+## Search points taken outside the bot phase, owed by the next ticks' pools.
+var _points_owed := 0
+## The delta run_bots() was given, and the order bots are handed to the
+## threads in, for _work().
+var _delta := 0.0
+var _order := PackedInt32Array()
+## The bots that began a search in this tick's work, in bot order.
+var _starts := PackedInt32Array()
+## Each bot's work time this tick, by place in _order, for Prof. Each thread
+## writes only its own bots' entries.
+var _work_usec := PackedInt64Array()
+## soldiers() as last made, and the match's next_id and entity count then.
+var _soldiers: Array[Soldier] = []
+var _soldiers_made := Vector2i(-1, -1)
 ## Routes already planned, by start, goal, speed and energy, rounded.
 var _plans := {}
 ## Per team, the links ending near its spawn points, found once.
 var _spawn_links := {}
-## Per team, the sniper perches its snipers hold, found once.
+## Per team, the sniper perches its snipers hold, found once, guarded by
+## _perches_lock for bot threads.
 var _perches := {}
+var _perches_lock := Mutex.new()
 ## Team to its commander, made with the team's first bot.
 var commanders := {}
 var _lanes: Lanes
@@ -55,7 +99,13 @@ func _init(match_node: Match, route_graph: RouteGraph) -> void:
 	name = "BotDirector"
 	game = match_node
 	graph = route_graph
+	# Done now, while the map loads, so the first bot to plan doesn't stall a
+	# tick on them.
+	graph.packed()
+	for team: int in [0, 1]:
+		links_near_spawns(team, BotBrain.CARRIER_KEEP_OFF)
 	game.add_child(self)
+	game.bots = self
 	game.fired.connect(_on_fired)
 	game.impacted.connect(_on_impacted)
 	game.damaged.connect(_on_damaged)
@@ -85,8 +135,10 @@ func add_bot(team: int, spawn: Transform3D, skill := -1.0) -> BotBrain:
 		brain.personality = personality_for(game.seed_value, team, on_team)
 	# Every 7th tick in turn spreads them evenly over THINK_TICKS.
 	brain.think_offset = (brains.size() * 7) % THINK_TICKS
+	brain.work_parity = (brains.size() + 1) % BotBrain.WORK_TICKS
 	brain.soldier = game.add_soldier(team, spawn, brain)
 	brain.soldier.display_name = "Bot %d" % brain.soldier.entity_id
+	brain.rng.seed = hash([game.seed_value, brain.soldier.entity_id])
 	brain.reset()
 	brains.append(brain)
 	if not commanders.has(team):
@@ -119,8 +171,124 @@ func commander(team: int) -> TeamCommander:
 	return commanders.get(team)
 
 
-## Lets each commander think on its tick. Called by every bot each tick; only
-## the first call in a tick does anything.
+## Works out every bot's command for this tick, before any soldier moves.
+## Called by the match each tick before it asks for commands. Main thread.
+##
+## Serial first, in bot order: a snapshot of every soldier and flag, the
+## commanders, sight line rays for the bots that think this tick, and the
+## route search points for searches carried on, handed out from the turn.
+## Then each bot's work on its
+## own fields, reading only the snapshot and what nothing writes meanwhile
+## (other bots as they were before it, the commanders, the route graph and
+## route store, sounds), on WorkerThreadPool or serially. Then searches bots
+## began get points from what's left of the pool, and run the same way.
+## Then, in bot order, the rays bots asked for and the routes they
+## found go into the store.
+## Nothing in it depends on which thread runs what or when.
+func run_bots(delta: float) -> void:
+	_delta = delta
+	var prof_t := Time.get_ticks_usec() if Prof.on else 0
+	for other in soldiers():
+		other.take_snapshot()
+	for team: int in game.flags:
+		game.flags[team].take_snapshot()
+	if Prof.on:
+		Prof.add("bots.snapshot", Time.get_ticks_usec() - prof_t)
+		var commander_t := Time.get_ticks_usec()
+		before_tick()
+		Prof.add("bot.commander", Time.get_ticks_usec() - commander_t)
+	else:
+		before_tick()
+	Soldier.use_snapshot = true
+	for brain in brains:
+		brain.before_work()
+	var pool := maxi(SEARCH_POINTS_PER_TICK - _points_owed, 0)
+	_points_owed = maxi(_points_owed - SEARCH_POINTS_PER_TICK, 0)
+	_search_turns.resize(BotBrain.WORK_TICKS)
+	var parity := game.tick % BotBrain.WORK_TICKS
+	var turn := _search_turns[parity] if _search_turns[parity] < brains.size() else 0
+	var left_out := -1
+	for n in brains.size():
+		var k := (turn + n) % brains.size()
+		if brains[k].wants_points():
+			if pool <= 0 and left_out < 0:
+				left_out = k
+			pool = brains[k].allow_carry(pool)
+	if Prof.on:
+		Prof.add("bots.serial_before", Time.get_ticks_usec() - prof_t)
+		prof_t = Time.get_ticks_usec()
+	# Bots with the most to do first, so they don't start last and hold up
+	# the rest.
+	_order.clear()
+	for k in brains.size():
+		if brains[k].busy():
+			_order.append(k)
+	for k in brains.size():
+		if not brains[k].busy():
+			_order.append(k)
+	if Prof.on:
+		_work_usec.resize(_order.size())
+	_run_group(_work, _order.size())
+	if Prof.on:
+		Prof.add("bots.work", Time.get_ticks_usec() - prof_t)
+		var sum := 0
+		for usec in _work_usec:
+			sum += usec
+		Prof.add("bots.work_sum", sum)
+		prof_t = Time.get_ticks_usec()
+	_starts.clear()
+	for n in brains.size():
+		var k := (turn + n) % brains.size()
+		if brains[k].started_search():
+			if pool <= 0 and left_out < 0:
+				left_out = k
+			pool = brains[k].allow_start(pool)
+			_starts.append(k)
+	# Next time this parity comes round, start from the first bot left out.
+	if left_out >= 0:
+		_search_turns[parity] = left_out
+	if not _starts.is_empty():
+		_run_group(_work_start, _starts.size())
+		if Prof.on:
+			Prof.add("bots.starts", Time.get_ticks_usec() - prof_t)
+			prof_t = Time.get_ticks_usec()
+	for brain in brains:
+		brain.after_work()
+		for search in brain.found:
+			_keep_plan(search)
+		brain.found.clear()
+	Soldier.use_snapshot = false
+	if Prof.on:
+		Prof.add("bots.serial_after", Time.get_ticks_usec() - prof_t)
+
+
+## Calls work(k) for k from 0 to count - 1, on WorkerThreadPool or serially.
+func _run_group(work: Callable, count: int) -> void:
+	if threads and count > 1:
+		var task := WorkerThreadPool.add_group_task(work, count, mini(MAX_THREADS, OS.get_processor_count()), true, "bots")
+		WorkerThreadPool.wait_for_group_task_completion(task)
+	else:
+		for k in count:
+			work.call(k)
+
+
+## The kth bot in _starts runs the search it began this tick.
+func _work_start(k: int) -> void:
+	brains[_starts[k]].work_start()
+
+
+## The kth bot in _order's work for the tick, on a worker thread or not.
+func _work(k: int) -> void:
+	if Prof.on:
+		var t := Time.get_ticks_usec()
+		brains[_order[k]].work(_delta)
+		_work_usec[k] = Time.get_ticks_usec() - t
+	else:
+		brains[_order[k]].work(_delta)
+
+
+## Lets each commander think on its tick. Called once a tick by run_bots();
+## only the first call in a tick does anything.
 func before_tick() -> void:
 	if _commanded_tick == game.tick:
 		return
@@ -142,10 +310,23 @@ func brain_of(id: int) -> BotBrain:
 	return source as BotBrain
 
 
-## Plans a route over the graph. Speed, energy and heading are rounded so
-## routes can be kept and shared between bots; a route got from the store is
-## the same one planning again would give. Routes avoiding links aren't kept.
+## Plans a route over the graph all in one go, as begin_plan() and
+## run_plan() do over ticks.
 func plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}) -> Array[int]:
+	var search := begin_plan(start, goal, velocity, energy, avoid)
+	while not run_plan(search, -1):
+		pass
+	var path: Array[int] = []
+	path.assign(search.result)
+	return path
+
+
+## Starts planning a route over the graph, taking up to first points of the
+## search now. Safe from bot threads: it only reads the route store. Speed, energy and heading are rounded so routes can be
+## kept and shared between bots; a route got from the store is the same one
+## planning again would give. Routes avoiding links aren't kept. The search
+## comes back done, or for run_plan() to carry on each tick.
+func begin_plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}, first := SEARCH_FIRST) -> RoutePlanner.Search:
 	var speed := Vector2(velocity.x, velocity.z).length()
 	var speed_step := int(speed / 5.0)
 	var energy_step := int(energy / 20.0)
@@ -157,27 +338,91 @@ func plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}) 
 		heading = Vector2.from_angle(heading_step * TAU / 8.0)
 	var rounded_speed := speed_step * 5.0 + 2.5
 	var rounded_energy := energy_step * 20.0 + 10.0
-	if not avoid.is_empty():
-		return planner.plan(graph, start, goal, rounded_speed, rounded_energy, avoid, heading)
-	var key := [start, goal, speed_step, energy_step, heading_step]
-	if not _plans.has(key):
-		if _plans.size() > 4000:
-			_plans.clear()
-		_plans[key] = planner.plan(graph, start, goal, rounded_speed, rounded_energy, {}, heading)
-	var path: Array[int] = []
-	path.assign(_plans[key])
-	return path
+	var key := []
+	if avoid.is_empty():
+		key = [start, goal, speed_step, energy_step, heading_step]
+		if _plans.has(key):
+			if Prof.on:
+				Prof.count("astar_cached")
+			var kept := RoutePlanner.Search.new()
+			kept.start = start
+			kept.goal = goal
+			kept.done = true
+			kept.result.assign(_plans[key])
+			return kept
+	if Prof.on:
+		Prof.count("astar_avoid" if not avoid.is_empty() else "astar_new")
+	var t := Time.get_ticks_usec() if Prof.on else 0
+	var search := planner.begin(graph, start, goal, rounded_speed, rounded_energy, avoid, heading)
+	if Prof.on:
+		Prof.add("bot.replan.begin", Time.get_ticks_usec() - t)
+	search.key = key
+	run_plan(search, first)
+	return search
 
 
-## Takes one ray cast from this tick's budget, or false if it's used up.
-func take_ray() -> bool:
+## Carries a search on by up to budget points, or all of it for -1. A route
+## found is kept in the store at once on the main thread; in the bot phase
+## it's the bot's job to hand it to run_bots(), which keeps it. True once
+## it's done.
+func run_plan(search: RoutePlanner.Search, budget := SEARCH_POINTS) -> bool:
+	if search.done:
+		return true
+	if budget == 0:
+		return false
+	var t := Time.get_ticks_usec() if Prof.on else 0
+	var done := planner.step(search, budget)
+	if Prof.on:
+		Prof.add("bot.replan.astar", Time.get_ticks_usec() - t)
+	if done and not Soldier.use_snapshot:
+		_keep_plan(search)
+	return done
+
+
+## Keeps a finished search's route in the store. Main thread.
+func _keep_plan(search: RoutePlanner.Search) -> void:
+	if search.key.is_empty():
+		return
+	if _plans.size() > 4000:
+		_plans.clear()
+	_plans[search.key] = search.result.duplicate()
+
+
+## Every soldier in the match, dead or alive, by id. Made again only when
+## entities come or go.
+func soldiers() -> Array[Soldier]:
+	var made := Vector2i(game.next_id, game.entities.size())
+	if made != _soldiers_made:
+		_soldiers_made = made
+		_soldiers.clear()
+		var ids := game.entities.keys()
+		ids.sort()
+		for id: int in ids:
+			var other := game.soldier(id)
+			if other != null:
+				_soldiers.append(other)
+	return _soldiers
+
+
+## Takes one ray cast from this tick's budget, or false if it's used up. A
+## disc check takes from its own budget first.
+func take_ray(for_disc := false) -> bool:
 	if _ray_tick != game.tick:
 		_ray_tick = game.tick
 		_rays_left = RAYS_PER_TICK
+		_disc_rays_left = DISC_RAYS_PER_TICK
+	if for_disc and _disc_rays_left > 0:
+		_disc_rays_left -= 1
+		return true
 	if _rays_left <= 0:
 		return false
 	_rays_left -= 1
 	return true
+
+
+## Notes search points taken outside the bot phase, for the next ticks' pools.
+func owe_points(points: int) -> void:
+	_points_owed += points
 
 
 func _add_sound(at: Vector3, source: int, reach: float) -> void:
@@ -202,7 +447,7 @@ func _on_damaged(victim_id: int, attacker_id: int, _amount: float, _from: Vector
 	if victim != null and attacker != null and attacker.team != victim.soldier.team:
 		# Being hit tells you roughly where from, like a player's hit marker.
 		victim.combat.hurt(attacker_id, game.tick)
-		victim.perception.hear(attacker_id, attacker.global_position, attacker.velocity, game.tick)
+		victim.perception.hear(attacker_id, attacker.at(), attacker.vel(), game.tick)
 
 
 func _on_hit(attacker_id: int, _victim_id: int, weapon: int) -> void:
@@ -247,6 +492,7 @@ func _on_impacted(weapon: int, at: Vector3, _normal: Vector3) -> void:
 ## Sniper perches on a team's half, short of its base, that a link leads to
 ## without a must-jet climb, found once.
 func perches(team: int) -> Array[int]:
+	_perches_lock.lock()
 	if not _perches.has(team):
 		var found: Array[int] = []
 		var home_x: float = game.stands[team].x
@@ -259,7 +505,9 @@ func perches(team: int) -> Array[int]:
 			if reachable.has(point) and signf(p.x) == signf(home_x) and absf(p.x) < absf(home_x) - 30.0:
 				found.append(point)
 		_perches[team] = found
-	return _perches[team]
+	var kept: Array[int] = _perches[team]
+	_perches_lock.unlock()
+	return kept
 
 
 ## The links ending within reach of a team's spawn points, once per spawn
@@ -295,6 +543,9 @@ func get_state() -> Dictionary:
 		"sound_count": sound_count,
 		"ray_tick": _ray_tick,
 		"rays_left": _rays_left,
+		"disc_rays_left": _disc_rays_left,
+		"search_turns": _search_turns.duplicate(),
+		"points_owed": _points_owed,
 		"brains": brain_states,
 		"commanded_tick": _commanded_tick,
 		"commanders": commanders.keys().map(func(team: int) -> Array: return [team, commanders[team].get_state()]),
@@ -306,6 +557,9 @@ func set_state(state: Dictionary) -> void:
 	sound_count = state.sound_count
 	_ray_tick = state.ray_tick
 	_rays_left = state.rays_left
+	_disc_rays_left = state.get("disc_rays_left", 0)
+	_search_turns.assign(state.get("search_turns", []))
+	_points_owed = state.get("points_owed", 0)
 	_commanded_tick = state.commanded_tick
 	for pair: Array in state.commanders:
 		if commanders.has(pair[0]):

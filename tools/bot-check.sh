@@ -3,7 +3,8 @@
 # Ochre Fold and fails if the bots stop moving (any match with 60 s or more
 # stuck) or, over all the matches together, stop attacking, defending or
 # scoring: fewer than MIN_GRABS grabs, MIN_RETURNS returns or MIN_CAPTURES
-# captures. Reports go to build/bot-reports/ as usual.
+# captures. Reports go to build/bot-reports/ as usual, with Godot's output
+# for a match that fails or ends with no result.
 #
 #   tools/bot-check.sh
 set -uo pipefail
@@ -24,6 +25,11 @@ for seed in $SEEDS; do
 	line=$(echo "$out" | grep "^CHECK")
 	echo "${line:-CHECK FAIL seed $seed: no result}"
 	if [ $code -ne 0 ] || [ -z "$line" ]; then
+		# Keeps Godot's output, crash backtrace included, to look at later.
+		log="build/bot-reports/bot-check-seed$seed-$(date +%Y%m%d-%H%M%S).log"
+		mkdir -p build/bot-reports
+		printf '%s\nexit code %d\n' "$out" "$code" > "$log"
+		echo "  output kept in $log"
 		status=1
 		continue
 	fi

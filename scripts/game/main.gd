@@ -65,6 +65,7 @@ func _ready() -> void:
 		var brain := bots.add_bot(other, map.spawn_point(other, k))
 		if enemy == null:
 			enemy = brain.soldier
+	game.prepare_terrain()
 	overlay = BotOverlay.new(bots)
 	add_child(overlay)
 

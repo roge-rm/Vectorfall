@@ -160,7 +160,12 @@ func _lanes() -> Lanes:
 ## Called every tick; thinks on its own tick.
 func tick() -> void:
 	if (game.tick + think_offset) % THINK_TICKS == 0:
-		think()
+		if Prof.on:
+			var prof_t := Time.get_ticks_usec()
+			think()
+			Prof.add("commander%d" % team, Time.get_ticks_usec() - prof_t)
+		else:
+			think()
 
 
 func think(force := false) -> void:
@@ -272,7 +277,7 @@ func _read_people() -> void:
 		if s.dead:
 			samples.clear()
 			continue
-		samples.append([game.tick, s.global_position])
+		samples.append([game.tick, s.at()])
 		while samples.size() > 1 and (game.tick - samples[0][0]) / 60.0 > PERSON_WINDOW:
 			samples.pop_front()
 		if game.flags.is_empty():
@@ -281,7 +286,7 @@ func _read_people() -> void:
 		var enemy_carrier: Variant = null
 		var own: Flag = game.flags.get(team)
 		if own != null and own.mode == Flag.Mode.CARRIED:
-			enemy_carrier = own.global_position
+			enemy_carrier = own.at()
 		var reading := read_person(samples, carrying, game.stands[team], game.stands[1 - team], enemy_carrier)
 		if reading < 0 or reading == entry.role:
 			entry.pending = -1
@@ -417,11 +422,11 @@ func _committed() -> int:
 	var n := 0
 	var stand: Vector3 = game.stands[1 - team]
 	var own: Flag = game.flags[team]
-	var carrier_left := own.global_position.distance_to(stand) if own.mode == Flag.Mode.CARRIED else 0.0
+	var carrier_left := own.at().distance_to(stand) if own.mode == Flag.Mode.CARRIED else 0.0
 	for brain in brains():
 		if brain.role != BotBrain.Role.OFFENCE or brain.soldier.dead:
 			continue
-		var left := brain.soldier.global_position.distance_to(stand)
+		var left := brain.soldier.at().distance_to(stand)
 		if left < COMMITTED_RANGE or left < carrier_left - COMMITTED_AHEAD:
 			n += 1
 	return n
@@ -430,7 +435,7 @@ func _committed() -> int:
 ## Who a role is best given to, lower first: closest to where the role is.
 func _fitness(brain: BotBrain, role: int) -> float:
 	var s := brain.soldier
-	var at := s.global_position
+	var at := s.at()
 	var penalty := 500.0 if s.dead else 0.0
 	if game.flags.is_empty():
 		return penalty
@@ -440,10 +445,10 @@ func _fitness(brain: BotBrain, role: int) -> float:
 		BotBrain.Role.DEFENCE, BotBrain.Role.LIGHT_DEFENCE:
 			return penalty + at.distance_to(game.stands[team])
 		BotBrain.Role.CHASE:
-			return penalty + at.distance_to(own.global_position)
+			return penalty + at.distance_to(own.at())
 		BotBrain.Role.ESCORT:
 			var runner := escort_target()
-			return penalty + (at.distance_to(game.soldier(runner).global_position) if runner != 0 else 0.0)
+			return penalty + (at.distance_to(game.soldier(runner).at()) if runner != 0 else 0.0)
 		BotBrain.Role.OFFENCE:
 			return penalty + at.distance_to(game.stands[1 - team])
 	return penalty
@@ -661,10 +666,10 @@ func _learn() -> void:
 		if flag.mode != Flag.Mode.CARRIED:
 			continue
 		var carrier := game.soldier(flag.carrier_id)
-		if carrier == null or not lanes.in_lanes(carrier.global_position):
+		if carrier == null or not lanes.in_lanes(carrier.at()):
 			continue
 		# Our flag's carrier is public, shown on everyone's screen.
-		var lane := lanes.lane_of(carrier.global_position)
+		var lane := lanes.lane_of(carrier.at())
 		var used: Array = carrier_lanes.get(carrier.entity_id, [])
 		if not used.has(lane):
 			used.append(lane)
@@ -680,7 +685,7 @@ func _plan_chase() -> void:
 	var own: Flag = game.flags[team]
 	if own.mode != Flag.Mode.CARRIED:
 		return
-	var at := own.global_position
+	var at := own.at()
 	var home: Vector3 = game.stands[1 - team]
 	var total := 0.0
 	for w in escape_lanes:
@@ -698,10 +703,10 @@ func _plan_chase() -> void:
 ## or wait at its stand once it's past them.
 func chase_point(slot: int, from: Vector3) -> Array:
 	var own: Flag = game.flags[team]
-	var at := own.global_position
+	var at := own.at()
 	var lead := clampf(at.distance_to(from) / 40.0, 0.0, 2.0)
 	var carrier := game.soldier(own.carrier_id)
-	var trail := at + (carrier.velocity * lead if carrier != null else Vector3.ZERO)
+	var trail := at + (carrier.vel() * lead if carrier != null else Vector3.ZERO)
 	if slot == 0 or escape_order.is_empty() or from.distance_to(at) < 60.0 or slot > escape_order.size() + 1:
 		return [trail, false]
 	# Home or standing still, it's waiting for its own flag: everyone goes for it.
@@ -777,7 +782,7 @@ func hide_point() -> Vector3:
 		spots.append(known_position(id))
 	var own: Flag = game.flags[team]
 	if own.mode == Flag.Mode.CARRIED:
-		spots.append(own.global_position)
+		spots.append(own.at())
 	var best := stand
 	var best_score := -INF
 	for k in graph.points.size():
@@ -820,14 +825,14 @@ func _assign_pickups() -> void:
 		var flag := game.flags[flag_team]
 		if flag.mode != Flag.Mode.DROPPED:
 			continue
-		var at := flag.global_position
+		var at := flag.at()
 		var ranked: Array[BotBrain] = []
 		for brain in brains():
 			if not brain.soldier.dead and game.carried_flag(brain.soldier.entity_id) == null:
 				ranked.append(brain)
 		ranked.sort_custom(func(a: BotBrain, b: BotBrain) -> bool:
-			var da := a.soldier.global_position.distance_to(at)
-			var db := b.soldier.global_position.distance_to(at)
+			var da := a.soldier.at().distance_to(at)
+			var db := b.soldier.at().distance_to(at)
 			return da < db or (da == db and a.soldier.entity_id < b.soldier.entity_id))
 		var count := 2 if flag_team == team else 1
 		for k in mini(count, ranked.size()):
@@ -844,13 +849,13 @@ func _help_people() -> void:
 		var person := game.soldier(id)
 		if person == null or person.dead:
 			continue
-		var pos := person.global_position
+		var pos := person.at()
 		var best: BotBrain = null
 		for brain in brains():
 			if brain.soldier.dead or game.carried_flag(brain.soldier.entity_id) != null:
 				continue
-			var d := brain.soldier.global_position.distance_to(pos)
-			if d < COVER_RANGE and (best == null or d < best.soldier.global_position.distance_to(pos)):
+			var d := brain.soldier.at().distance_to(pos)
+			if d < COVER_RANGE and (best == null or d < best.soldier.at().distance_to(pos)):
 				best = brain
 		if best != null:
 			covers[best.soldier.entity_id] = id
@@ -889,7 +894,7 @@ func _on_flag_taken(flag_team: int, soldier_id: int) -> void:
 	elif taker != null and taker.team == team:
 		var speaker := director.brain_of(soldier_id)
 		if speaker == null:
-			speaker = _nearest_bot(taker.global_position)
+			speaker = _nearest_bot(taker.at())
 		if speaker != null:
 			say(speaker.soldier.entity_id, BotLines.Line.WE_HAVE_FLAG)
 		# Their flag is taken: an order to take it is done.
@@ -1029,7 +1034,7 @@ func _report_carrier() -> void:
 	var own: Flag = game.flags[team]
 	if own.mode != Flag.Mode.CARRIED or lanes == null or lanes.count == 0:
 		return
-	var at := own.global_position
+	var at := own.at()
 	var lane := lanes.lane_of(at) if lanes.in_lanes(at) else (escape_order[0] if not escape_order.is_empty() else -1)
 	if lane < 0 or lane == reported_lane:
 		return
@@ -1045,7 +1050,7 @@ func _nearest_bot(at: Vector3) -> BotBrain:
 	for brain in brains():
 		if brain.soldier.dead:
 			continue
-		var d := brain.soldier.global_position.distance_to(at)
+		var d := brain.soldier.at().distance_to(at)
 		if d < best_d:
 			best_d = d
 			best = brain
@@ -1087,7 +1092,7 @@ func _on_ordered(soldier_id: int, kind: int, arg: int) -> void:
 	var person := game.soldier(soldier_id)
 	if person == null or person.team != team or game.flags.is_empty():
 		return
-	var pos := person.global_position
+	var pos := person.at()
 	var until := game.tick + int(ORDER_TIME * 60.0)
 	_decide("%s orders %s" % [person.display_name, Orders.NAMES[kind] if kind > 0 and kind < Orders.NAMES.size() else "?"])
 	match kind:
@@ -1127,8 +1132,8 @@ func _send(at: Vector3, count: int, role: int, target: int, until: int, kind: in
 		if not skip.has(brain.role) and id != target:
 			ranked.append(brain)
 	ranked.sort_custom(func(a: BotBrain, b: BotBrain) -> bool:
-		var da := a.soldier.global_position.distance_to(at) + (500.0 if a.soldier.dead else 0.0)
-		var db := b.soldier.global_position.distance_to(at) + (500.0 if b.soldier.dead else 0.0)
+		var da := a.soldier.at().distance_to(at) + (500.0 if a.soldier.dead else 0.0)
+		var db := b.soldier.at().distance_to(at) + (500.0 if b.soldier.dead else 0.0)
 		return da < db or (da == db and a.soldier.entity_id < b.soldier.entity_id))
 	var sent := 0
 	for brain in ranked:
@@ -1152,7 +1157,7 @@ func _set_role(person: Soldier, bot_id: int, role: int) -> void:
 	if bot_id == 0:
 		var best_d := INF
 		for b in brains():
-			var d := b.soldier.global_position.distance_to(person.global_position) + (500.0 if b.soldier.dead else 0.0)
+			var d := b.soldier.at().distance_to(person.at()) + (500.0 if b.soldier.dead else 0.0)
 			if d < best_d:
 				best_d = d
 				brain = b

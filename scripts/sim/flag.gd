@@ -20,6 +20,8 @@ var return_in := 0.0
 ## Where its stand holds it.
 var home := Vector3.ZERO
 
+## The position at the start of the tick, for bot threads. See Soldier.at().
+var _seen_pos := Vector3.ZERO
 var _beam: MeshInstance3D
 var _beam_material: StandardMaterial3D
 
@@ -113,6 +115,19 @@ func _update_beam() -> void:
 
 
 ## Where the match holds it to the soldier carrying it: on their back.
+## Copies the position for bot threads. Main thread only.
+func take_snapshot() -> void:
+	_seen_pos = global_position
+
+
+## The position, from the snapshot in the bot phase. Off it, main thread only.
+func at() -> Vector3:
+	if Soldier.use_snapshot:
+		return _seen_pos
+	assert(OS.get_thread_caller_id() == OS.get_main_thread_id(), "a node read off the main thread")
+	return global_position
+
+
 func hold_on(who: Soldier) -> void:
 	var basis := Basis(Vector3.UP, who.yaw)
 	global_transform = Transform3D(basis, who.global_position + Vector3.UP * (POLE * 0.5 - 0.3) + basis * Vector3(0.0, 0.0, 0.45))
