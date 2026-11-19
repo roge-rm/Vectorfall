@@ -4,29 +4,39 @@ extends Control
 ## On-screen controls: a stick that appears where your left thumb lands, drag
 ## anywhere else on the right half to look, and round buttons for fire, jet,
 ## jump (hold it to ski) and SWAP for the next weapon, and a small second FIRE
-## on the left. JUMP, JET and the right FIRE sit close together on the right.
+## just above the stick. JUMP, JET and the right FIRE sit close together on
+## the right.
 ## A touch that starts on JUMP or JET holds that button until it lifts, and
 ## also holds whichever of the three it's sliding over, so one thumb can jet
 ## and fire or ski and jet. A touch that starts on a FIRE button also looks
-## when dragged, and doesn't slide onto other buttons. ORDERS, above the
-## right FIRE, opens the order menu, and while it's open a tap on it picks;
-## the menu sits clear of the stick's half and the buttons. A small pause
-## button sits at the top, left of the score.
-## Sizes follow the shorter side of the screen, times Settings.touch_size.
+## when dragged, and doesn't slide onto other buttons. ORDERS, at the top
+## right, opens the order menu, and while it's open a tap on it picks; the
+## menu sits clear of the stick's half and the buttons. A small square pause
+## button sits in the top left corner.
+## Sizes are design pixels on a 390 pixel high screen (InkUi), scaled by the
+## shorter side of the screen times Settings.touch_size, then held to the
+## caps below so the middle of the view stays clear on any screen shape.
 
 signal pause_pressed
 
-## Left thumb movement in pixels for a full push, as a share of the short side.
-const STICK_REACH := 0.1
-## Name, command bit, distance of the centre from the bottom corner as a share
-## of the short side, radius, and whether the corner is the left one.
+## Left thumb movement for a full push, in design pixels.
+const STICK_REACH := 39.0
+## The stick's ring when no thumb is on it: centre from the bottom left
+## corner and radius, and the thumb's radius, in design pixels.
+const STICK_HOME := Vector2(89.0, 81.0)
+const STICK_RING := 55.0
+const STICK_THUMB := 20.0
+## Name, command bit, distance of the centre from the bottom corner, radius,
+## whether the corner is the left one, label size, fill and label colour.
+## Distances and sizes in design pixels. ORDERS is a box at the top right
+## instead, see orders_rect().
 const BUTTONS := [
-	["FIRE", PlayerCommand.FIRE, Vector2(0.13, 0.33), 0.1, false],
-	["JET", PlayerCommand.JET, Vector2(0.13, 0.115), 0.095, false],
-	["JUMP", PlayerCommand.JUMP, Vector2(0.32, 0.115), 0.075, false],
-	["FIRE", PlayerCommand.FIRE, Vector2(0.4, 0.4), 0.065, true],
-	["SWAP", PlayerCommand.NEXT_WEAPON, Vector2(0.48, 0.1), 0.06, false],
-	["ORDERS", 0, Vector2(0.1, 0.6), 0.07, false],
+	["FIRE", PlayerCommand.FIRE, Vector2(66.0, 162.0), 42.0, false, 20, InkUi.PINK, InkUi.CREAM],
+	["JET", PlayerCommand.JET, Vector2(64.0, 64.0), 40.0, false, 19, InkUi.ORANGE, InkUi.INK],
+	["JUMP", PlayerCommand.JUMP, Vector2(151.0, 65.0), 35.0, false, 17, InkUi.CREAM, InkUi.INK],
+	["FIRE", PlayerCommand.FIRE, Vector2(118.0, 186.0), 32.0, true, 16, InkUi.CREAM, InkUi.INK],
+	["SWAP", PlayerCommand.NEXT_WEAPON, Vector2(150.0, 140.0), 24.0, false, 13, InkUi.CREAM, InkUi.INK],
+	["ORDERS", 0, Vector2.ZERO, 0.0, false, 16, InkUi.INK, InkUi.CREAM],
 ]
 ## The ORDERS button's index in BUTTONS.
 const ORDERS_BUTTON := 5
@@ -36,6 +46,19 @@ const SLIDE_GROUP := [0, 1, 2]
 ## the buttons a sliding touch didn't start on.
 const START_REACH := 1.2
 const SLIDE_REACH := 1.3
+## Design pixels the right cluster (FIRE, JET, JUMP, SWAP) takes in from the
+## bottom right corner, and the stick and left FIRE from the bottom left.
+const RIGHT_SPAN := Vector2(186.0, 204.0)
+const LEFT_WIDE := 150.0
+## Most of the screen each side may take: the right cluster within the right
+## 30% of the width and the lower 60% of the height, the left side within the
+## left 25% of the width. Both keep the middle third clear.
+const RIGHT_SHARE := Vector2(0.3, 0.6)
+const LEFT_SHARE := 0.25
+## On a phone or tablet, the most a design pixel can be in millimetres at
+## 100%, so a big tablet doesn't get huge buttons. A 20:9 phone of about 400
+## dpi stays under it and looks the same as without it.
+const MM_PER_DESIGN := 0.22
 ## Buttons sent for one tick per tap.
 const PULSES := PlayerCommand.NEXT_WEAPON
 
@@ -54,6 +77,9 @@ var _stick_at := Vector2.ZERO
 var menu: OrderMenu
 ## Size of the controls, times the normal size.
 var scale_factor := 1.0
+var _orders_rect := Rect2()
+var _orders_for_size := Vector2(-1.0, -1.0)
+var _orders_for_scale := 0.0
 
 
 func _init() -> void:
@@ -80,29 +106,84 @@ func _short_side() -> float:
 	return minf(size.x, size.y)
 
 
-## The short side times the size setting, which buttons and the stick follow.
-func _unit() -> float:
-	return _short_side() * scale_factor
+## Pixels per design pixel for the buttons and stick: the short side times
+## the size setting, held to the screen share caps and on a phone or tablet
+## to MM_PER_DESIGN.
+func design_unit() -> float:
+	var s := _short_side() * scale_factor / InkUi.DESIGN_HEIGHT
+	s = minf(s, physical_cap())
+	s = minf(s, size.x * RIGHT_SHARE.x / RIGHT_SPAN.x)
+	s = minf(s, size.y * RIGHT_SHARE.y / RIGHT_SPAN.y)
+	return minf(s, size.x * LEFT_SHARE / LEFT_WIDE)
+
+
+## The most pixels per design pixel the screen's size in millimetres allows
+## at this size setting, or INF off a phone or tablet.
+func physical_cap() -> float:
+	if not OS.has_feature("mobile") or not is_inside_tree():
+		return INF
+	var dpi := float(DisplayServer.screen_get_dpi())
+	var window := Vector2(DisplayServer.window_get_size())
+	var view := get_viewport_rect().size
+	if dpi <= 0.0 or window.y <= 0.0 or view.y <= 0.0:
+		return INF
+	# Screen pixels per pixel here, as the canvas is stretched to the window.
+	var stretch := window.y / view.y
+	return MM_PER_DESIGN / 25.4 * dpi * scale_factor / stretch
 
 
 func button_centre(k: int) -> Vector2:
-	var s := _unit()
+	if k == ORDERS_BUTTON:
+		return orders_rect().get_center()
+	var s := design_unit()
 	var from_corner: Vector2 = BUTTONS[k][2]
 	var x := from_corner.x * s if BUTTONS[k][4] else size.x - from_corner.x * s
 	return Vector2(x, size.y - from_corner.y * s)
 
 
+## For ORDERS, half its width.
 func button_radius(k: int) -> float:
-	return BUTTONS[k][3] * _unit()
+	if k == ORDERS_BUTTON:
+		return orders_rect().size.x * 0.5
+	return BUTTONS[k][3] * design_unit()
+
+
+## The ORDERS box: 12 from the right, 48 from the top, 44 high. Kept until
+## the size or the size setting changes.
+func orders_rect() -> Rect2:
+	if size == _orders_for_size and scale_factor == _orders_for_scale:
+		return _orders_rect
+	var s := design_unit()
+	var wide := InkUi.width("ORDERS", InkUi.Face.BLACK, roundi(16.0 * s)) + 28.0 * s
+	_orders_rect = Rect2(size.x - 12.0 * s - wide, 48.0 * s, wide, 44.0 * s)
+	_orders_for_size = size
+	_orders_for_scale = scale_factor
+	return _orders_rect
+
+
+## The stick's ring when no thumb is on it, and its radius.
+func stick_home() -> Vector2:
+	var s := design_unit()
+	return Vector2(STICK_HOME.x * s, size.y - STICK_HOME.y * s)
+
+
+func stick_radius() -> float:
+	return STICK_RING * design_unit()
+
+
+## The pause button, a 34 design pixel square at the top left. It doesn't
+## grow with the touch size setting.
+func pause_rect() -> Rect2:
+	var s := _short_side() / InkUi.DESIGN_HEIGHT
+	return Rect2(Vector2(12.0, 8.0) * s, Vector2(34.0, 34.0) * s)
 
 
 func pause_centre() -> Vector2:
-	var s := _short_side()
-	return Vector2(size.x * 0.5 - 0.42 * s, 0.065 * s)
+	return pause_rect().get_center()
 
 
 func pause_radius() -> float:
-	return 0.042 * _short_side()
+	return pause_rect().size.x * 0.5
 
 
 # Touches are tracked even while hidden, since the first touch is what shows
@@ -124,7 +205,7 @@ func _input(event: InputEvent) -> void:
 			_look += event.relative
 		elif role is String and role == "stick":
 			_stick_at = event.position
-			var reach := STICK_REACH * _unit()
+			var reach := STICK_REACH * design_unit()
 			var offset: Vector2 = (_stick_at - _stick_origin).limit_length(reach) / reach
 			stick = Vector2(offset.x, -offset.y)
 			queue_redraw()
@@ -140,6 +221,11 @@ func _button_at(at: Vector2, reach: float, only: Array = []) -> int:
 		if not only.is_empty() and not only.has(k):
 			continue
 		var score := at.distance_to(button_centre(k)) / button_radius(k)
+		if k == ORDERS_BUTTON:
+			# Distance out from the box as a share of its half size.
+			var rect := orders_rect()
+			var off := (at - rect.get_center()).abs() / (rect.size * 0.5)
+			score = maxf(off.x, off.y)
 		if score < best_score:
 			best_score = score
 			best = k
@@ -155,7 +241,7 @@ func _slide_bits(start: int, at: Vector2) -> int:
 func _press(index: int, at: Vector2) -> void:
 	# Buttons come first, then the open menu, so a tap meant for a button
 	# never picks an order.
-	if at.distance_to(pause_centre()) < pause_radius() * START_REACH:
+	if pause_rect().grow(pause_radius() * (START_REACH - 1.0)).has_point(at):
 		_touches[index] = "pause"
 		pause_pressed.emit()
 		return
@@ -226,47 +312,46 @@ func release_all() -> void:
 
 
 func _draw() -> void:
-	var s := _unit()
-	var font := InkUi.font()
-	var font_size := int(s * 0.035)
-	var line := maxf(2.0, s * 0.005)
+	if size.y <= 0.0:
+		return
+	var s := design_unit()
+	var line := maxf(2.0, 2.0 * s)
 	for k in BUTTONS.size():
+		var held: bool = buttons & BUTTONS[k][1] != 0 or (k == ORDERS_BUTTON and menu != null and menu.visible)
+		var fill: Color = BUTTONS[k][6]
+		var ink: Color = BUTTONS[k][7]
+		var label: String = BUTTONS[k][0]
+		var label_size := roundi(float(BUTTONS[k][5]) * s)
+		if k == ORDERS_BUTTON:
+			var rect := orders_rect()
+			draw_rect(rect, InkUi.PINK if held else fill)
+			InkUi.centred(self, rect.get_center(), label, InkUi.Face.BLACK, label_size, InkUi.INK if held else ink)
+			continue
 		var centre := button_centre(k)
 		var radius := button_radius(k)
-		var held: bool = buttons & BUTTONS[k][1] != 0 or (k == ORDERS_BUTTON and menu != null and menu.visible)
-		# Ink rings round a pale fill, solid ink while held.
-		draw_circle(centre + Vector2(line, line), radius + line, Color(InkUi.INK, 0.35))
-		draw_circle(centre, radius, Color(InkUi.INK, 0.55) if held else Color(InkUi.PAPER, 0.18))
-		draw_arc(centre, radius, 0.0, TAU, 40, Color(InkUi.INK, 0.8), line * 2.0, true)
-		draw_arc(centre, radius - line * 1.5, 0.0, TAU, 40, Color(InkUi.PAPER, 0.6), line * 0.6, true)
-		var label: String = BUTTONS[k][0]
-		var label_size := font_size
-		var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
-		if width > radius * 1.7:
-			# Long labels shrink to fit inside the ring.
-			label_size = int(label_size * radius * 1.7 / width)
-			width = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x
-		var at := centre + Vector2(-width * 0.5, label_size * 0.35)
-		draw_string_outline(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, maxi(4, label_size / 4), Color(InkUi.INK, 0.85))
-		draw_string(font, at, label, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(InkUi.PAPER, 0.9))
-	var reach := STICK_REACH * s
+		# Held buttons go ink with cream words.
+		draw_circle(centre, radius, InkUi.INK)
+		draw_circle(centre, radius - line, InkUi.INK if held else Color(fill, 0.92))
+		InkUi.centred(self, centre, label, InkUi.Face.BLACK, label_size, InkUi.CREAM if held else ink)
 	var origin := _stick_origin
 	var knob := _stick_at
 	if not _touches.values().has("stick"):
-		origin = Vector2(0.2 * s, size.y - 0.22 * s)
+		origin = stick_home()
 		knob = origin
-	draw_circle(origin, reach, Color(InkUi.PAPER, 0.1))
-	draw_arc(origin, reach, 0.0, TAU, 40, Color(InkUi.INK, 0.6), line * 2.0, true)
-	draw_arc(origin, reach - line * 1.5, 0.0, TAU, 40, Color(InkUi.PAPER, 0.45), line * 0.6, true)
-	var knob_at := origin + (knob - origin).limit_length(reach)
-	draw_circle(knob_at, reach * 0.4 + line, Color(InkUi.INK, 0.7))
-	draw_circle(knob_at, reach * 0.4, Color(InkUi.PAPER, 0.45))
-	# The pause button: two bars in a ring.
-	var pause := pause_centre()
-	var pause_r := pause_radius()
-	draw_circle(pause, pause_r, Color(InkUi.PAPER, 0.18))
-	draw_arc(pause, pause_r, 0.0, TAU, 32, Color(InkUi.INK, 0.8), line * 2.0, true)
+	var ring := stick_radius()
+	draw_circle(origin, ring, Color(InkUi.INK, 0.25))
+	draw_arc(origin, ring - line * 0.5, 0.0, TAU, 48, InkUi.CREAM, line, true)
+	# The thumb travels to the ring's edge at a full push.
+	var thumb := STICK_THUMB * s
+	var reach := STICK_REACH * s
+	var push := (knob - origin).limit_length(reach) / reach
+	var knob_at := origin + push * (ring - thumb)
+	draw_circle(knob_at, thumb, InkUi.INK)
+	draw_circle(knob_at, thumb - line, InkUi.CREAM)
+	# The pause button: two ink bars in a cream square.
+	var pause := pause_rect()
+	var p := pause.size.x
+	InkUi.box(self, pause, InkUi.CREAM, maxf(2.0, p / 17.0))
 	for side: float in [-1.0, 1.0]:
-		var bar := Rect2(pause + Vector2(side * pause_r * 0.3 - pause_r * 0.12, -pause_r * 0.42), Vector2(pause_r * 0.24, pause_r * 0.84))
-		draw_rect(bar.grow(line * 0.8), Color(InkUi.INK, 0.85))
-		draw_rect(bar, Color(InkUi.PAPER, 0.9))
+		var bar := Rect2(pause.get_center() + Vector2(side * p * 0.14 - p * 0.06, -p * 0.22), Vector2(p * 0.12, p * 0.44))
+		draw_rect(bar, InkUi.INK)

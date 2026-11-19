@@ -56,7 +56,7 @@ func _run() -> void:
 	var press := InputEventScreenTouch.new()
 	press.index = 0
 	press.pressed = true
-	press.position = to_window * Vector2(touch.size.x * 0.2, touch.size.y * 0.7)
+	press.position = to_window * touch.stick_home()
 	Input.parse_input_event(press)
 	await ticks(2)
 	checks.check(touch.visible and main.input.device == LocalInput.Device.TOUCH, "a touch shows the touch controls")

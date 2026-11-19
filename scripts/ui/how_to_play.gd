@@ -16,8 +16,11 @@ const CONTROLS: Array[String] = [
 ]
 const RULES := "Take the other team's flag from their base and bring it to your flag stand. You can only score while your own flag is home.\nTouch your own flag when it's dropped to send it home, or it goes home by itself after 30 s.\nThe first team to the capture limit wins, or the one with most captures when time runs out.\nHold jump going downhill to ski: you slide with no friction and pick up speed. Jet over the next rise to keep it. Jet energy comes back when you stop jetting."
 
+const FONTS := "Big Shoulders Display, copyright 2019 The Big Shoulders Project Authors (https://github.com/xotypeco/big_shoulders).\nIBM Plex Serif, copyright 2017 IBM Corp. with Reserved Font Name \"Plex\".\nBoth are licensed under the SIL Open Font License, Version 1.1:"
+const LICENCE_FILE := "res://art/fonts/IBMPlexSerif-OFL.txt"
+
 var scheme := Scheme.KEYBOARD
-var _tabs: Array[Button] = []
+var _tabs: Array[MenuKit.CoverButton] = []
 var _controls: Label
 
 
@@ -25,13 +28,10 @@ func _init() -> void:
 	name = "HowToPlay"
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	theme = MenuKit.theme()
-	var box := MenuKit.panel(self, "How to play", 0.8)
-	var tabs := HBoxContainer.new()
-	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
-	tabs.add_theme_constant_override("separation", 12)
-	box.add_child(tabs)
+	var box := MenuKit.screen(self, "How to play")
+	var tabs := MenuKit.button_row(box)
 	for k in TABS.size():
-		var tab := MenuKit.button(TABS[k], show_scheme.bind(k), 24)
+		var tab := MenuKit.button(TABS[k], show_scheme.bind(k), 22)
 		tab.toggle_mode = true
 		tabs.add_child(tab)
 		_tabs.append(tab)
@@ -42,22 +42,32 @@ func _init() -> void:
 	box.add_child(scroll)
 	var text := VBoxContainer.new()
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	text.add_theme_constant_override("separation", 12)
+	text.add_theme_constant_override("separation", MenuKit.pxi(10))
 	scroll.add_child(text)
 	_controls = _paragraph(text, "")
 	_paragraph(text, RULES)
-	var back := MenuKit.button("Back", close, MenuKit.BUTTON_SIZE, true)
-	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	box.add_child(back)
+	# The fonts' licence has to travel with them.
+	text.add_child(MenuKit.ink_label("Fonts", 14, InkUi.Face.ITALIC, InkUi.RUST))
+	_paragraph(text, FONTS)
+	var licence := _paragraph(text, _licence_text())
+	licence.add_theme_font_size_override("font_size", MenuKit.pxi(10))
+	MenuKit.button_row(box).add_child(MenuKit.button("Back", close, MenuKit.BUTTON_SIZE, true))
 	show_scheme(scheme)
 
 
 func _paragraph(parent: Control, words: String) -> Label:
-	var label := MenuKit.ink_label(words, 22)
+	var label := MenuKit.ink_label(words, 14)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(label)
 	return label
+
+
+## The licence from its file, without the copyright line at its top.
+static func _licence_text() -> String:
+	var whole := FileAccess.get_file_as_string(LICENCE_FILE)
+	var start := whole.find("This Font Software")
+	return whole.substr(maxi(start, 0)).strip_edges()
 
 
 func show_scheme(which: int) -> void:

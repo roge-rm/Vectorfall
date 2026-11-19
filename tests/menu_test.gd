@@ -5,6 +5,7 @@ extends SceneTree
 ## match (team, bots, skill, time and captures, map), the main menu opens its
 ## screens, pausing stops the sim ticking and resuming starts it, settings
 ## changed from the pause menu reach the match, and auto ski skis when fast.
+## The home screen's footnote follows the chosen match.
 ## Uses its own settings file, not yours.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/menu_test.gd
 
@@ -116,9 +117,9 @@ func _menu() -> void:
 	checks.check(menu.how_to.visible and menu.how_to.scheme == HowToPlay.Scheme.KEYBOARD, "How to play opens on the keyboard scheme on a computer")
 	menu.how_to.show_scheme(HowToPlay.Scheme.TOUCH)
 	checks.check(menu.how_to._controls.text.contains("JUMP"), "the touch tab shows the touch controls")
-	for i in 4:
-		await process_frame
-	checks.check(menu.map != null and menu.map.route_graph == null, "the backdrop map is built without a route graph")
+	menu.show_home()
+	checks.check(menu.home.footnote == "Test map · 8 against 7 · bots", "the cover's footnote shows the chosen map and teams (%s)" % menu.home.footnote)
+	checks.check(menu.get_viewport().gui_get_focus_owner() == menu.home.buttons[0], "Play has the focus on the home screen")
 	menu.free()
 
 
@@ -153,7 +154,7 @@ func _match() -> void:
 	await process_frame
 	var to_window := root.get_final_transform() * touch.get_global_transform_with_canvas()
 	var held: Array[InputEventScreenTouch] = []
-	for at: Vector2 in [Vector2(touch.size.x * 0.2, touch.size.y * 0.7), touch.button_centre(0)]:
+	for at: Vector2 in [touch.stick_home(), touch.button_centre(0)]:
 		var press := InputEventScreenTouch.new()
 		press.index = held.size()
 		press.pressed = true

@@ -17,22 +17,11 @@ func _init() -> void:
 	name = "SetupScreen"
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	theme = MenuKit.theme()
-	var box := MenuKit.panel(self, "Match setup", 0.72)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.follow_focus = true
-	box.add_child(scroll)
-	_rows = VBoxContainer.new()
-	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rows.add_theme_constant_override("separation", 8)
-	scroll.add_child(_rows)
-	var bottom := HBoxContainer.new()
-	bottom.alignment = BoxContainer.ALIGNMENT_CENTER
-	bottom.add_theme_constant_override("separation", 24)
-	box.add_child(bottom)
+	var box := MenuKit.screen(self, "Match setup")
+	_rows = MenuKit.rows(box)
+	var bottom := MenuKit.button_row(box)
 	bottom.add_child(MenuKit.button("Back", close, MenuKit.BUTTON_SIZE, true))
-	bottom.add_child(MenuKit.button("Start", start))
+	bottom.add_child(MenuKit.button("Start", start, MenuKit.BUTTON_SIZE, false, true))
 
 
 ## Shows the screen with the last choices.

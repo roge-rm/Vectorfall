@@ -104,6 +104,7 @@ func _ready() -> void:
 	touch.scale_factor = Settings.touch_size
 	layer.add_child(touch)
 	touch.menu = menu
+	menu.touch = touch
 	touch.pause_pressed.connect(pause)
 	input.touch = touch
 	hud.touch = touch

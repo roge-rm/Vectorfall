@@ -21,10 +21,6 @@ func _ready() -> void:
 
 	var menu: MainMenu = load("res://scenes/menu.tscn").instantiate()
 	add_child(menu)
-	while menu.map == null:
-		await get_tree().process_frame
-	while menu._cover.visible:
-		await get_tree().process_frame
 	var started := Time.get_ticks_usec()
 	for i in 60:
 		await get_tree().process_frame

@@ -17,20 +17,9 @@ func _init() -> void:
 	name = "SettingsScreen"
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	theme = MenuKit.theme()
-	var box := MenuKit.panel(self, "Settings", 0.72)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.follow_focus = true
-	box.add_child(scroll)
-	_rows = VBoxContainer.new()
-	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rows.add_theme_constant_override("separation", 8)
-	scroll.add_child(_rows)
-	var bottom := HBoxContainer.new()
-	bottom.alignment = BoxContainer.ALIGNMENT_CENTER
-	bottom.add_theme_constant_override("separation", 24)
-	box.add_child(bottom)
+	var box := MenuKit.screen(self, "Settings")
+	_rows = MenuKit.rows(box)
+	var bottom := MenuKit.button_row(box)
 	bottom.add_child(MenuKit.button("Defaults", _reset))
 	bottom.add_child(MenuKit.button("Back", close, MenuKit.BUTTON_SIZE, true))
 	_build()
@@ -39,6 +28,7 @@ func _init() -> void:
 func open() -> void:
 	visible = true
 	MenuKit.focus_first(_rows)
+	MenuKit.scroll_to_top(_rows)
 
 
 func close() -> void:
@@ -72,8 +62,7 @@ func _saved() -> void:
 
 
 func _section(words: String) -> void:
-	var label := MenuKit.ink_label(words, 22)
-	label.modulate = Color(1, 1, 1, 0.6)
+	var label := MenuKit.ink_label(words, 14, InkUi.Face.ITALIC, InkUi.RUST)
 	_rows.add_child(label)
 
 
@@ -82,13 +71,13 @@ func _choice(words: String, setting: String, values: Array, labels: Array[String
 	var at := MenuKit.nearest(values, float(Settings.value(setting)))
 	_rows.add_child(MenuKit.stepper(words, labels, at, func(k: int) -> void:
 		Settings.set_value(setting, values[k])
-		_saved()))
+		_saved(), "meter"))
 
 
 func _toggle(words: String, setting: String) -> void:
 	_rows.add_child(MenuKit.stepper(words, MenuKit.on_off(), 1 if Settings.value(setting) else 0, func(k: int) -> void:
 		Settings.set_value(setting, k == 1)
-		_saved()))
+		_saved(), "toggle"))
 
 
 func _build() -> void:

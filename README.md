@@ -99,3 +99,5 @@ F3 in the game shows the bots' route graph (run links white, ski blue, jet orang
 ## Licence
 
 Vectorfall is free software under the GNU General Public License, version 3 or later. See [LICENSE](LICENSE).
+
+The fonts, Big Shoulders Display and IBM Plex Serif, are under the SIL Open Font License 1.1, in [art/fonts](art/fonts) with their licence files. How to play in the game shows the licence too.

@@ -1,8 +1,9 @@
 class_name OrderMenu
 extends Control
 
-## The order menu: a short numbered list of orders for your team's bots, at
-## the top of the screen right of middle. V, the D-pad up or the ORDERS button opens it. Pick
+## The order menu: a short numbered list of orders for your team's bots, on a
+## cream card under the compass, right of middle. V, the D-pad up or the
+## ORDERS button opens it. Pick
 ## with the number keys, the D-pad (up and down, right to pick, left to go
 ## back) or a tap. With commander mode on, its last entry hands out roles:
 ## pick a bot, then a role. It only makes the order; LocalInput sends it in the
@@ -19,6 +20,8 @@ var selected := 0
 var director: BotDirector
 var soldier: Soldier
 var commander_mode := false
+## The touch controls, which the card keeps clear of while they show.
+var touch: TouchControls
 ## The bot picked on the bots page, or 0 for the nearest.
 var _bot_pick := 0
 
@@ -132,21 +135,56 @@ func move(step: int) -> void:
 
 
 ## Where the panel goes: right of the touch stick's half (the left 45% of
-## the screen) and clear of the right hand buttons, below the score. Returns
-## [panel, row height, font size, entry boxes].
+## the screen) and below the score and compass, clear of the touch buttons
+## on the right while they show. Returns [panel, row height, font size,
+## entry boxes].
 func layout() -> Array:
 	var short := minf(size.x, size.y)
 	var count := entries().size()
 	var left := size.x * 0.45 + short * 0.03
-	var width := minf(short * 0.62, size.x - short * 0.25 - left)
-	var scale := clampf(width / (short * 0.62), 0.6, 1.0)
-	var row := short * 0.065 * scale
-	var top := Vector2(left, short * 0.12)
-	var panel := Rect2(top, Vector2(width, row * (count + 1) + short * 0.02))
+	var top := short * 0.17
+	var longest := 0.0
+	var probe := 100
+	for entry in entries() + [title()]:
+		longest = maxf(longest, InkUi.width(entry.to_upper(), InkUi.Face.BLACK, probe))
+	# Rows get shorter, and the words with them, until the card is clear of
+	# the touch buttons on the right and its longest entry fits.
+	var scale := 1.0
+	var width := 0.0
+	var start := left
+	while true:
+		left = start
+		var row := short * 0.07 * scale
+		var font := short * 0.045 * scale
+		var tall := row * (count + 1) + short * 0.01
+		var right := size.x - short * 0.03
+		if touch != null and touch.visible:
+			for k in TouchControls.BUTTONS.size():
+				var centre := touch.button_centre(k)
+				var reach := touch.button_radius(k)
+				var span_top := centre.y - reach
+				var span_bottom := centre.y + reach
+				if k == TouchControls.ORDERS_BUTTON:
+					var box := touch.orders_rect()
+					span_top = box.position.y
+					span_bottom = box.end.y
+				if span_bottom > top and span_top < top + tall:
+					if centre.x > size.x * 0.5:
+						right = minf(right, centre.x - reach - short * 0.02)
+					else:
+						left = maxf(left, centre.x + reach + short * 0.02)
+		var needed := longest * font / probe + font * 0.9 + short * 0.05
+		width = minf(maxf(short * 0.62 * scale, needed), right - left)
+		if width >= needed or scale <= 0.4:
+			break
+		scale -= 0.05
+	var row_height := short * 0.07 * scale
+	var corner := Vector2(left, top)
+	var panel := Rect2(corner, Vector2(width, row_height * (count + 1) + short * 0.01))
 	var boxes: Array[Rect2] = []
 	for k in count:
-		boxes.append(Rect2(top + Vector2(0.0, row * (k + 1)), Vector2(width, row)))
-	return [panel, row, roundi(short * 0.04 * scale), boxes]
+		boxes.append(Rect2(corner + Vector2(0.0, row_height * (k + 1)), Vector2(width, row_height)))
+	return [panel, row_height, roundi(short * 0.045 * scale), boxes]
 
 
 ## The entry under a point on screen, or -1.
@@ -178,10 +216,22 @@ func _draw() -> void:
 	var font_size: int = parts[2]
 	var boxes: Array[Rect2] = parts[3]
 	var list := entries()
-	InkUi.panel(self, panel, Color(InkUi.INK, 0.72), short)
-	InkUi.text(self, panel.position + Vector2(short * 0.02, row * 0.7), title(), font_size, Color(0.95, 0.72, 0.3), HORIZONTAL_ALIGNMENT_LEFT)
+	var line := maxf(2.0, short / InkUi.DESIGN_HEIGHT * 2.0)
+	var pad := short * 0.025
+	InkUi.box(self, panel, InkUi.CREAM, line)
+	# An ink title band with a thin stripe under it.
+	var band := Rect2(panel.position, Vector2(panel.size.x, row))
+	draw_rect(band, InkUi.INK)
+	InkUi.stripes(self, Rect2(band.position.x, band.end.y - line * 1.5, band.size.x, line * 1.5), true)
+	InkUi.centred(self, Vector2(band.position.x + pad + InkUi.width(title().to_upper(), InkUi.Face.BLACK, font_size) * 0.5, band.get_center().y - line * 0.5), title().to_upper(), InkUi.Face.BLACK, font_size, InkUi.CREAM)
+	var number_size := roundi(font_size * 0.7)
+	var f := InkUi.face(InkUi.Face.BLACK)
 	for k in boxes.size():
 		var box := boxes[k]
-		if k == selected:
-			draw_rect(box.grow(-short * 0.006), Color(InkUi.PAPER, 0.22))
-		InkUi.text(self, box.position + Vector2(short * 0.02, row * 0.68), "%d  %s" % [k + 1, list[k]], font_size, InkUi.PAPER, HORIZONTAL_ALIGNMENT_LEFT)
+		var chosen := k == selected
+		if chosen:
+			draw_rect(box.grow_individual(-line, 0.0, -line, 0.0), InkUi.INK)
+		var baseline := box.position.y + (box.size.y + f.get_ascent(font_size) - f.get_descent(font_size)) * 0.5
+		var x := box.position.x + pad
+		InkUi.words(self, Vector2(x, baseline), "%d" % (k + 1), InkUi.Face.ITALIC, number_size, InkUi.AMBER if chosen else InkUi.RUST)
+		InkUi.words(self, Vector2(x + font_size * 0.9, baseline), list[k].to_upper(), InkUi.Face.BLACK, font_size, InkUi.CREAM if chosen else InkUi.INK)
