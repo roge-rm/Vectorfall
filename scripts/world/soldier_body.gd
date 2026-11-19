@@ -12,7 +12,9 @@ extends Node3D
 ## rounded, each with its own helmet, shoulders, pack and chest mark). Each
 ## frame it reads the soldier and poses itself: a run cycle, a crouched ski
 ## stance with sparks, legs tucked in the air, a jet flame and a fall when
-## dead. Only for looks; nothing here is match state.
+## dead. The pack carried shows as a small part on the back, merged into the
+## torso, and a shield or jammer that's on shows a shell or a flickering
+## antenna tip. Only for looks; nothing here is match state.
 
 enum Armour { LIGHT, MEDIUM, HEAVY }
 
@@ -32,6 +34,10 @@ const FAR_LIMB := Color(0.6, 0.6, 0.64, 0.7)
 const FLAME := Color(1.0, 0.55, 0.15)
 const FLAME_CORE := Color(1.0, 0.95, 0.6)
 const SPARK := Color(1.0, 0.92, 0.55)
+## Pack part colours: the repair cross and the ammo crate.
+const CROSS := Color(0.92, 0.2, 0.32, 0.0)
+const CRATE := Color(0.66, 0.58, 0.34, 0.0)
+const JAM_TIP := Color(1.0, 0.95, 0.75)
 ## Past this many metres from the camera the far version draws instead.
 const FAR_DISTANCE := 25.0
 ## Medium armour's leg; the others scale it by their "leg" size.
@@ -62,10 +68,16 @@ static var _meshes: Dictionary[String, ArrayMesh] = {}
 ## While building: the far version, and the detail level wanted.
 static var _far := false
 static var _level := 1
+static var _pack := -1
+## The shield shell's look: see-through with a rim in the team colour.
+static var _shell_shader: Shader
+static var _shells: Dictionary[String, ShaderMaterial] = {}
 
 var soldier: Soldier
 var team := 0
 var armour := Armour.MEDIUM
+## The pack on the back, a Pack slot or Loadout.NO_PACK.
+var pack := Loadout.NO_PACK
 var pose: Node3D
 var hips: Node3D
 var torso: Node3D
@@ -75,11 +87,17 @@ var legs: Array[Node3D] = []
 var knees: Array[Node3D] = []
 var flame: MeshInstance3D
 var sparks: MeshInstance3D
-var guns: Array[Node3D] = []
+## Shown while a shield is on, and the glowing tip of a jammer's antenna
+## while it's on.
+var shell: MeshInstance3D
+var jam_tip: MeshInstance3D
+## Gun models for the carried weapons, by weapon slot, set by set_weapons().
+var guns: Dictionary[int, Node3D] = {}
 ## Near and far views by part.
 var _views: Dictionary[String, Array] = {}
 var _far_views: Dictionary[String, Array] = {}
 var _layer := 1
+var _team_colour := Color.WHITE
 var _phase := 0.0
 ## How much of each pose shows, eased towards the soldier's state.
 var _run := 0.0
@@ -108,11 +126,6 @@ func _init() -> void:
 	head = _joint(torso, Vector3(0.0, 0.62, 0.0), "head")
 	# Arms and gun turn together with the look pitch, about the shoulders.
 	aim = _joint(torso, Vector3(0.0, 0.52, 0.0), "arms")
-	for slot in Weapon.all.size():
-		var gun := WeaponModels.build(slot)
-		gun.position = GUN_AT
-		aim.add_child(gun)
-		guns.append(gun)
 
 	# Both jet flames as one glowing mesh under the pack's nozzles.
 	flame = _view(torso, "flame")
@@ -124,6 +137,14 @@ func _init() -> void:
 	sparks.position = Vector3(0.0, 0.04, 0.2)
 	sparks.material_override = Cel.glow(Color.WHITE, true)
 	sparks.visible = false
+	shell = MeshInstance3D.new()
+	shell.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	shell.mesh = Cel.sphere(1.0, 2.0, 16)
+	shell.visible = false
+	pose.add_child(shell)
+	jam_tip = _view(torso, "jam_tip")
+	jam_tip.material_override = Cel.glow(Color.WHITE, true)
+	jam_tip.visible = false
 	_flicker.seed = 1
 	set_look(0, Armour.MEDIUM)
 
@@ -152,10 +173,14 @@ func _view(parent: Node3D, part: String, far := false) -> MeshInstance3D:
 	return view
 
 
-## Builds the body for a team and armour, in the team's colour.
-func set_look(new_team: int, new_armour: Armour) -> void:
+## Builds the body for a team, armour and pack (a Pack slot or
+## Loadout.NO_PACK), in the team's colour. Leaving out the pack keeps the one
+## it has.
+func set_look(new_team: int, new_armour: Armour, new_pack := -2) -> void:
 	team = new_team
 	armour = new_armour
+	if new_pack != -2:
+		pack = new_pack
 	var build: Dictionary = BUILDS[armour]
 	var leg: float = build.leg
 	_thigh = THIGH * leg
@@ -168,17 +193,79 @@ func set_look(new_team: int, new_armour: Armour) -> void:
 		knees[k].position.y = -_thigh
 	for part: String in _views:
 		for view: MeshInstance3D in _views[part]:
-			view.mesh = mesh(part, team, armour)
+			view.mesh = mesh(part, team, armour, false, pack)
 	for part: String in _far_views:
 		for view: MeshInstance3D in _far_views[part]:
-			view.mesh = mesh(part, team, armour, true)
+			view.mesh = mesh(part, team, armour, true, pack)
+	# The shell sits round the body from the knees to above the helmet.
+	var width := 0.4 + 0.12 * float(build.width) + 0.06 * float(build.shoulder)
+	shell.scale = Vector3(width, 1.05 * sqrt(leg), 0.42 + 0.06 * float(build.pack))
+	shell.position.y = _hip_height + 0.12
+	jam_tip.position = _antenna_tip(build)
 	set_team_colour(Palette.team(team))
 	set_render_layer(_layer)
 
 
+## Puts a different pack on the back, a Pack slot or Loadout.NO_PACK.
+func set_pack(new_pack: int) -> void:
+	if new_pack != pack:
+		set_look(team, armour, new_pack)
+
+
+## Builds gun models for these weapon slots and drops the rest. The meshes
+## are shared, so this only makes a few nodes.
+func set_weapons(slots: Array[int]) -> void:
+	for slot: int in guns.keys():
+		if not slots.has(slot):
+			guns[slot].visible = false
+			guns[slot].queue_free()
+			guns.erase(slot)
+	for slot in slots:
+		if guns.has(slot):
+			continue
+		var gun := WeaponModels.build(slot)
+		gun.position = GUN_AT
+		gun.visible = false
+		aim.add_child(gun)
+		guns[slot] = gun
+		for view: GeometryInstance3D in _meshes_under(gun):
+			Cel.set_team(view, _team_colour)
+			view.layers = _layer
+
+
 func set_team_colour(colour: Color) -> void:
+	_team_colour = colour
 	for view: GeometryInstance3D in _meshes_under(self):
-		Cel.set_team(view, colour)
+		if view != shell and view != jam_tip:
+			Cel.set_team(view, colour)
+	shell.material_override = shell_material(colour)
+
+
+## A see-through shell in a team colour, faint in the middle and stronger at
+## the rim, with a thin ink edge. Shared by colour.
+static func shell_material(colour: Color) -> ShaderMaterial:
+	var key := colour.to_html()
+	if _shells.has(key):
+		return _shells[key]
+	if _shell_shader == null:
+		_shell_shader = Shader.new()
+		_shell_shader.code = """shader_type spatial;
+render_mode unshaded, cull_back, depth_draw_never, shadows_disabled, fog_disabled;
+uniform vec3 colour : source_color;
+uniform vec3 ink : source_color;
+void fragment() {
+	float rim = 1.0 - abs(dot(NORMAL, VIEW));
+	float edge = smoothstep(0.86, 0.9, rim);
+	ALBEDO = mix(colour, ink, edge);
+	ALPHA = mix(0.12 + 0.6 * pow(rim, 2.5), 0.8, edge);
+}
+"""
+	var made := ShaderMaterial.new()
+	made.shader = _shell_shader
+	made.set_shader_parameter("colour", colour.lightened(0.25))
+	made.set_shader_parameter("ink", Color(0.14, 0.04, 0.18))
+	_shells[key] = made
+	return made
 
 
 func set_render_layer(layer: int) -> void:
@@ -196,16 +283,21 @@ static func _meshes_under(node: Node, found: Array[GeometryInstance3D] = []) -> 
 
 
 ## The merged mesh for one part of a soldier, made once and shared: the
-## near version at the current detail level, or the far version.
-static func mesh(part: String, for_team: int, for_armour: Armour, far := false) -> ArrayMesh:
+## near version at the current detail level, or the far version. Only the
+## torso depends on the pack.
+static func mesh(part: String, for_team: int, for_armour: Armour, far := false, with_pack := -1) -> ArrayMesh:
 	var level := -1 if far else detail
-	var key := "%s/%d/%d/%d" % [part, for_team, for_armour, level]
+	if part != "torso":
+		with_pack = -1
+	var key := "%s/%d/%d/%d/%d" % [part, for_team, for_armour, level, with_pack]
 	if not _meshes.has(key):
 		_far = far
 		_level = 0 if far else detail
+		_pack = with_pack
 		var parts := _parts(part, for_team, BUILDS[for_armour])
-		_meshes[key] = Cel.merged(parts, part == "flame" or part == "sparks")
+		_meshes[key] = Cel.merged(parts, part == "flame" or part == "sparks" or part == "jam_tip")
 		_far = false
+		_pack = -1
 	return _meshes[key]
 
 
@@ -280,6 +372,12 @@ static func _parts(part: String, for_team: int, b: Dictionary) -> Array:
 				_add(parts, Cel.box(Vector3(0.012, shin * 0.36, 0.012)), _at((k - 0.5) * 0.05 * l, -shin * 0.42, -0.085 * l - 0.03), DARK, 2)
 		"torso":
 			_torso(parts, angular, b)
+			_pack_part(parts, b)
+		"jam_tip":
+			parts.append([Cel.sphere(0.035, 0.07, 6), Transform3D.IDENTITY, JAM_TIP])
+			for k in 3:
+				var spoke := Basis(Vector3.UP, k * PI / 3.0) * Basis(Vector3.BACK, PI * 0.5)
+				parts.append([Cel.box(Vector3(0.012, 0.16, 0.012)), Transform3D(spoke, Vector3.ZERO), JAM_TIP])
 		"head":
 			_head(parts, angular, h)
 		"arms":
@@ -406,6 +504,74 @@ static func _torso(parts: Array, angular: bool, b: Dictionary) -> void:
 		_add(parts, _turned(bell), _at(side * 0.11 * p, 0.06, 0.26), DARK)
 
 
+## Where the pack part sits on the back of the torso: x, y and the z of its
+## front face.
+static func _pack_mount(b: Dictionary) -> Vector3:
+	var p: float = b.pack
+	var d: float = b.depth
+	return Vector3(0.0, 0.34 + 0.06 * sqrt(p), 0.24 * d + 0.07 * p)
+
+
+## Top of the jammer's antenna in torso space.
+static func _antenna_tip(b: Dictionary) -> Vector3:
+	var at := _pack_mount(b)
+	return Vector3(-0.1 * float(b.pack) - 0.02, at.y + 0.62, at.z + 0.05)
+
+
+## The pack's part on the back, between and behind the two halves of the
+## pack: a pale box with a red cross for repair, a team coloured dish for the
+## shield, an upright cell with amber bands for energy, a strapped crate for
+## ammo and a box with an antenna for the jammer.
+static func _pack_part(parts: Array, b: Dictionary) -> void:
+	var p: float = b.pack
+	var k := sqrt(p)
+	var at := _pack_mount(b)
+	var flat := Basis(Vector3.RIGHT, PI * 0.5)
+	match _pack:
+		Pack.REPAIR:
+			var size := Vector3(0.22, 0.2, 0.12) * k
+			var c := at + Vector3(0, 0, size.z * 0.5)
+			_add(parts, _block(size, 0.02), _at(c.x, c.y, c.z), PALE)
+			_add(parts, Cel.box(Vector3(0.05, 0.15, 0.02) * k), _at(c.x, c.y, c.z + size.z * 0.5), CROSS)
+			_add(parts, Cel.box(Vector3(0.15, 0.05, 0.02) * k), _at(c.x, c.y, c.z + size.z * 0.5), CROSS)
+			# A coiled hose to the side.
+			_add(parts, _drum(0.05 * k, 0.05, 0.01), Transform3D(Basis(Vector3.BACK, PI * 0.5), c + Vector3(size.x * 0.5 + 0.025, -0.04, 0)), DARK, 1)
+		Pack.SHIELD:
+			var c := at + Vector3(0, 0.02, 0.03)
+			_add(parts, _block(Vector3(0.12, 0.14, 0.06) * k, 0.015), _at(c.x, c.y, c.z), DARK)
+			_add(parts, _drum(0.13 * k, 0.04, 0.012), Transform3D(flat, c + Vector3(0, 0, 0.05)), PLATE)
+			_add(parts, _drum(0.09 * k, 0.05, 0.01), Transform3D(flat, c + Vector3(0, 0, 0.06)), TEAM)
+			_add(parts, _drum(0.03 * k, 0.07, 0.006), Transform3D(flat, c + Vector3(0, 0, 0.07)), PALE, 1)
+		Pack.ENERGY:
+			var c := at + Vector3(0, 0, 0.07 * k)
+			var r := 0.07 * k
+			var half := 0.17 * k
+			_add(parts, _turned(PackedVector2Array([Vector2(r * 0.7, -half), Vector2(r, -half + 0.02), Vector2(r, half - 0.02), Vector2(r * 0.7, half)])), _at(c.x, c.y, c.z), DARK)
+			for n in 3:
+				_add(parts, _drum(r * 1.12, 0.035, 0.008), _at(c.x, c.y + (n - 1) * half * 0.6, c.z), VISOR)
+			_add(parts, _drum(0.025 * k, 0.06, 0.006), _at(c.x, c.y + half + 0.03, c.z), PLATE, 1)
+		Pack.AMMO:
+			var size := Vector3(0.3, 0.24, 0.16) * k
+			var c := at + Vector3(0, -0.02, size.z * 0.5 + 0.02)
+			_add(parts, _block(size, 0.02), _at(c.x, c.y, c.z), CRATE)
+			for side: float in [1.0, -1.0]:
+				_add(parts, Cel.box(Vector3(0.035 * k, size.y + 0.012, size.z + 0.012)), _at(c.x + side * size.x * 0.3, c.y, c.z), DARK)
+			_add(parts, Cel.box(Vector3(size.x * 0.3, 0.025, 0.012)), _at(c.x, c.y + size.y * 0.2, c.z + size.z * 0.5 + 0.002), PALE, 1)
+			_add(parts, Cel.box(Vector3(size.x * 0.3, 0.025, 0.012)), _at(c.x, c.y - size.y * 0.1, c.z + size.z * 0.5 + 0.002), PALE, 1)
+		Pack.JAMMER:
+			var size := Vector3(0.18, 0.18, 0.1) * k
+			var c := at + Vector3(0, -0.02, size.z * 0.5)
+			_add(parts, _block(size, 0.018), _at(c.x, c.y, c.z), DARK)
+			_add(parts, _block(Vector3(0.12, 0.03, 0.02) * k, 0.006), _at(c.x, c.y + 0.03, c.z + size.z * 0.5), VISOR, 1)
+			# A thin mast from the box's top corner, up past the helmet.
+			var tip := _antenna_tip(b)
+			var foot := Vector3(tip.x, c.y + size.y * 0.5, tip.z)
+			var mast := tip.y - foot.y
+			_add(parts, Cel.box(Vector3(0.02, mast, 0.02)), _at(foot.x, foot.y + mast * 0.5, foot.z), DARK)
+			_add(parts, _drum(0.03, 0.05, 0.006), _at(foot.x, foot.y + 0.02, foot.z), PLATE)
+			_add(parts, _drum(0.05, 0.015, 0.004), _at(tip.x, tip.y - mast * 0.35, tip.z), PLATE, 1)
+
+
 func _process(delta: float) -> void:
 	if soldier == null:
 		return
@@ -448,11 +614,17 @@ func _process(delta: float) -> void:
 	# Dead: tip over backwards onto the ground.
 	pose.rotation.x = _fallen * PI * 0.48
 	pose.position.y = _fallen * 0.28
-	for k in guns.size():
-		guns[k].visible = k == s.weapon
-	var spinner := guns[Weapon.CHAINGUN].get_node("Spinner") as Node3D
-	spinner.rotation.z += s.spin * delta * 40.0
+	for slot: int in guns:
+		guns[slot].visible = slot == s.weapon_slot()
+	if guns.has(Weapon.CHAINGUN):
+		var spinner := guns[Weapon.CHAINGUN].get_node("Spinner") as Node3D
+		spinner.rotation.z += s.spin * delta * 40.0
 	flame.visible = _jet > 0.5
+	shell.visible = s.shielded()
+	jam_tip.visible = s.jamming() and _flicker.randf() < 0.7
+	if jam_tip.visible:
+		jam_tip.scale = Vector3.ONE * _flicker.randf_range(0.6, 1.3)
+		jam_tip.rotation.y = _flicker.randf_range(0.0, PI)
 	flame.scale = Vector3(1.0, _flicker.randf_range(0.75, 1.15), 1.0)
 	sparks.visible = on_ground and s.skiing and speed > 10.0
 	if sparks.visible:

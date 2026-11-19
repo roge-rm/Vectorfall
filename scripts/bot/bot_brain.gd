@@ -19,8 +19,8 @@ extends CommandSource
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
 ## goal_target.
-enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE }
-const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide"]
+enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP }
+const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair"]
 ## OFFENCE goes for the enemy flag and carries it, DEFENCE holds by the flag,
 ## LIGHT_DEFENCE watches the way enemies come in and chases carriers, ESCORT
 ## goes with a carrier or a person heading for the flag, CHASE goes after the
@@ -109,6 +109,14 @@ const JET_IN_NEAR := 45.0
 ## Light defence goes out to meet our carrier once it's this close to home, in
 ## metres.
 const MEET_RANGE := 450.0
+## A bot whose role wants another loadout goes to one of its team's stations
+## this close, in metres, while nothing more urgent is going on. It gives up
+## after STATION_TIME seconds and doesn't try again for STATION_WAIT.
+const STATION_RANGE := 60.0
+const STATION_TIME := 20.0
+const STATION_WAIT := 90.0
+## Goals a bot may leave for a station or to repair a teammate.
+const CALM_GOALS: Array[Goal] = [Goal.DEFEND, Goal.MIDFIELD, Goal.RALLY, Goal.RETREAT]
 
 var director: BotDirector
 var game: Match
@@ -123,6 +131,7 @@ var work_parity := 0
 var perception := BotPerception.new()
 var steering := BotSteering.new()
 var combat := BotCombat.new()
+var gear := BotGear.new()
 var role := Role.OFFENCE
 ## Which of its role's places it takes, such as a defence spot.
 var role_slot := 0
@@ -202,6 +211,15 @@ var found: Array[RoutePlanner.Search] = []
 var ready_seen := false
 ## The disc's way out, from and to, for after_work() to check with a ray
 ## before the shot.
+## Role to the BotLoadouts kit picked for it, kept for the match, and the
+## random numbers that pick them, seeded from the bot's own so its aim and
+## other choices go on as they would without them.
+var kit_picks := {}
+var kit_rng := RandomNumberGenerator.new()
+## The tick a station detour gives up, and the tick before which it won't
+## start another.
+var station_until := -1
+var no_station_until := 0
 var _disc_check := false
 var _disc_from := Vector3.ZERO
 var _disc_to := Vector3.ZERO
@@ -226,8 +244,10 @@ func reset() -> void:
 	attacking = false
 	rally_tick = -1
 	_steer = {}
+	station_until = -1
 	steering.reset()
 	combat.reset()
+	gear.reset()
 	if soldier != null:
 		last_position = soldier.at()
 		yaw = soldier.yaw
@@ -246,8 +266,8 @@ func reset() -> void:
 			"captures": 0,
 			"returns": 0,
 			"grabs": 0,
-			"shots": [0, 0],
-			"hits": [0, 0],
+			"shots": _zeros(Weapon.all.size()),
+			"hits": _zeros(Weapon.all.size()),
 		}
 
 
@@ -350,6 +370,7 @@ func work(delta: float) -> void:
 	_command = command
 	if soldier == null or game == null:
 		return
+	_send_loadout(command)
 	if soldier.dead:
 		was_dead = true
 		return
@@ -368,9 +389,39 @@ func work(delta: float) -> void:
 		Prof.add("bot.combat_aim", Time.get_ticks_usec() - prof_t)
 	else:
 		combat.apply(self, command, delta)
+	gear.apply(self, command)
+	if _command.loadout.size() > 0:
+		command.loadout = _command.loadout
 	yaw = command.yaw
 	pitch = command.pitch
 	_command = command
+
+
+## The loadout its role wants, picking the kit the first time it plays the
+## role. Uses the bot's kit random numbers, so only from work() or the main
+## thread in bot order.
+func wanted_loadout() -> Loadout:
+	if not kit_picks.has(role):
+		kit_picks[role] = BotLoadouts.pick(role, personality, kit_rng)
+	return BotLoadouts.loadout(kit_picks[role])
+
+
+## Once each think period, alive or dead, sends the role's loadout when the
+## soldier's next one differs, so it respawns in it, the same way a person's
+## loadout screen does.
+func _send_loadout(command: PlayerCommand) -> void:
+	if posmod(game.tick + think_offset, BotDirector.THINK_TICKS) != 0:
+		return
+	var want := wanted_loadout()
+	if not soldier.next_loadout.equals(want):
+		command.loadout = want.to_dict()
+
+
+## Puts the role's loadout on at once, before the match starts.
+func dress() -> void:
+	var want := wanted_loadout()
+	if not soldier.loadout.equals(want):
+		soldier.set_loadout(want)
 
 
 ## Thinks if it's time, carries its route search on and steers, on the ticks
@@ -447,10 +498,12 @@ func think() -> void:
 		Prof.add("bot.perception", Time.get_ticks_usec() - prof_t)
 		prof_t = Time.get_ticks_usec()
 		combat.think(self)
+		gear.think(self)
 		Prof.add("bot.combat_think", Time.get_ticks_usec() - prof_t)
 	else:
 		perception.listen(soldier, game, director)
 		combat.think(self)
+		gear.think(self)
 	if goal == Goal.HOLD or goal == Goal.POINT:
 		if goal == Goal.POINT and _needs_route():
 			replan()
@@ -515,8 +568,52 @@ func _think_ctf() -> void:
 		replan()
 
 
-## The goal for now, as [Goal, position].
+## The goal for now, as [Goal, position]: the role's, or when that's a calm
+## one, a detour to a station for the role's loadout or to repair a teammate.
 func _choose_goal() -> Array:
+	var next := _role_goal()
+	var kind: Goal = next[0]
+	if not CALM_GOALS.has(kind) or combat.target_id != 0 or combat.hurt_recently(game.tick):
+		if goal == Goal.STATION:
+			station_until = -1
+		return next
+	var own: Flag = game.flags.get(soldier.team)
+	if own != null and own.mode != Flag.Mode.HOME:
+		return next
+	var pad := _station_detour()
+	if pad != Vector3.INF:
+		return [Goal.STATION, pad]
+	var mate := game.soldier(gear.mate_id) if gear.mate_id != 0 else null
+	if mate != null and not mate.dead:
+		return [Goal.HELP, mate.at()]
+	return next
+
+
+## The pad of the nearest station in reach while the loadout worn isn't the
+## role's, or Vector3.INF. A detour that takes too long is dropped for a
+## while, so a bot can't keep trying for a pad it can't reach.
+func _station_detour() -> Vector3:
+	if game.tick < no_station_until:
+		return Vector3.INF
+	if soldier.loadout.equals(wanted_loadout()):
+		station_until = -1
+		return Vector3.INF
+	if goal == Goal.STATION and station_until >= 0 and game.tick > station_until:
+		station_until = -1
+		no_station_until = game.tick + int(STATION_WAIT * 60.0)
+		return Vector3.INF
+	var pos := soldier.at()
+	var best := Vector3.INF
+	for pad in director.station_pads(soldier.team):
+		if pad.distance_to(pos) < STATION_RANGE and pad.distance_to(pos) < best.distance_to(pos):
+			best = pad
+	if best != Vector3.INF and goal != Goal.STATION:
+		station_until = game.tick + int(STATION_TIME * 60.0)
+	return best
+
+
+## The goal its role and the flags call for, as [Goal, position].
+func _role_goal() -> Array:
 	var team := soldier.team
 	var own: Flag = game.flags.get(team)
 	var theirs: Flag = game.flags.get(1 - team)
@@ -721,6 +818,8 @@ func _hold_range() -> float:
 			return 10.0
 		Goal.CAPTURE:
 			return 1.0
+		Goal.HELP:
+			return BotGear.MATE_HOLD
 	return -1.0
 
 
@@ -1096,7 +1195,7 @@ func _escape_command() -> PlayerCommand:
 			if refilling:
 				# Out of energy: stand still, which holds on any slope a soldier
 				# can stand on, until there's enough to jet out.
-				refilling = soldier.energy < BotSteering.REST_UNTIL and soldier.grounded
+				refilling = soldier.energy < BotSteering.rest_until(soldier) and soldier.grounded
 				escape_ticks += WORK_TICKS
 				if refilling:
 					var down := BotSteering.rest_wish(soldier)
@@ -1157,7 +1256,8 @@ func describe() -> String:
 	if GOAL_NAMES[goal] != ROLE_NAMES[role]:
 		name_ += ", " + GOAL_NAMES[goal]
 	var who := "%s, %s" % [BotDirector.SKILL_NAMES[BotDirector.skill_level(skill)], PERSONALITY_NAMES[personality]]
-	return "%s: %s%s\n%s  %.0f m/s  energy %.0f  health %.0f  knows %d" % [name_, doing, fight, who, soldier.vel().length(), soldier.energy, soldier.health, perception.known_count()]
+	var wears := BotLoadouts.describe(soldier.loadout, soldier.pack_on)
+	return "%s: %s%s\n%s  %.0f m/s  energy %.0f  health %.0f  knows %d\n%s" % [name_, doing, fight, who, soldier.vel().length(), soldier.energy, soldier.health, perception.known_count(), wears]
 
 
 func get_state() -> Dictionary:
@@ -1185,6 +1285,12 @@ func get_state() -> Dictionary:
 		"role_target": role_target,
 		"refilling": refilling,
 		"combat": combat.get_state(),
+		"gear": gear.get_state(),
+		"kit_picks": kit_picks.duplicate(),
+		"kit_rng_seed": kit_rng.seed,
+		"kit_rng_state": kit_rng.state,
+		"station_until": station_until,
+		"no_station_until": no_station_until,
 		"path": path.duplicate(),
 		"path_index": path_index,
 		"path_start": path_start,
@@ -1235,6 +1341,13 @@ func set_state(state: Dictionary) -> void:
 	role_target = state.role_target
 	refilling = state.refilling
 	combat.set_state(state.combat)
+	gear.set_state(state.get("gear", {}))
+	kit_picks = state.get("kit_picks", {}).duplicate()
+	if state.has("kit_rng_seed"):
+		kit_rng.seed = state.kit_rng_seed
+		kit_rng.state = state.kit_rng_state
+	station_until = state.get("station_until", -1)
+	no_station_until = state.get("no_station_until", 0)
 	path.assign(state.path)
 	path_index = state.path_index
 	path_start = state.path_start
@@ -1260,3 +1373,11 @@ func set_state(state: Dictionary) -> void:
 	if state.has("rng_seed"):
 		rng.seed = state.rng_seed
 		rng.state = state.rng_state
+
+
+## An array of n zeros, for counts per weapon.
+static func _zeros(n: int) -> Array:
+	var out := []
+	out.resize(n)
+	out.fill(0)
+	return out

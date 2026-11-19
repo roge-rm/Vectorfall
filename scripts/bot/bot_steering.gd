@@ -131,10 +131,10 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 	# Energy the steep part of this leg needs on top of what the speed gives.
 	var steep_need := 0.0
 	if link != null and link.steep > 0.0 and target.y > pos.y + 3.0:
-		steep_need = minf(maxf(link.steep - carries, 0.0) * RouteGraph.ENERGY_PER_METRE + 10.0, REST_UNTIL)
+		steep_need = minf(maxf(link.steep - carries, 0.0) * RouteGraph.ENERGY_PER_METRE + 10.0, rest_until(s))
 	if resting:
 		# Out of energy below a climb it can't run up: wait for a tank.
-		resting = s.energy < REST_UNTIL and s.grounded
+		resting = s.energy < rest_until(s) and s.grounded
 		climbing = not resting
 	elif s.grounded and speed < 3.0 and rise > 3.0 and s.energy < CLIMB_RESERVE and brain.no_progress > 1.0 and pos.distance_to(rest_spot) > 5.0:
 		# Only once in a place: if a full tank didn't get it moving, it's stuck.
@@ -206,6 +206,11 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 	if jump:
 		command.buttons |= PlayerCommand.JUMP
 	return command
+
+
+## Energy to wait for, at most a little under the armour's full tank.
+static func rest_until(s: Soldier) -> float:
+	return minf(REST_UNTIL, s.tuning.energy_max - 5.0)
 
 
 ## Where to walk while waiting for energy: down to flatter ground if it's

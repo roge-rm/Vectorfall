@@ -3,7 +3,8 @@ extends SceneTree
 ## Checks what bots see and hear on the test map: an enemy in the open in
 ## front is seen once the reaction time has passed, one behind a hill isn't,
 ## one behind the bot is heard when it fires, and a seen enemy is remembered
-## for a while once it's out of sight and then forgotten. The ray cast budget
+## for a while once it's out of sight and then forgotten. One with a sensor
+## jammer on isn't seen past 20 m. The ray cast budget
 ## is shared by every bot each tick.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/perception_test.gd
 
@@ -54,6 +55,24 @@ func _run() -> void:
 	eyes.update(me, game, director)
 	checks.check(eyes.knows(behind.entity_id) and not eyes.can_see(behind.entity_id), "the one behind is heard when it fires")
 	checks.check(eyes.guess_position(behind.entity_id, game.tick).distance_to(behind.global_position) < 3.0, "and placed where it fired from")
+
+	# A sensor jammer hides an enemy past 20 m. open is 28 m away.
+	open.set_loadout(Loadout.make(SoldierBody.Armour.LIGHT, [Weapon.DISC], Pack.JAMMER))
+	open.pack_on = true
+	var jammed := BotPerception.new()
+	jammed.reaction_time = 0.0
+	jammed.update(me, game, director)
+	var hidden_far: bool = not jammed.contacts.has(open.entity_id) or not jammed.contacts[open.entity_id].visible
+	var at_28 := open.global_position
+	open.global_position = _on_ground(-118.0, 2.0).origin
+	await ticks(1)
+	jammed.update(me, game, director)
+	var seen_near := jammed.can_see(open.entity_id)
+	open.global_position = at_28
+	open.pack_on = false
+	await ticks(1)
+	jammed.update(me, game, director)
+	checks.check(hidden_far and seen_near and jammed.can_see(open.entity_id), "a jamming enemy isn't seen at 28 m, is at 15 m, and is at 28 m with the jammer off")
 
 	# Out of sight, the seen one is remembered, fading, then forgotten.
 	open.global_position = _on_ground(0.0, 20.0).origin

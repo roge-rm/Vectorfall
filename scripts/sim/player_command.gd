@@ -15,6 +15,9 @@ const SKI := 32
 ## one tick per press, and a soldier switches once for every tick it's set.
 const NEXT_WEAPON := 64
 const PREV_WEAPON := 128
+## Held to throw a hand grenade or place a mine. One throw per press.
+const GRENADE := 256
+const MINE := 512
 
 ## x is right and y is forward, length at most 1.
 var move := Vector2.ZERO
@@ -23,12 +26,16 @@ var move := Vector2.ZERO
 var yaw := 0.0
 var pitch := 0.0
 var buttons := 0
-## Weapon slot to switch to, or -1 to keep the current one.
+## Index in the soldier's carried weapons to switch to, or -1 to keep the
+## current one.
 var weapon := -1
 ## An order to the team's bots (Orders.Kind), sent for one tick, and what it's
 ## about, such as the bot and role for Orders.Kind.SET_ROLE.
 var order := 0
 var order_arg := 0
+## A loadout the soldier wants (Loadout.to_dict()), sent for one tick when it
+## changes, or empty. It's worn at the next respawn, or at once on a station.
+var loadout: Dictionary = {}
 
 
 func has(button: int) -> bool:
@@ -40,7 +47,7 @@ func duplicate() -> PlayerCommand:
 
 
 func to_dict() -> Dictionary:
-	return { "move": move, "yaw": yaw, "pitch": pitch, "buttons": buttons, "weapon": weapon, "order": order, "order_arg": order_arg }
+	return { "move": move, "yaw": yaw, "pitch": pitch, "buttons": buttons, "weapon": weapon, "order": order, "order_arg": order_arg, "loadout": loadout.duplicate(true) }
 
 
 static func from_dict(data: Dictionary) -> PlayerCommand:
@@ -52,4 +59,5 @@ static func from_dict(data: Dictionary) -> PlayerCommand:
 	command.weapon = data.get("weapon", -1)
 	command.order = data.get("order", 0)
 	command.order_arg = data.get("order_arg", 0)
+	command.loadout = data.get("loadout", {}).duplicate(true)
 	return command

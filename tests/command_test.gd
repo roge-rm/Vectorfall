@@ -25,7 +25,7 @@ func ticks(n: int) -> void:
 
 
 func _run() -> void:
-	for action in ["move_forward", "move_back", "move_left", "move_right", "look_left", "look_right", "look_up", "look_down", "fire", "jet", "jump", "use", "deploy", "ski", "pause", "weapon_1", "weapon_2", "next_weapon", "prev_weapon"]:
+	for action in ["move_forward", "move_back", "move_left", "move_right", "look_left", "look_right", "look_up", "look_down", "fire", "jet", "jump", "use", "deploy", "ski", "pause", "weapon_1", "weapon_2", "weapon_3", "weapon_4", "loadout", "grenade", "mine", "next_weapon", "prev_weapon"]:
 		checks.check(InputMap.has_action(action) and not InputMap.action_get_events(action).is_empty(), "the input map has %s" % action)
 	var kinds := {}
 	for event in InputMap.action_get_events("jet"):

@@ -38,6 +38,12 @@ static var commander_mode := false
 ## Volumes from 0 to 1, for sound effects and the bots' voices.
 static var sound_volume := 0.8
 static var voice_volume := 0.8
+## Saved loadouts (Loadout.to_dict()), and the index of the last one used,
+## which you start a match in.
+static var loadouts: Array[Dictionary] = default_loadouts()
+static var loadout_slot := 0
+
+const LOADOUT_SLOTS := 3
 
 
 ## True on a slow device, which starts with lower graphics: Android with 4
@@ -47,6 +53,36 @@ static func weak_device() -> bool:
 		return false
 	var memory: int = OS.get_memory_info().get("physical", -1)
 	return OS.get_processor_count() <= 4 or (memory > 0 and memory < 3 * 1024 * 1024 * 1024)
+
+
+## The saved loadouts to start with: medium with the disc, chaingun and
+## grenade launcher and a shield, light with the disc and blaster and an
+## energy pack, and heavy with the disc, chaingun, mortar and grenade
+## launcher and a repair pack.
+static func default_loadouts() -> Array[Dictionary]:
+	return [
+		Loadout.make(SoldierBody.Armour.MEDIUM, [Weapon.DISC, Weapon.CHAINGUN, Weapon.GRENADE_LAUNCHER], Pack.SHIELD).to_dict(),
+		Loadout.make(SoldierBody.Armour.LIGHT, [Weapon.DISC, Weapon.BLASTER], Pack.ENERGY).to_dict(),
+		Loadout.make(SoldierBody.Armour.HEAVY, [Weapon.DISC, Weapon.CHAINGUN, Weapon.MORTAR, Weapon.GRENADE_LAUNCHER], Pack.REPAIR).to_dict(),
+	]
+
+
+## A saved loadout, trimmed to its armour.
+static func loadout(slot: int) -> Loadout:
+	return Loadout.from_dict(loadouts[clampi(slot, 0, LOADOUT_SLOTS - 1)]).fixed()
+
+
+## The last loadout used, which a match starts you in.
+static func current_loadout() -> Loadout:
+	return loadout(loadout_slot)
+
+
+## Keeps a loadout in a slot, makes it the last used and saves the file.
+static func save_loadout(slot: int, value: Loadout) -> void:
+	slot = clampi(slot, 0, LOADOUT_SLOTS - 1)
+	loadouts[slot] = value.fixed().to_dict()
+	loadout_slot = slot
+	save_file()
 
 
 ## Puts every setting back to how it starts.
@@ -65,6 +101,8 @@ static func reset() -> void:
 	commander_mode = false
 	sound_volume = 0.8
 	voice_volume = 0.8
+	loadouts = default_loadouts()
+	loadout_slot = 0
 
 
 ## A setting by name, for the settings screen.
@@ -145,6 +183,11 @@ static func load_file() -> void:
 		commander_mode = file.get_value("bots", "commander", commander_mode)
 		sound_volume = clampf(file.get_value("sound", "effects", sound_volume), 0.0, 1.0)
 		voice_volume = clampf(file.get_value("sound", "voices", voice_volume), 0.0, 1.0)
+		for k in LOADOUT_SLOTS:
+			var saved: Variant = file.get_value("loadouts", "slot_%d" % (k + 1), loadouts[k])
+			if saved is Dictionary:
+				loadouts[k] = Loadout.from_dict(saved).fixed().to_dict()
+		loadout_slot = clampi(file.get_value("loadouts", "last", loadout_slot), 0, LOADOUT_SLOTS - 1)
 	apply()
 
 
@@ -164,6 +207,9 @@ static func save_file() -> void:
 	file.set_value("bots", "commander", commander_mode)
 	file.set_value("sound", "effects", sound_volume)
 	file.set_value("sound", "voices", voice_volume)
+	for k in LOADOUT_SLOTS:
+		file.set_value("loadouts", "slot_%d" % (k + 1), loadouts[k])
+	file.set_value("loadouts", "last", loadout_slot)
 	file.save(path)
 
 

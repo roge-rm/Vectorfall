@@ -10,9 +10,9 @@ enum Scheme { TOUCH, KEYBOARD, GAMEPAD }
 
 const TABS: Array[String] = ["Touch", "Keyboard", "Gamepad"]
 const CONTROLS: Array[String] = [
-	"Drag on the left side to move and on the right side to look.\nHold JUMP to ski and JET to fly. One thumb can slide between JUMP, JET and FIRE.\nDrag from FIRE to aim while firing. SWAP changes weapon.\nORDERS gives your bots orders, II pauses.",
-	"WASD to move, the mouse to look, left click to fire.\nHold space to jump and ski, right click or shift to jet.\n1, 2 or Q change weapon.\nV then a number gives your bots orders, Esc pauses.",
-	"Left stick to move, right stick to look.\nRight trigger fires, left trigger or LB jets, hold A to jump and ski.\nRB changes weapon.\nD-pad up gives your bots orders, Start pauses.",
+	"Drag on the left side to move and on the right side to look.\nHold JUMP to ski and JET to fly. One thumb can slide between JUMP, JET and FIRE.\nDrag from FIRE to aim while firing. The button with your weapon's name changes weapon.\nPACK uses your pack, GREN throws a hand grenade and MINE places a mine.\nStep onto a station in your base, or tap LOADOUT while dead, to change your loadout.\nORDERS gives your bots orders, II pauses.",
+	"WASD to move, the mouse to look, left click to fire.\nHold space to jump and ski, right click or shift to jet.\n1 to 4 pick a weapon, Q or the wheel changes weapon.\nE uses your pack, F throws a hand grenade, C places a mine.\nI or B changes your loadout on a station in your base or while dead.\nV then a number gives your bots orders, Esc pauses.",
+	"Left stick to move, right stick to look.\nRight trigger fires, left trigger or LB jets, hold A to jump and ski.\nY or RB changes weapon.\nX uses your pack, d-pad left throws a hand grenade, d-pad right places a mine.\nBack changes your loadout on a station in your base or while dead.\nD-pad up gives your bots orders, Start pauses.",
 ]
 const RULES := "Take the other team's flag from their base and bring it to your flag stand. You can only score while your own flag is home.\nTouch your own flag when it's dropped to send it home, or it goes home by itself after 30 s.\nThe first team to the capture limit wins, or the one with most captures when time runs out.\nHold jump going downhill to ski: you slide with no friction and pick up speed. Jet over the next rise to keep it. Jet energy comes back when you stop jetting."
 

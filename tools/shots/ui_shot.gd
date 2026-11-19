@@ -6,12 +6,16 @@ extends Node
 ## Saves in /srv/downloads/temp/debug/vectorfall/ui as <size>-menu.png,
 ## -setup, -settings, -howto, -match (keyboard), -touch (touch controls, the
 ## feed and a held SKI), -orders (the order menu open on touch), -pause and
-## -end (the match over card). "-- touch=1.3" sets the touch controls' size
-## for the touch and later pictures. Uses its own settings file.
+## -end (the match over card), -station (one of your inventory stations from
+## beside it), -loadout (the loadout screen it opens) and -dead (the respawn
+## count with the LOADOUT button). "-- touch=1.3" sets the touch controls'
+## size for the touch and later pictures, and "-- out=/some/folder/ui-" saves
+## as /some/folder/ui-<size>-<what>.png instead. Uses its own settings file.
 
 const FOLDER := "/srv/downloads/temp/debug/vectorfall/ui"
 
 var _tag := "1280x720"
+var _out := FOLDER + "/"
 
 
 func _ready() -> void:
@@ -23,7 +27,10 @@ func _ready() -> void:
 	_tag = "%dx%d" % [window_size.x, window_size.y]
 	Settings.path = "user://shot-settings.cfg"
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.path))
-	DirAccess.make_dir_recursive_absolute(FOLDER)
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("out="):
+			_out = arg.substr(4)
+	DirAccess.make_dir_recursive_absolute(_out.get_base_dir())
 
 	var menu: MainMenu = load("res://scenes/menu.tscn").instantiate()
 	add_child(menu)
@@ -55,6 +62,11 @@ func _ready() -> void:
 	main.hud.add_chat(mates[1], "Our flag's taken")
 	main.hud._on_killed(mates[2].entity_id, main.bots.brains[-1].soldier.entity_id, 0)
 	main.hud.add_chat(mates[3], "Defending our flag")
+	# Hurt, so the health arc shows, with the shield on and a grenade thrown.
+	player.health = player.tuning.health_max * 0.6
+	player.pack_on = true
+	player.grenades -= 1
+	await _wait(0.5)
 	await _save("match")
 	# "-- touch=1.3" draws the touch controls at that size.
 	for arg in OS.get_cmdline_user_args():
@@ -68,6 +80,30 @@ func _ready() -> void:
 	await _save("orders")
 	main.menu.close()
 	main.input.set_device(LocalInput.Device.KEYBOARD)
+	player.pack_on = false
+	# Beside one of your stations, looking at it.
+	var station: InventoryStation
+	for id: int in game.stations:
+		if game.stations[id].team == player.team:
+			station = game.stations[id]
+	var side := signf(station.global_position.z)
+	var stand := station.global_position + Vector3(main.map.front(player.team) * 5.0, 0.3, side * 3.5)
+	player.global_position = stand
+	player.velocity = Vector3.ZERO
+	var to := station.global_position - stand
+	main.input.source.yaw = atan2(-to.x, -to.z)
+	main.input.source.pitch = -0.3
+	await _wait(0.5)
+	await _save("station")
+	player.global_position = station.global_position + Vector3.UP * 0.3
+	player.velocity = Vector3.ZERO
+	await _wait(0.5)
+	await _save("loadout")
+	main.loadout_screen.close()
+	game.damage(player, 1000.0, main.enemy.entity_id, Weapon.DISC, main.enemy.global_position)
+	await _wait(0.5)
+	await _save("dead")
+	await _wait(Match.RESPAWN_DELAY)
 	main.pause()
 	await _save("pause")
 	main.pause_menu.resume()
@@ -85,6 +121,6 @@ func _save(what: String) -> void:
 	for i in 12:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
-	var path := "%s/%s-%s.png" % [FOLDER, _tag, what]
+	var path := "%s%s-%s.png" % [_out, _tag, what]
 	get_viewport().get_texture().get_image().save_png(path)
 	print("Saved ", path)

@@ -14,8 +14,14 @@ const PITCH_LIMIT := 1.45
 const OWN_BODY_LAYER := 2
 ## The gun's muzzle from the eye, in look space: right, down and ahead.
 const MUZZLE := Vector3(0.22, -0.2, -0.6)
+## Where thrown things leave the hand from the eye, in look space.
+const THROW_HAND := Vector3(-0.2, -0.1, -0.4)
 ## Seconds after switching weapons before the new one can fire.
 const SWITCH_TIME := 0.3
+## Seconds after throwing a hand grenade or placing a mine before the next.
+const THROW_TIME := 0.5
+## No throw waiting, for throw_pending.
+const NO_THROW := -1
 
 var entity_id := 0
 var team := 0
@@ -45,9 +51,17 @@ var health := 0.0
 var dead := false
 ## Seconds left until a dead soldier respawns.
 var respawn_in := 0.0
-## Slot of the weapon in hand, an index into Weapon.all.
+## What the soldier carries now, set with set_loadout().
+var loadout := Loadout.standard()
+## The loadout the soldier wants: put on at the next respawn, or at once on
+## one of its team's inventory stations. A command's loadout sets it.
+var next_loadout := Loadout.standard()
+## Weapon slots carried (indexes into Weapon.all), a copy of loadout.weapons.
+var weapons: Array[int] = []
+## The weapon in hand, an index into weapons.
 var weapon := 0
-## Rounds left for each weapon slot.
+## Rounds left for each carried weapon, in the order of weapons, 0 for one
+## that runs on energy.
 var ammo: Array[int] = []
 ## Seconds until the weapon in hand can fire again.
 var cooldown := 0.0
@@ -55,6 +69,24 @@ var cooldown := 0.0
 var spin := 0.0
 ## Shots fired since the start, so the view model can kick on each one.
 var shots := 0
+## Hand grenades and mines left.
+var grenades := 0
+var mines := 0
+## Seconds until the next throw.
+var throw_cooldown := 0.0
+## The grenade and mine buttons were held last tick, so holding throws once.
+var grenade_held := false
+var mine_held := false
+## A throw pressed during throw_cooldown, done when it ends: NO_THROW,
+## Weapon.HAND_GRENADE or Weapon.MINE.
+var throw_pending := NO_THROW
+## A shield or jammer switched on, or a repair pack repairing this tick.
+var pack_on := false
+## The use button was held last tick, so a press toggles a pack once.
+var use_held := false
+## Who the repair pack healed this tick: this soldier's id, a teammate's, or
+## 0 for no one.
+var repair_target := 0
 
 var body: SoldierBody
 var blob: BlobShadow
@@ -72,11 +104,15 @@ var _seen_walls := PackedVector3Array()
 
 
 func _init() -> void:
+	tuning = MovementTuning.for_armour(loadout.armour)
+	weapons = loadout.weapons.duplicate()
+	for slot in weapons:
+		ammo.append(Weapon.all[slot].ammo)
+	grenades = loadout.grenades
+	mines = loadout.mines
 	energy = tuning.energy_max
 	since_jet = tuning.refill_delay
 	health = tuning.health_max
-	for w in Weapon.all:
-		ammo.append(w.ammo)
 	floor_snap_length = tuning.floor_snap
 	floor_max_angle = deg_to_rad(50.0)
 	floor_constant_speed = true
@@ -93,6 +129,7 @@ func _init() -> void:
 	body = SoldierBody.new()
 	body.soldier = self
 	add_child(body)
+	body.set_weapons(weapons)
 
 	blob = BlobShadow.new()
 	add_child(blob)
@@ -104,7 +141,112 @@ func _ready() -> void:
 
 func set_team(value: int) -> void:
 	team = value
-	body.set_look(team, body.armour)
+	body.set_look(team, loadout.armour, loadout.pack)
+
+
+## Puts on a loadout at once, trimmed to its armour: its movement numbers,
+## health and energy kept as shares of the new maximums, full ammo and the
+## body look. It's also the loadout for the next respawn. The weapon in hand
+## stays if it's still carried. With keep_stock, ammo, grenades and mines are
+## carried over instead, held to the new maximums, and a weapon not carried
+## before starts empty.
+func set_loadout(value: Loadout, keep_stock := false) -> void:
+	var fixed := value.fixed()
+	var old_weapons := weapons.duplicate()
+	var old_ammo := ammo.duplicate()
+	var old_grenades := grenades
+	var old_mines := mines
+	var health_share := health / tuning.health_max
+	var energy_share := energy / tuning.energy_max
+	var in_hand := weapon_slot()
+	var armour_changed := fixed.armour != loadout.armour
+	if fixed.pack != loadout.pack:
+		pack_on = false
+		repair_target = 0
+	loadout = fixed
+	next_loadout = fixed.duplicate()
+	tuning = MovementTuning.for_armour(fixed.armour)
+	health = health_share * tuning.health_max
+	energy = energy_share * tuning.energy_max
+	weapons = fixed.weapons.duplicate()
+	ammo.clear()
+	for k in weapons.size():
+		if not keep_stock:
+			ammo.append(max_ammo(k))
+			continue
+		var before := old_weapons.find(weapons[k])
+		ammo.append(mini(old_ammo[before], max_ammo(k)) if before >= 0 else 0)
+	grenades = Pack.scaled(fixed.grenades, fixed.pack)
+	mines = Pack.scaled(fixed.mines, fixed.pack)
+	if keep_stock:
+		grenades = mini(old_grenades, grenades)
+		mines = mini(old_mines, mines)
+	weapon = maxi(weapons.find(in_hand), 0)
+	if weapon_slot() != in_hand:
+		spin = 0.0
+	if armour_changed:
+		body.set_look(team, fixed.armour, fixed.pack)
+	else:
+		body.set_pack(fixed.pack)
+	body.set_weapons(weapons)
+
+
+## The pack carried, or null for none.
+func pack() -> Pack:
+	return Pack.get_pack(loadout.pack)
+
+
+## True while a shield pack is on.
+func shielded() -> bool:
+	return pack_on and loadout.pack == Pack.SHIELD
+
+
+## True while a sensor jammer is on.
+func jamming() -> bool:
+	return pack_on and loadout.pack == Pack.JAMMER
+
+
+## Rounds a full load gives the carried weapon at an index, more with an
+## ammo pack.
+func max_ammo(k: int) -> int:
+	return Pack.scaled(Weapon.all[weapons[k]].ammo, loadout.pack)
+
+
+## Seconds after the jet stops before energy refills, and energy a second it
+## refills at, both quicker with an energy pack.
+func refill_delay() -> float:
+	var p := pack()
+	return tuning.refill_delay * (p.delay_scale if p != null else 1.0)
+
+
+func refill_rate() -> float:
+	var p := pack()
+	return tuning.energy_refill * (p.refill_scale if p != null else 1.0)
+
+
+## Slot in Weapon.all of the weapon in hand.
+func weapon_slot() -> int:
+	return weapons[weapon] if weapon < weapons.size() else Weapon.DISC
+
+
+## Index in weapons of a carried weapon slot, or -1 if it isn't carried.
+func carried(slot: int) -> int:
+	return weapons.find(slot)
+
+
+## Rounds left for a weapon slot, 0 if it isn't carried.
+func ammo_for(slot: int) -> int:
+	var k := weapons.find(slot)
+	return ammo[k] if k >= 0 else 0
+
+
+## True if a weapon slot is carried and has the ammo or energy for a shot.
+func loaded(slot: int) -> bool:
+	var k := weapons.find(slot)
+	if k < 0:
+		return false
+	var w := Weapon.all[slot]
+	return energy >= w.energy_per_shot if w.uses_energy() else ammo[k] > 0
 
 
 ## Hides your own body from your camera.
@@ -143,17 +285,33 @@ func die() -> void:
 	jetting = false
 	skiing = false
 	spin = 0.0
+	pack_on = false
+	repair_target = 0
+	throw_pending = NO_THROW
 	_set_alive_layers(false)
 
 
-## Back to full health, energy and ammo at a spawn point.
+## Full ammo, hand grenades and mines for the loadout worn.
+func restock() -> void:
+	for k in weapons.size():
+		ammo[k] = max_ammo(k)
+	grenades = Pack.scaled(loadout.grenades, loadout.pack)
+	mines = Pack.scaled(loadout.mines, loadout.pack)
+
+
+## Back at a spawn point in next_loadout, with full health, energy and ammo.
 func revive(where: Transform3D) -> void:
 	dead = false
+	if not next_loadout.equals(loadout):
+		set_loadout(next_loadout)
 	health = tuning.health_max
 	energy = tuning.energy_max
 	since_jet = tuning.refill_delay
-	for k in Weapon.all.size():
-		ammo[k] = Weapon.all[k].ammo
+	restock()
+	pack_on = false
+	repair_target = 0
+	throw_cooldown = 0.0
+	throw_pending = NO_THROW
 	cooldown = 0.0
 	spin = 0.0
 	respawn_in = 0.0
@@ -230,6 +388,8 @@ func _wall_normals() -> PackedVector3Array:
 
 
 func simulate(command: PlayerCommand, delta: float) -> void:
+	if not command.loadout.is_empty():
+		next_loadout = Loadout.from_dict(command.loadout).fixed()
 	if dead:
 		# A body only falls and slides until it's time to respawn.
 		var still := PlayerCommand.new()
@@ -290,8 +450,8 @@ func simulate(command: PlayerCommand, delta: float) -> void:
 		grounded = false
 	else:
 		since_jet += delta
-		if since_jet >= t.refill_delay:
-			energy = minf(energy + t.energy_refill * delta, t.energy_max)
+		if since_jet >= refill_delay():
+			energy = minf(energy + refill_rate() * delta, t.energy_max)
 
 	if not skiing:
 		v_y -= t.gravity * delta
@@ -332,12 +492,14 @@ func simulate(command: PlayerCommand, delta: float) -> void:
 			game.respawn(self)
 	else:
 		_use_weapon(command, delta)
+		_throw(command, delta)
+		_use_pack(command, delta)
 
 
-## Switching weapons and firing, after moving so a shot leaves from where you
-## are now with the speed you have now.
+## Switching between the carried weapons and firing, after moving so a shot
+## leaves from where you are now with the speed you have now.
 func _use_weapon(command: PlayerCommand, delta: float) -> void:
-	var count := Weapon.all.size()
+	var count := weapons.size()
 	var wanted := weapon
 	if command.weapon >= 0 and command.weapon < count:
 		wanted = command.weapon
@@ -350,15 +512,85 @@ func _use_weapon(command: PlayerCommand, delta: float) -> void:
 		spin = 0.0
 		cooldown = maxf(cooldown, SWITCH_TIME)
 	cooldown = maxf(cooldown - delta, 0.0)
-	var w := Weapon.all[weapon]
-	var trigger := command.has(PlayerCommand.FIRE) and ammo[weapon] > 0
+	var w := Weapon.all[weapons[weapon]]
+	var trigger := command.has(PlayerCommand.FIRE) and loaded(w.slot)
 	if w.spin_up > 0.0:
 		spin = move_toward(spin, 1.0, delta / w.spin_up) if trigger else move_toward(spin, 0.0, delta / w.spin_down)
 	if trigger and cooldown <= 0.0 and spin >= w.spin_to_fire and game != null:
+		# The shot reads the energy before it's taken, for damage that scales
+		# with it.
 		game.fire(self)
-		ammo[weapon] -= 1
+		if w.uses_energy():
+			energy = maxf(energy - w.energy_per_shot, 0.0)
+		else:
+			ammo[weapon] -= 1
 		shots += 1
 		cooldown = w.interval_at(spin)
+
+
+## Throws a hand grenade or places a mine, once per press of its button. A
+## press during throw_cooldown waits for it to end, the latest press winning.
+func _throw(command: PlayerCommand, delta: float) -> void:
+	if command.has(PlayerCommand.GRENADE) and not grenade_held:
+		throw_pending = Weapon.HAND_GRENADE
+	elif command.has(PlayerCommand.MINE) and not mine_held:
+		throw_pending = Weapon.MINE
+	grenade_held = command.has(PlayerCommand.GRENADE)
+	mine_held = command.has(PlayerCommand.MINE)
+	throw_cooldown = maxf(throw_cooldown - delta, 0.0)
+	if throw_cooldown > 0.0 or game == null:
+		return
+	var pending := throw_pending
+	throw_pending = NO_THROW
+	if pending == Weapon.HAND_GRENADE and grenades > 0:
+		game.throw(self, Weapon.HAND_GRENADE)
+		grenades -= 1
+		throw_cooldown = THROW_TIME
+	elif pending == Weapon.MINE and mines > 0:
+		game.throw(self, Weapon.MINE)
+		mines -= 1
+		throw_cooldown = THROW_TIME
+
+
+## Works the pack: repair while use is held, a shield or jammer switched with
+## each press, and the energy they take. A shield or jammer goes off at no
+## energy, and repairing stops.
+func _use_pack(command: PlayerCommand, delta: float) -> void:
+	var pressed := command.has(PlayerCommand.USE) and not use_held
+	use_held = command.has(PlayerCommand.USE)
+	repair_target = 0
+	var p := pack()
+	if p == null or p.use == Pack.Use.ALWAYS:
+		pack_on = false
+		return
+	if p.use == Pack.Use.TOGGLE:
+		if pressed:
+			switch_pack(not pack_on and energy > 0.0)
+	elif use_held and energy > 0.0 and game != null:
+		# A hurt teammate in front of you first, then yourself.
+		var target := game.repair_target(self, p.reach)
+		if target == null and health < tuning.health_max:
+			target = self
+		if target != null:
+			var rate := p.self_repair if target == self else p.other_repair
+			target.health = minf(target.health + rate * delta, target.tuning.health_max)
+			repair_target = target.entity_id
+		switch_pack(target != null)
+	else:
+		switch_pack(false)
+	if pack_on:
+		energy = maxf(energy - p.drain * delta, 0.0)
+	if energy <= 0.0 and p.use == Pack.Use.TOGGLE:
+		switch_pack(false)
+
+
+## Turns the pack on or off, telling the match when it changes.
+func switch_pack(on: bool) -> void:
+	if on == pack_on:
+		return
+	pack_on = on
+	if game != null:
+		game.pack_switched.emit(entity_id, on)
 
 
 ## Skiing on the ground: speed along the slope only, gravity along the slope
@@ -420,11 +652,22 @@ func get_state() -> Dictionary:
 		"health": health,
 		"dead": dead,
 		"respawn_in": respawn_in,
+		"loadout": loadout.to_dict(),
+		"next_loadout": next_loadout.to_dict(),
 		"weapon": weapon,
 		"ammo": ammo.duplicate(),
 		"cooldown": cooldown,
 		"spin": spin,
 		"shots": shots,
+		"grenades": grenades,
+		"mines": mines,
+		"throw_cooldown": throw_cooldown,
+		"grenade_held": grenade_held,
+		"mine_held": mine_held,
+		"throw_pending": throw_pending,
+		"pack_on": pack_on,
+		"use_held": use_held,
+		"repair_target": repair_target,
 	}
 
 
@@ -432,6 +675,10 @@ func set_state(state: Dictionary) -> void:
 	entity_id = state.id
 	if state.team != team:
 		set_team(state.team)
+	var worn := Loadout.from_dict(state.loadout)
+	if not worn.equals(loadout):
+		set_loadout(worn)
+	next_loadout = Loadout.from_dict(state.next_loadout)
 	global_position = state.position
 	velocity = state.velocity
 	yaw = state.yaw
@@ -453,4 +700,13 @@ func set_state(state: Dictionary) -> void:
 	cooldown = state.cooldown
 	spin = state.spin
 	shots = state.shots
+	grenades = state.get("grenades", loadout.grenades)
+	mines = state.get("mines", loadout.mines)
+	throw_cooldown = state.get("throw_cooldown", 0.0)
+	grenade_held = state.get("grenade_held", false)
+	mine_held = state.get("mine_held", false)
+	throw_pending = state.get("throw_pending", NO_THROW)
+	pack_on = state.get("pack_on", false)
+	use_held = state.get("use_held", false)
+	repair_target = state.get("repair_target", 0)
 	_set_alive_layers(not dead)

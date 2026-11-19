@@ -11,8 +11,13 @@ var shooter := 0
 var team := 0
 var position := Vector3.ZERO
 var velocity := Vector3.ZERO
-## Seconds since it was fired.
+## Seconds since it was fired. A weapon with a fuse blows up when it
+## reaches the fuse.
 var age := 0.0
+## Damage on a direct hit, set when fired.
+var damage := 0.0
+## Bounces off the world left, -1 for any number.
+var bounces_left := 0
 ## From the shooter's eye, where the shot really starts, to the gun's muzzle.
 ## The visual starts at the muzzle and closes onto the real path.
 var muzzle_offset := Vector3.ZERO
@@ -34,6 +39,8 @@ func get_state() -> Dictionary:
 		"position": position,
 		"velocity": velocity,
 		"age": age,
+		"damage": damage,
+		"bounces_left": bounces_left,
 		"muzzle_offset": muzzle_offset,
 	}
 
@@ -47,5 +54,7 @@ static func from_state(state: Dictionary) -> Projectile:
 	shot.position = state.position
 	shot.velocity = state.velocity
 	shot.age = state.age
+	shot.damage = state.get("damage", 0.0)
+	shot.bounces_left = state.get("bounces_left", 0)
 	shot.muzzle_offset = state.muzzle_offset
 	return shot

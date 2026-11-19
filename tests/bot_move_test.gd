@@ -48,6 +48,8 @@ func _base_to_base() -> void:
 	var map: TestMap = setup.map
 	var director: BotDirector = setup.director
 	var brain := director.add_bot(0, map.spawn_point(0, 3))
+	# Medium, which the route planner's numbers are for.
+	brain.soldier.set_loadout(Loadout.standard())
 	var s := brain.soldier
 	var reached := -1.0
 	var top := 0.0

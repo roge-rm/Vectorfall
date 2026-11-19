@@ -4,15 +4,18 @@ extends Control
 ## The match HUD in the paperback cover look: the score bar with the clock
 ## and a status line, the three colour stripe, a compass strip with both
 ## flags, a feed of what your bots say and who killed whom, the crosshair and
-## hit markers, arrows towards whoever hurt you, the status panel (health,
-## jet energy, weapon, ammo and speed), flag messages, markers and arrows for
+## hit markers, arrows towards whoever hurt you, health and energy arcs by the
+## crosshair, the weapon line with the pack and what's left to throw over it,
+## flag messages, markers and arrows for
 ## both flags, the respawn count and the end of match card. It only reads the
 ## soldier and the match and hears the match's signals. Sizes are design
 ## pixels on a 390 pixel high screen (InkUi.unit()), and while the touch
-## controls show, the feed and the status panel keep clear of them.
+## controls show, the feed and the weapon line keep clear of them.
 
 signal restart_requested
 signal menu_requested
+## The LOADOUT button under the respawn count, to pick what you respawn in.
+signal loadout_requested
 
 const FEED_LINES := 5
 const FEED_TIME := 6.0
@@ -43,10 +46,17 @@ var _end: Control
 var _end_band: MenuKit.Band
 var _end_score: Label
 var _restart_button: Button
+## Shown under the respawn count while you're dead.
+var loadout_button: MenuKit.CoverButton
 ## Bottom of the score bar and compass, and top of the status panel, from the
 ## last frame, for the flag arrows.
 var _top_edge := 0.0
 var _bottom_edge := 0.0
+## How much each status arc shows, 0 to 1, and how long its bar has been full.
+var _health_show := 0.0
+var _energy_show := 0.0
+var _health_full_for := 0.0
+var _energy_full_for := 0.0
 var _compass := Rect2()
 ## The touch controls' rects for this frame, from _touch_rects().
 var _avoid: Array[Rect2] = []
@@ -57,6 +67,10 @@ func _init() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	theme = InkUi.theme()
+	loadout_button = MenuKit.button("Loadout", loadout_requested.emit, 18, false, true)
+	loadout_button.name = "LoadoutButton"
+	loadout_button.visible = false
+	add_child(loadout_button)
 	_make_end_card()
 
 
@@ -215,10 +229,25 @@ func _process(delta: float) -> void:
 	_message_left = maxf(_message_left - delta, 0.0)
 	_hit_left = maxf(_hit_left - delta, 0.0)
 	_flash = maxf(_flash - delta, 0.0)
+	# Each arc fades in while its bar isn't full and out a second after it is.
+	var health_full := soldier.health >= soldier.tuning.health_max
+	var energy_full := soldier.energy >= soldier.tuning.energy_max
+	_health_full_for = _health_full_for + delta if health_full else 0.0
+	_energy_full_for = _energy_full_for + delta if energy_full else 0.0
+	_health_show = move_toward(_health_show, 0.0 if _health_full_for > 1.0 else 1.0, delta * 3.0)
+	_energy_show = move_toward(_energy_show, 0.0 if _energy_full_for > 1.0 else 1.0, delta * 3.0)
 	for k in range(_hurts.size() - 1, -1, -1):
 		_hurts[k].left -= delta
 		if _hurts[k].left <= 0.0:
 			_hurts.remove_at(k)
+	# Shown while dead and while on one of your stations.
+	var show_loadout := soldier.dead or (game != null and game.station_under(soldier) != null)
+	show_loadout = show_loadout and (game == null or not game.over)
+	if loadout_button.visible != show_loadout:
+		loadout_button.visible = show_loadout
+	if show_loadout:
+		loadout_button.size = loadout_button.get_combined_minimum_size()
+		loadout_button.position = Vector2((size.x - loadout_button.size.x) * 0.5, size.y * 0.38 + 30.0 * _u())
 	queue_redraw()
 
 
@@ -410,72 +439,113 @@ func _draw_compass(u: float, width: float, y: float) -> float:
 	draw_colored_polygon(PackedVector2Array([tip, Vector2(mid - 4.0 * u, y + height), Vector2(mid + 4.0 * u, y + height)]), InkUi.INK)
 	for team in game.flags:
 		var flag := game.flags[team]
+		if _jammed(flag):
+			continue
 		var rel := clampf(_heading_to(flag.global_position), -span, span)
 		_diamond(Vector2(mid + rel / span * reach, y + height * 0.5), height * 0.42, Palette.team(team))
 	return tip.y
 
 
-## The status panel at the bottom middle: health and energy bars and the
-## weapon line, with a SKI tag on top while ski is held. With the touch
-## controls showing, it stays at the bottom and fits the gap between them,
-## shrinking as a whole if the gap is narrower than it. Returns its top.
-func _draw_status(screen_u: float, avoid: Array[Rect2]) -> float:
-	var design_tall := 6.0 + 14.0 + 4.0 + 14.0 + 4.0 + 14.0 + 6.0 + 4.0
-	var bottom := size.y - 12.0 * screen_u
-	var full := Rect2((size.x - 220.0 * screen_u) * 0.5, bottom - design_tall * screen_u, 220.0 * screen_u, design_tall * screen_u)
-	# The gap between the touch controls beside the panel's band.
+## Health and energy as thin arcs either side of the crosshair, health on the
+## left and energy on the right, filling from the bottom up. Each one shows
+## only while its bar isn't full. Under them, at the bottom middle between
+## the touch controls, the weapon line in outlined words, with a SKI tag
+## beside it while ski is held. Returns the top of the weapon line.
+func _draw_status(u: float, avoid: Array[Rect2]) -> float:
+	var centre := size * 0.5
+	var radius := 50.0 * u
+	var thick := maxf(2.0, 3.0 * u)
+	var edge := maxf(1.0, 1.0 * u)
+	# Half the sweep of each arc, in radians either side of level.
+	var half := 0.45
+	var health := clampf(soldier.health / soldier.tuning.health_max, 0.0, 1.0)
+	var energy := clampf(soldier.energy / soldier.tuning.energy_max, 0.0, 1.0)
+	var refilling := soldier.since_jet >= soldier.tuning.refill_delay or soldier.jetting
+	var energy_fill := InkUi.ORANGE if refilling else InkUi.ORANGE.darkened(0.3)
+	# Angles go clockwise from the right, so PI - half is low on the left and
+	# half is low on the right.
+	_status_arc(centre, radius, thick, edge, PI - half, PI + half, health, InkUi.PINK, _health_show)
+	_status_arc(centre, radius, thick, edge, half, -half, energy, energy_fill, _energy_show)
+	# The weapon line, kept in the gap between the touch controls: rounds
+	# left, or the energy a shot takes.
+	var weapon := Weapon.all[soldier.weapon_slot()]
+	var amount := "%d energy" % roundi(weapon.energy_per_shot) if weapon.uses_energy() else str(soldier.ammo[soldier.weapon])
+	var words := "%s · %s · %d m/s" % [weapon.name, amount, roundi(soldier.horizontal_speed())]
+	var px := _px(13.0)
+	var baseline := size.y - 14.0 * u
+	var top := baseline - px
 	var low := 0.0
 	var high := size.x
 	for box in avoid:
-		if box.end.y <= full.position.y or box.position.y >= bottom:
+		if box.end.y <= top or box.position.y >= size.y:
 			continue
 		if box.get_center().x < size.x * 0.5:
 			low = maxf(low, box.end.x)
 		else:
 			high = minf(high, box.position.x)
-	var k := clampf((high - low) / full.size.x, 0.35, 1.0)
-	var u := screen_u * k
-	var line := maxf(1.0, 2.0 * u)
-	var label_px := roundi(14.0 * u)
-	var weapon_px := roundi(11.0 * u)
-	var tall := design_tall * u
-	var wide := 220.0 * u
+	var wide := InkUi.width(words, InkUi.Face.BLACK, px)
 	var middle := clampf(size.x * 0.5, low + wide * 0.5, maxf(high - wide * 0.5, low + wide * 0.5))
-	var rect := Rect2(middle - wide * 0.5, bottom - tall, wide, tall)
-	InkUi.box(self, rect, InkUi.CREAM, line)
-	var x := rect.position.x + line + 10.0 * u
-	var bar_left := x + 54.0 * u
-	var bar_right := rect.end.x - line - 10.0 * u
-	var y := rect.position.y + line + 6.0 * u
-	var health := soldier.health / soldier.tuning.health_max
-	var energy := soldier.energy / soldier.tuning.energy_max
-	var refilling := soldier.since_jet >= soldier.tuning.refill_delay or soldier.jetting
-	var rows := [["HEALTH", health, InkUi.PINK], ["ENERGY", energy, InkUi.ORANGE if refilling else InkUi.ORANGE.darkened(0.3)]]
-	var f := InkUi.face(InkUi.Face.BLACK)
-	for row: Array in rows:
-		var baseline := y + 7.0 * u + (f.get_ascent(label_px) - f.get_descent(label_px)) * 0.5
-		InkUi.words(self, Vector2(x, baseline), row[0], InkUi.Face.BLACK, label_px, InkUi.INK)
-		var bar := Rect2(bar_left, y + 3.0 * u, bar_right - bar_left, 8.0 * u)
-		var edge := maxf(1.5, 1.5 * u)
-		draw_rect(bar, InkUi.INK)
-		var inside := bar.grow(-edge)
-		draw_rect(inside, InkUi.CREAM)
-		draw_rect(Rect2(inside.position, Vector2(inside.size.x * clampf(row[1], 0.0, 1.0), inside.size.y)), row[2])
-		y += 18.0 * u
-	var weapon := Weapon.all[soldier.weapon]
-	var words := "%s · %d · %d m/s" % [weapon.name, soldier.ammo[soldier.weapon], roundi(soldier.horizontal_speed())]
-	InkUi.words(self, Vector2(rect.get_center().x, y + 10.0 * u), words, InkUi.Face.ITALIC, weapon_px, InkUi.INK, HORIZONTAL_ALIGNMENT_CENTER)
+	InkUi.words(self, Vector2(middle, baseline), words, InkUi.Face.BLACK, px, InkUi.CREAM, HORIZONTAL_ALIGNMENT_CENTER, maxi(3, roundi(px * 0.22)))
+	top = _draw_kit(u, middle, top - 3.0 * u)
 	if soldier.ski_held:
 		# Orange while skiing on the ground, ink while held in the air.
-		var tag_px := roundi(12.0 * u)
+		var line := maxf(1.0, 2.0 * u)
+		var tag_px := _px(12.0)
 		var tag_wide := InkUi.width("SKI", InkUi.Face.BLACK, tag_px) + 12.0 * u
-		var tag := Rect2(rect.end.x - tag_wide, rect.position.y - 16.0 * u + line, tag_wide, 16.0 * u)
+		var tag := Rect2(middle - tag_wide * 0.5, top - 22.0 * u, tag_wide, 16.0 * u)
 		var fill := InkUi.ORANGE if soldier.skiing else InkUi.INK
 		draw_rect(tag, InkUi.INK)
 		draw_rect(tag.grow(-line), fill)
 		InkUi.centred(self, tag.get_center(), "SKI", InkUi.Face.BLACK, tag_px, _text_on(fill))
 		return tag.position.y
-	return rect.position.y
+	return top
+
+
+## The small line over the weapon line, centred on middle with its bottom at
+## bottom: the pack's name in a tag, orange while a shield or jammer is on or
+## the repair pack is working, then the hand grenades and mines left.
+## Returns its top.
+func _draw_kit(u: float, middle: float, bottom: float) -> float:
+	var px := _px(11.0)
+	var words := "%d %s · %d %s" % [soldier.grenades, "grenade" if soldier.grenades == 1 else "grenades", soldier.mines, "mine" if soldier.mines == 1 else "mines"]
+	words = words.to_upper()
+	var tall := 15.0 * u
+	var text_wide := InkUi.width(words, InkUi.Face.BLACK, px)
+	var pack := soldier.pack()
+	var tag_words := ""
+	var tag_wide := 0.0
+	var gap := 0.0
+	if pack != null:
+		tag_words = pack.short_name + (" ON" if soldier.pack_on and pack.use == Pack.Use.TOGGLE else "")
+		tag_wide = InkUi.width(tag_words, InkUi.Face.BLACK, px) + 10.0 * u
+		gap = 6.0 * u
+	var left := middle - (tag_wide + gap + text_wide) * 0.5
+	var row_middle := bottom - tall * 0.5
+	if pack != null:
+		var line := maxf(1.0, 2.0 * u)
+		var tag := Rect2(left, bottom - tall, tag_wide, tall)
+		var fill := InkUi.ORANGE if soldier.pack_on else InkUi.INK
+		draw_rect(tag, InkUi.INK)
+		draw_rect(tag.grow(-line), fill)
+		InkUi.centred(self, tag.get_center(), tag_words, InkUi.Face.BLACK, px, _text_on(fill))
+	InkUi.centred(self, Vector2(left + tag_wide + gap + text_wide * 0.5, row_middle), words, InkUi.Face.BLACK, px, InkUi.CREAM, maxi(2, roundi(px * 0.22)))
+	return bottom - tall
+
+
+## One status arc from start (empty end) towards finish, filled by amount: a
+## faint track with the filled part in colour, both with an ink edge, all
+## faded by show.
+func _status_arc(centre: Vector2, radius: float, thick: float, edge: float, start: float, finish: float, amount: float, colour: Color, show: float) -> void:
+	if show <= 0.0:
+		return
+	var a := show * 0.8
+	var lip := edge / radius
+	var dir := signf(finish - start)
+	draw_arc(centre, radius, start - dir * lip, finish + dir * lip, 24, Color(InkUi.INK, a * 0.25), thick + edge * 2.0, true)
+	if amount > 0.0:
+		var end := lerpf(start, finish, amount)
+		draw_arc(centre, radius, start - dir * lip, end + dir * lip, 24, Color(InkUi.INK, a), thick + edge * 2.0, true)
+		draw_arc(centre, radius, start, end, 24, Color(colour, a), thick, true)
 
 
 ## The feed at the top left: cream boxes with the team colour down the left
@@ -540,6 +610,8 @@ func _draw_flag_markers(u: float) -> void:
 	var inverse := camera.global_transform.affine_inverse()
 	for team in game.flags:
 		var flag := game.flags[team]
+		if _jammed(flag):
+			continue
 		var point := flag.global_position + Vector3.UP * 3.0
 		var local := inverse * point
 		var behind := local.z > -0.05
@@ -591,7 +663,22 @@ func _draw_flag_markers(u: float) -> void:
 		# The label stays on screen.
 		var half_width := InkUi.width(shown, InkUi.Face.BLACK, font_size) * 0.5 + font_size * 0.4
 		text_at.x = clampf(text_at.x, half_width, maxf(size.x - half_width, half_width))
+		# Slid left of any touch button it still runs into.
+		var box_h := font_size * 1.2
+		for box in _avoid:
+			var words := Rect2(text_at - Vector2(half_width, box_h * 0.8), Vector2(half_width * 2.0, box_h))
+			if box.intersects(words):
+				text_at.x = box.position.x - half_width
 		InkUi.text(self, text_at, shown, font_size, colour.lightened(0.15))
+
+
+## True for a flag carried by an enemy with a sensor jammer on, which the
+## markers and compass leave out.
+func _jammed(flag: Flag) -> bool:
+	if flag.mode != Flag.Mode.CARRIED:
+		return false
+	var carrier := game.soldier(flag.carrier_id)
+	return carrier != null and carrier.team != soldier.team and carrier.jamming()
 
 
 ## Pushes an edge marker towards the middle of the screen until it's clear of

@@ -6,6 +6,9 @@ extends Node
 ## flag with you, as offence, defence or midfield. F3 shows what the bots are
 ## doing, and V, the D-pad up or ORDERS opens the order menu. Esc, Start or
 ## the touch pause button opens the pause menu, which pauses the whole tree.
+## You start in your last saved loadout. The loadout screen opens when you
+## step onto one of your team's inventory stations, and with I, B, the
+## gamepad's Back or the LOADOUT button while you're on one or dead.
 
 const MENU_SCENE := "res://scenes/menu.tscn"
 
@@ -25,6 +28,7 @@ var menu: OrderMenu
 var effects: Effects
 var audio: GameAudio
 var pause_menu: PauseMenu
+var loadout_screen: LoadoutScreen
 
 
 func _ready() -> void:
@@ -45,13 +49,16 @@ func _ready() -> void:
 		game.spawns[team] = map.spawn_points(team)
 	for team in 2:
 		game.add_flag(team, map.stand_point(team), map.flag_rest(team))
+	for team in 2:
+		for at in map.station_points(team):
+			game.add_station(team, at)
 	add_child(game)
 	game.match_over.connect(_on_match_over)
 	input = LocalInput.new()
 	add_child(input)
 	var own := setup.team
 	var other := 1 - own
-	player = game.add_soldier(own, map.spawn_point(own, 3), input.source)
+	player = game.add_soldier(own, map.spawn_point(own, 3), input.source, Settings.current_loadout())
 	player.display_name = "You"
 	player.set_first_person(true)
 	input.soldier = player
@@ -106,6 +113,7 @@ func _ready() -> void:
 	touch.menu = menu
 	menu.touch = touch
 	touch.pause_pressed.connect(pause)
+	touch.soldier = player
 	input.touch = touch
 	hud.touch = touch
 	input.menu = menu
@@ -114,6 +122,13 @@ func _ready() -> void:
 		bots.commanders[team].said.connect(_on_said)
 	input.device_changed.connect(_on_device_changed)
 	_on_device_changed(input.device)
+	loadout_screen = LoadoutScreen.new()
+	layer.add_child(loadout_screen)
+	loadout_screen.chosen.connect(input.want_loadout)
+	loadout_screen.closed.connect(_on_loadout_closed)
+	hud.loadout_requested.connect(open_loadout)
+	input.loadout_requested.connect(open_loadout)
+	game.station_entered.connect(_on_station_entered)
 
 	var top := CanvasLayer.new()
 	top.layer = 2
@@ -124,6 +139,39 @@ func _ready() -> void:
 	pause_menu.restart_pressed.connect(restart)
 	pause_menu.quit_pressed.connect(quit_to_menu)
 	pause_menu.settings.changed.connect(apply_settings)
+
+
+## Opens the loadout screen while you're dead or on one of your stations.
+## Your soldier stands still while it's open.
+func open_loadout() -> void:
+	if loadout_screen.visible or game.over or pause_menu.visible:
+		return
+	if not player.dead and game.station_under(player) == null:
+		return
+	if menu.visible:
+		menu.close()
+	input.held_off = true
+	touch.blocked = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	loadout_screen.open()
+
+
+func _on_loadout_closed() -> void:
+	input.held_off = false
+	touch.blocked = false
+	if input.device == LocalInput.Device.KEYBOARD and not game.over and not pause_menu.visible and DisplayServer.get_name() != "headless":
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _on_station_entered(_station_id: int, soldier_id: int) -> void:
+	if soldier_id == player.entity_id:
+		open_loadout()
+
+
+func _process(_delta: float) -> void:
+	# It closes once you're back to life off a station, or pushed off one.
+	if loadout_screen != null and loadout_screen.visible and (game.over or (not player.dead and game.station_under(player) == null)):
+		loadout_screen.close()
 
 
 func _on_device_changed(device: LocalInput.Device) -> void:
@@ -156,7 +204,7 @@ func pause() -> void:
 func _on_resumed() -> void:
 	get_tree().paused = false
 	touch.release_all()
-	if input.device == LocalInput.Device.KEYBOARD and not game.over and DisplayServer.get_name() != "headless":
+	if input.device == LocalInput.Device.KEYBOARD and not game.over and not loadout_screen.visible and DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 

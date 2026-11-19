@@ -38,9 +38,11 @@ static var _ground_shared: Dictionary[String, Variant] = {}
 ## colours and the vertex alpha scales team_amount. near is for things right
 ## in front of the camera, like the gun in your hands, which get a thinner
 ## outline. figure is for soldiers, what they carry and flags, whose outline
-## thins sooner with distance so it doesn't swallow them.
-static func material(colour: Color, team_amount := 0.0, outlined := true, vertex_colour := false, near := false, figure := false) -> ShaderMaterial:
-	var key := "%s/%s/%s/%s/%s/%s" % [colour.to_html(), team_amount, outlined, vertex_colour, near, figure]
+## thins sooner with distance so it doesn't swallow them. small is for
+## things a hand's width across, like mines and hand grenades, which get the
+## effects' thin outline with no wobble.
+static func material(colour: Color, team_amount := 0.0, outlined := true, vertex_colour := false, near := false, figure := false, small := false) -> ShaderMaterial:
+	var key := "%s/%s/%s/%s/%s/%s/%s" % [colour.to_html(), team_amount, outlined, vertex_colour, near, figure, small]
 	if _materials.has(key):
 		return _materials[key]
 	var made := ShaderMaterial.new()
@@ -58,6 +60,7 @@ static func material(colour: Color, team_amount := 0.0, outlined := true, vertex
 		made.set_meta("outlined", true)
 		made.set_meta("near", near)
 		made.set_meta("figure", figure)
+		made.set_meta("small", small)
 		if _outlines_on:
 			made.next_pass = _outline_for(made)
 	_materials[key] = made
@@ -538,6 +541,8 @@ static func effect_outline() -> ShaderMaterial:
 static func _outline_for(made: ShaderMaterial) -> ShaderMaterial:
 	if made.get_meta("near", false):
 		return near_outline()
+	if made.get_meta("small", false):
+		return effect_outline()
 	return figure_outline() if made.get_meta("figure", false) else outline()
 
 

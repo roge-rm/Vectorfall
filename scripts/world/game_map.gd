@@ -119,6 +119,14 @@ func stand_top(team: int) -> Vector3:
 	return Vector3(base_x(team), deck_height() + STAND_HEIGHT, 0.0)
 
 
+## Where a team's two inventory stations stand: on the deck between the flag
+## stand and the tower, one each side, clear of the route points on the deck
+## and the tower's foot. Maps with other bases override it.
+func station_points(team: int) -> Array[Vector3]:
+	var x := base_x(team) - front(team) * 4.0
+	return [Vector3(x, deck_height(), -5.0), Vector3(x, deck_height(), 5.0)]
+
+
 ## The spot a carrier touches to score.
 func stand_point(team: int) -> Vector3:
 	return stand_top(team) + Vector3.UP * 0.5

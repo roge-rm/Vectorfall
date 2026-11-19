@@ -52,7 +52,7 @@ func make_command(_delta: float) -> PlayerCommand:
 				pitch += game.rng.randf_range(-aim_error, aim_error)
 	command.yaw = yaw
 	command.pitch = pitch
-	command.weapon = Weapon.DISC
+	command.weapon = soldier.carried(Weapon.DISC)
 	return command
 
 

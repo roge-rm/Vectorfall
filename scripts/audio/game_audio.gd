@@ -5,7 +5,8 @@ extends Node3D
 ## never changes either. World sounds (shots, blasts) are placed in 3D on a
 ## pool of VOICES players: when they're all busy a new sound takes the one
 ## that started longest ago, or is dropped if it matters less. Your own jet,
-## skis, footsteps and landings, hit markers and flag jingles play flat. The
+## skis, footsteps and landings, repair hum, pack switches, hit markers and
+## flag jingles play flat. The
 ## jets of the JET_VOICES nearest other soldiers loop in 3D.
 
 const VOICES := 10
@@ -14,6 +15,10 @@ const FLAT_VOICES := 4
 ## How far world sounds carry, in metres.
 const REACH := 260.0
 const STEP_TIME := 0.33
+## Each weapon's firing sound and its hit or blast sound, by slot. The
+## chaingun's hits make no sound.
+const FIRE_SOUNDS: Array[String] = ["disc_fire", "chaingun", "grenade_fire", "mortar_fire", "plasma_fire", "sniper_fire", "blaster_fire", "throw", "throw"]
+const HIT_SOUNDS: Array[String] = ["disc_blast", "", "grenade_blast", "mortar_blast", "plasma_hit", "blaster_hit", "blaster_hit", "hand_grenade_blast", "mine_blast"]
 ## Seconds between one soldier's chaingun sounds, so a burst doesn't take
 ## every voice.
 const CHAINGUN_GAP := 0.06
@@ -31,6 +36,7 @@ var _flat: Array[AudioStreamPlayer] = []
 var _next_flat := 0
 var _jet: AudioStreamPlayer
 var _ski: AudioStreamPlayer
+var _repair: AudioStreamPlayer
 var _jets: Array[AudioStreamPlayer3D] = []
 var _step_left := 0.0
 var _was_grounded := true
@@ -63,6 +69,7 @@ func _init() -> void:
 		_flat.append(flat)
 	_jet = _loop_player("jet")
 	_ski = _loop_player("ski")
+	_repair = _loop_player("repair")
 	for k in JET_VOICES:
 		var jet := AudioStreamPlayer3D.new()
 		jet.bus = Sound.EFFECTS_BUS
@@ -89,10 +96,18 @@ func watch(match_node: Match, who: Soldier) -> void:
 	game.fired.connect(_on_fired)
 	game.impacted.connect(_on_impacted)
 	game.hit.connect(_on_hit)
+	game.mine_placed.connect(_on_mine.bind("mine_place", -4.0))
+	game.mine_armed.connect(_on_mine.bind("mine_arm", -8.0))
+	game.pack_switched.connect(_on_pack_switched)
+	game.shield_hit.connect(_on_shield_hit)
 	game.flag_taken.connect(_on_flag.bind("taken"))
 	game.flag_dropped.connect(_on_flag.bind("dropped"))
 	game.flag_returned.connect(_on_flag.bind("returned"))
 	game.flag_captured.connect(_on_flag.bind("captured"))
+
+
+func _on_mine(_mine_id: int, at: Vector3, sound_name: String, volume_db: float) -> void:
+	play_at(sound_name, at, volume_db, 1)
 
 
 ## Plays a sound at a point on a free voice, or the oldest one if they're all
@@ -155,13 +170,42 @@ func _on_fired(soldier_id: int, weapon: int) -> void:
 			return
 		_last_chaingun[soldier_id] = now
 		play_at("chaingun", at, -4.0 if who == soldier else -6.0, 0, 0.95 + 0.1 * randf())
+	elif weapon == Weapon.BLASTER or weapon == Weapon.HAND_GRENADE or weapon == Weapon.MINE:
+		play_at(FIRE_SOUNDS[weapon], at, -6.0, 1 if who == soldier else 0)
 	else:
-		play_at("disc_fire", at, -2.0, 2 if who == soldier else 1)
+		play_at(FIRE_SOUNDS[weapon], at, -2.0, 2 if who == soldier else 1)
+
+
+## A click up or down for a shield or jammer going on or off. The repair
+## pack has its hum instead.
+func _on_pack_switched(soldier_id: int, on: bool) -> void:
+	var who := game.soldier(soldier_id)
+	if who == null or who.loadout.pack == Pack.REPAIR:
+		return
+	var sound_name := "pack_on" if on else "pack_off"
+	if who == soldier:
+		play_flat(sound_name, -8.0)
+	else:
+		play_at(sound_name, who.centre(), -10.0, 0)
+
+
+func _on_shield_hit(victim_id: int, _amount: float, _from: Vector3) -> void:
+	var who := game.soldier(victim_id)
+	if who == null:
+		return
+	if who == soldier:
+		play_flat("shield_hit", -6.0, 0.95 + 0.1 * randf())
+	else:
+		play_at("shield_hit", who.centre(), -4.0, 1, 0.95 + 0.1 * randf())
 
 
 func _on_impacted(weapon: int, at: Vector3, _normal: Vector3) -> void:
-	if weapon == Weapon.DISC:
-		play_at("disc_blast", at, 0.0, 3)
+	var sound := HIT_SOUNDS[weapon]
+	if sound.is_empty():
+		return
+	# Blasts matter most; small hits only take a free voice.
+	var priority := 3 if Weapon.all[weapon].splash_radius > 0.0 else 0
+	play_at(sound, at, 0.0 if priority == 3 else -6.0, priority)
 
 
 func _on_hit(attacker_id: int, victim_id: int, _weapon: int) -> void:
@@ -200,6 +244,7 @@ func _own_sounds(delta: float) -> void:
 	var alive := not soldier.dead
 	var speed := Vector2(soldier.velocity.x, soldier.velocity.z).length()
 	_set_loop(_jet, alive and soldier.jetting, -8.0, 1.0)
+	_set_loop(_repair, alive and soldier.repair_target != 0, -12.0, 1.0 if soldier.repair_target == soldier.entity_id else 1.15)
 	var skiing := alive and soldier.skiing and speed > 3.0
 	# The hiss rises with speed.
 	_set_loop(_ski, skiing, linear_to_db(clampf(speed / 40.0, 0.15, 1.0)) - 10.0, 0.8 + clampf(speed / 60.0, 0.0, 0.6))

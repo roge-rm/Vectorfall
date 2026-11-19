@@ -5,7 +5,8 @@ extends SceneTree
 ## match (team, bots, skill, time and captures, map), the main menu opens its
 ## screens, pausing stops the sim ticking and resuming starts it, settings
 ## changed from the pause menu reach the match, and auto ski skis when fast.
-## The home screen's footnote follows the chosen match.
+## The home screen's footnote follows the chosen match. Saved loadouts round
+## trip through the settings file.
 ## Uses its own settings file, not yours.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/menu_test.gd
 
@@ -45,12 +46,15 @@ func _settings() -> void:
 	Settings.auto_ski = true
 	Settings.commander_mode = true
 	Settings.touch_size = 1.3
+	var sniper := Loadout.make(SoldierBody.Armour.LIGHT, [Weapon.SNIPER, Weapon.GRENADE_LAUNCHER], Pack.JAMMER)
+	Settings.save_loadout(2, sniper)
 	Settings.save_file()
 	Settings.reset()
 	checks.check(Settings.look_mouse == 1.0 and not Settings.invert_look and Settings.outlines, "reset puts the settings back")
 	Settings.load_file()
 	var loaded := Settings.look_mouse == 1.5 and Settings.invert_look and Settings.render_scale == 0.67 and Settings.view_distance == 900.0 and not Settings.outlines and Settings.auto_ski and Settings.commander_mode and Settings.touch_size == 1.3
 	checks.check(loaded and is_equal_approx(Settings.voice_volume, 0.3), "settings save and load")
+	checks.check(Settings.loadout_slot == 2 and Settings.current_loadout().equals(sniper) and Settings.loadout(0).equals(Loadout.from_dict(Settings.default_loadouts()[0])), "saved loadouts and the last one used save and load")
 	var voices := AudioServer.get_bus_index(Sound.VOICES_BUS)
 	checks.check(voices != -1 and is_equal_approx(db_to_linear(AudioServer.get_bus_volume_db(voices)), 0.3), "loading applies the voice volume to its bus")
 	checks.check(is_equal_approx(root.scaling_3d_scale, 0.67), "loading applies the render scale")

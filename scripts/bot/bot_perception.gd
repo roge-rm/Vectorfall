@@ -68,6 +68,9 @@ func look(me: Soldier, game: Match, director: BotDirector) -> void:
 		var to := other.at() + Vector3.UP * 1.2 - eye.origin
 		var distance := to.length()
 		var in_view := distance < NEAR_SENSE or (distance < view_range and forward.angle_to(to) < VIEW_HALF_ANGLE)
+		# A soldier with a sensor jammer on isn't seen past its jam_sight.
+		if other.jamming() and distance > Pack.all[Pack.JAMMER].jam_sight:
+			in_view = false
 		if in_view:
 			if not director.take_ray():
 				if Prof.on:

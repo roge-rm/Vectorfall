@@ -2,7 +2,9 @@ extends SceneTree
 
 ## Checks bots fighting and playing capture the flag: the lead puts a disc
 ## where a crossing target will be, an expert bot standing still hits an
-## enemy running back and forth in front of it with a third of its discs or more, the commander
+## enemy running back and forth in front of it with a third of its discs or more, a mortar
+## lob lands on its mark and a heavy bot lands mortar shells on a still enemy, a light bot
+## picks the sniper rifle for an enemy far off, the commander
 ## counts a person not read yet as offence, bots with no one against them take the enemy flag and
 ## capture it, and two seeded matches with fighting and flags play out the
 ## same.
@@ -23,6 +25,9 @@ func ticks(n: int) -> void:
 func _run() -> void:
 	_lead_maths()
 	await _hits_crossing_target()
+	_lob_maths()
+	await _mortar_still_target()
+	await _sniper_far_target()
 	_roles()
 	await _captures_alone()
 	await _same_seed_fight()
@@ -71,6 +76,110 @@ func _hits_crossing_target() -> void:
 	# About 30% over seeds, with the knockback and the turns at each end.
 	checks.check(hits[0] * 3 >= shots, "and leads them well enough to hit (%d of %d)" % [hits[0], shots])
 	holder.free()
+	await ticks(2)
+
+
+## A shell fired along the lob pitch comes down on a point below and ahead.
+func _lob_maths() -> void:
+	var mortar := Weapon.all[Weapon.MORTAR]
+	var eye := Vector3(0.0, 1.6, 0.0)
+	var mark := Vector3(30.0, -4.0, -40.0)
+	var to := mark - eye
+	var pitch := BotCombat.lob_pitch(to, mortar)
+	var flat := Vector3(to.x, 0.0, to.z).normalized()
+	var v := (flat * cos(pitch) + Vector3.UP * sin(pitch)) * mortar.speed
+	var t := BotCombat.flight_time(to, mortar)
+	var at := eye + v * t + Vector3.DOWN * 0.5 * mortar.gravity * t * t
+	checks.check(at.distance_to(mark) < 0.3 and t < mortar.fuse, "a mortar lob lands %.2f m from its mark after %.2f s" % [at.distance_to(mark), t])
+
+
+## A lone bot on flat ground with an enemy that doesn't move, made a test
+## wearing a loadout. Returns [holder, game, brain, target].
+func _range_setup(match_seed: int, loadout: Loadout, distance: float) -> Array:
+	var holder := Node3D.new()
+	root.add_child(holder)
+	TestWorld.flat_ground(holder)
+	var game := Match.new(match_seed)
+	holder.add_child(game)
+	var director := BotDirector.new(game, RouteGraph.new())
+	var brain := director.add_bot(0, Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3(0.0, 0.2, 0.0)), 1.0)
+	brain.soldier.set_loadout(loadout)
+	var target := game.add_soldier(1, Transform3D(Basis.IDENTITY, Vector3(distance, 0.2, 0.0)), TestWorld.Scripted.new())
+	target.health = 100000.0
+	target.tuning.health_max = 100000.0
+	return [holder, game, brain, target]
+
+
+## A heavy bot with a mortar lobs it onto an enemy standing 50 m away: the
+## shells come down on it or the ground beside it. One that just misses the
+## body bounces on and goes off later, which is the mortar's way.
+func _mortar_still_target() -> void:
+	var setup := _range_setup(3, Loadout.make(SoldierBody.Armour.HEAVY, [Weapon.MORTAR, Weapon.DISC]), 50.0)
+	var game: Match = setup[1]
+	var brain: BotBrain = setup[2]
+	var target: Soldier = setup[3]
+	var hits := [0]
+	game.hit.connect(func(attacker: int, _victim: int, weapon: int) -> void:
+		if attacker == brain.soldier.entity_id and weapon == Weapon.MORTAR:
+			hits[0] += 1)
+	var spot := Vector3(50.0, 0.0, 0.0)
+	# Shell id to its last height speed, and where each first came down.
+	var falling := {}
+	var done := {}
+	var landed: Array[Vector3] = []
+	for i in 60 * 12:
+		var before := {}
+		for shot in game.projectiles:
+			if shot.weapon == Weapon.MORTAR:
+				before[shot.id] = shot.position
+		await physics_frame
+		var now := {}
+		for shot in game.projectiles:
+			if shot.weapon == Weapon.MORTAR:
+				now[shot.id] = shot
+		for id: int in before:
+			if not falling.has(id):
+				continue
+			if not now.has(id):
+				# Went off on the target.
+				landed.append(before[id])
+				done[id] = true
+				falling.erase(id)
+			elif falling[id] < 0.0 and now[id].velocity.y > 0.0:
+				landed.append(now[id].position)
+				done[id] = true
+				falling.erase(id)
+		for id: int in now:
+			if not done.has(id):
+				falling[id] = now[id].velocity.y
+		# Held still on the ground: a mortar blast would throw it far.
+		if target.grounded:
+			spot = target.global_position
+		target.global_position = spot
+		target.velocity = Vector3.ZERO
+	var shots: int = brain.stats.shots[Weapon.MORTAR]
+	checks.check(shots >= 4 and brain.stats.shots[Weapon.DISC] == 0, "a heavy bot picks the mortar for a still enemy 50 m away (%d shells, %d discs)" % [shots, brain.stats.shots[Weapon.DISC]])
+	var close := 0
+	for at in landed:
+		if Vector2(at.x - spot.x, at.z - spot.z).length() < 2.5:
+			close += 1
+	checks.check(close * 3 >= landed.size() * 2 and landed.size() >= 3 and hits[0] >= 1, "and leads them onto it: %d of %d come down within 2.5 m, %d hit" % [close, landed.size(), hits[0]])
+	setup[0].free()
+	await ticks(2)
+
+
+## A light bot with the sniper rifle and the disc picks the rifle for an
+## enemy standing 150 m away, past the disc's reach, and fires it.
+func _sniper_far_target() -> void:
+	var setup := _range_setup(4, Loadout.make(SoldierBody.Armour.LIGHT, [Weapon.DISC, Weapon.SNIPER], Pack.JAMMER), 150.0)
+	var brain: BotBrain = setup[2]
+	var picked := false
+	for i in 60 * 10:
+		await physics_frame
+		picked = picked or (brain.combat.target_id != 0 and brain.combat.weapon == Weapon.SNIPER)
+	var shots: int = brain.stats.shots[Weapon.SNIPER]
+	checks.check(picked and shots >= 2 and brain.stats.shots[Weapon.DISC] == 0, "a light bot picks the sniper rifle for an enemy 150 m away and fires it (%d shots, %d hits, %d discs)" % [shots, brain.stats.hits[Weapon.SNIPER], brain.stats.shots[Weapon.DISC]])
+	setup[0].free()
 	await ticks(2)
 
 

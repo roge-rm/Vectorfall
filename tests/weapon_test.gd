@@ -5,10 +5,16 @@ extends SceneTree
 ## and none from a teammate's, velocity inheritance, shots that never pass
 ## through a wall or the ground at full speed, weapon switching and spin up,
 ## death and respawn at the right base, and match state with shots in flight
-## round-tripping through get_state() and set_state().
+## round-tripping through get_state() and set_state(). The five newer
+## weapons: each fires only from the armours it's allowed on, grenades
+## bounce and go off at their fuse or on a soldier, the mortar's splash and
+## push, the sniper rifle's damage scaling with energy and taking it, the
+## blaster taking energy and bouncing once, and energy weapons stopping
+## without energy.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/weapon_test.gd
 
 const TICK := 1.0 / 60.0
+const Armour := SoldierBody.Armour
 
 var checks := TestWorld.Checks.new()
 var game: Match
@@ -233,6 +239,8 @@ func _run() -> void:
 	checks.check(not b.dead and b.health == b.tuning.health_max and at_spawn, "respawns at full health on a team 1 spawn point (%s)" % b.global_position)
 	checks.check(b.ammo[Weapon.DISC] == disc.ammo and b.collision_layer == Match.SOLDIER_LAYER, "with full ammo and a body again")
 
+	await _new_weapons()
+
 	# Match state with shots in flight and a hurt soldier: save, play on, put
 	# it back and play on again. Both runs must end the same.
 	place(a, Vector3(0.0, 0.0, 0.0))
@@ -255,6 +263,169 @@ func _run() -> void:
 	var second: Dictionary = play.call()
 	checks.check(_same(first, second), "replaying from it ends the same (health %.1f and %.1f, %d and %d shots)" % [first.entities[b.entity_id].health, second.entities[b.entity_id].health, first.projectiles.size(), second.projectiles.size()])
 	checks.finish(self)
+
+
+## Gives a soldier a loadout and puts it standing still at a point.
+func arm(who: Soldier, armour: int, slots: Array[int], at: Vector3) -> void:
+	who.set_loadout(Loadout.make(armour, slots))
+	place(who, at)
+
+
+func set_energy(who: Soldier, value: float) -> void:
+	var state := who.get_state()
+	state.energy = value
+	state.cooldown = 0.0
+	who.set_state(state)
+
+
+## The newest shot from a soldier, or null.
+func last_shot(from: Soldier) -> Projectile:
+	for k in range(game.projectiles.size() - 1, -1, -1):
+		if game.projectiles[k].shooter == from.entity_id:
+			return game.projectiles[k]
+	return null
+
+
+## Pitch from a soldier's eye to a point.
+func pitch_to(who: Soldier, at: Vector3) -> float:
+	var eye := who.eye_transform().origin
+	return atan2(at.y - eye.y, Vector2(at.x - eye.x, at.z - eye.z).length())
+
+
+func _new_weapons() -> void:
+	input_a.command = PlayerCommand.new()
+	input_b.command = PlayerCommand.new()
+	place(b, Vector3(0.0, 0.0, -100.0))
+
+	# Each fires only from the armours it's allowed on: a loadout drops it
+	# anywhere else and the shot is a disc.
+	var allowed := {
+		Weapon.GRENADE_LAUNCHER: [Armour.LIGHT, Armour.MEDIUM, Armour.HEAVY],
+		Weapon.MORTAR: [Armour.HEAVY],
+		Weapon.PLASMA: [Armour.MEDIUM, Armour.HEAVY],
+		Weapon.SNIPER: [Armour.LIGHT],
+		Weapon.BLASTER: [Armour.LIGHT, Armour.MEDIUM, Armour.HEAVY],
+	}
+	var right := true
+	var wrong: Array[String] = []
+	for slot: int in allowed:
+		for armour in 3:
+			arm(a, armour, [slot], Vector3(0.0, 0.0, 0.0))
+			input_a.command.pitch = 0.8
+			game.projectiles.clear()
+			await fire_once(input_a)
+			var shot := last_shot(a)
+			var fired_slot := shot.weapon if shot != null else -1
+			var expect: int = slot if allowed[slot].has(armour) else Weapon.DISC
+			if fired_slot != expect or Loadout.allows(armour, slot) != allowed[slot].has(armour):
+				right = false
+				wrong.append("%s on %d fired %d" % [Weapon.all[slot].short_name, armour, fired_slot])
+	game.projectiles.clear()
+	checks.check(right, "each new weapon fires from its armours only, a disc anywhere else %s" % [wrong])
+
+	# A grenade lobbed at the ground bounces and goes off at its fuse.
+	var grenades := Weapon.all[Weapon.GRENADE_LAUNCHER]
+	arm(a, Armour.MEDIUM, [Weapon.GRENADE_LAUNCHER], Vector3(0.0, 0.0, 0.0))
+	input_a.command.pitch = -0.3
+	impacts.clear()
+	await fire_once(input_a)
+	var grenade := last_shot(a)
+	var bounced := 0
+	var falling := true
+	var went_off := -1
+	for i in 150:
+		await ticks(1)
+		if not game.projectiles.has(grenade):
+			went_off = i + 1
+			break
+		if falling and grenade.velocity.y > 0.0:
+			bounced += 1
+		falling = grenade.velocity.y <= 0.0
+	var fuse_ticks := roundi(grenades.fuse * 60.0)
+	checks.check(bounced >= 1 and grenade.position.y < 1.0, "a grenade bounces off the ground (%d bounces)" % bounced)
+	checks.check(absi(went_off + 1 - fuse_ticks) <= 2 and impacts.size() == 1, "and goes off at its %.0f s fuse (after %d ticks, %d blasts)" % [grenades.fuse, went_off + 1, impacts.size()])
+
+	# A grenade straight at a soldier goes off on it, for the full splash.
+	place(b, Vector3(0.0, 0.0, -10.0))
+	await ticks(2)
+	place(a, Vector3(0.0, 0.0, 0.0))
+	input_a.command.pitch = pitch_to(a, b.centre() + Vector3.UP * 0.6)
+	await fire_once(input_a)
+	await ticks(30)
+	var loss := b.tuning.health_max - b.health
+	checks.check(absf(loss - grenades.splash_damage) < 1.5, "a grenade that hits a soldier goes off on it for %.1f damage" % loss)
+
+	# The mortar: more splash and push than the disc, out to 12 m.
+	var mortar := Weapon.all[Weapon.MORTAR]
+	place(b, Vector3(0.0, 0.0, -20.0))
+	await ticks(2)
+	game.explode(Vector3(6.0 + b.tuning.radius, b.tuning.radius, -20.0), Weapon.MORTAR, a.entity_id)
+	var mortar_loss := b.tuning.health_max - b.health
+	var thrown := b.velocity.length()
+	var expected_push := mortar.splash_impulse_at(6.0) / b.tuning.mass
+	checks.check(absf(mortar_loss - mortar.splash_damage_at(6.0)) < 0.6 and absf(thrown - expected_push) < 0.5, "a mortar 6 m away does %.1f damage and throws at %.1f m/s" % [mortar_loss, thrown])
+	place(b, Vector3(0.0, 0.0, -20.0))
+	await ticks(2)
+	game.explode(Vector3(11.0 + b.tuning.radius, b.tuning.radius, -20.0), Weapon.MORTAR, a.entity_id)
+	checks.check(b.health < b.tuning.health_max, "and still hurts 11 m away, past the disc's 7 m (%.1f)" % (b.tuning.health_max - b.health))
+
+	# The sniper rifle: damage with the energy you have, taking 60 a shot.
+	var sniper := Weapon.all[Weapon.SNIPER]
+	arm(a, Armour.LIGHT, [Weapon.SNIPER, Weapon.DISC], Vector3(0.0, 0.0, 0.0))
+	place(b, Vector3(0.0, 0.0, -40.0))
+	await ticks(2)
+	input_a.command.pitch = pitch_to(a, b.centre())
+	var losses: Array[float] = []
+	var energy_after: Array[float] = []
+	for energy: float in [a.tuning.energy_max, 85.0]:
+		place(b, Vector3(0.0, 0.0, -40.0))
+		place(a, Vector3(0.0, 0.0, 0.0))
+		set_energy(a, energy)
+		await fire_once(input_a)
+		energy_after.append(a.energy)
+		await ticks(10)
+		losses.append(b.tuning.health_max - b.health)
+	var half := lerpf(sniper.min_damage, sniper.damage, inverse_lerp(sniper.energy_per_shot, a.tuning.energy_max, 85.0))
+	checks.check(absf(losses[0] - sniper.damage) < 0.1 and absf(losses[1] - half) < 1.0, "the sniper rifle does %.0f at full energy and %.1f at 85 (%s)" % [sniper.damage, half, losses])
+	checks.check(absf(energy_after[0] - (a.tuning.energy_max - sniper.energy_per_shot)) < 1.0 and absf(energy_after[1] - (85.0 - sniper.energy_per_shot)) < 1.0, "and takes %.0f energy a shot (%s left)" % [sniper.energy_per_shot, energy_after])
+	place(a, Vector3(0.0, 0.0, 0.0))
+	set_energy(a, sniper.energy_per_shot - 1.0)
+	var shots := a.shots
+	await fire_once(input_a)
+	checks.check(a.shots == shots, "it won't fire under %.0f energy" % sniper.energy_per_shot)
+
+	# The blaster takes a little energy a shot, and none at all stops it.
+	var blaster := Weapon.all[Weapon.BLASTER]
+	arm(a, Armour.MEDIUM, [Weapon.BLASTER], Vector3(0.0, 0.0, 0.0))
+	input_a.command.pitch = 0.6
+	set_energy(a, 50.0)
+	await fire_once(input_a)
+	var bolt := last_shot(a)
+	checks.check(bolt != null and bolt.weapon == Weapon.BLASTER and absf(a.energy - (50.0 - blaster.energy_per_shot)) < 0.6 and a.ammo == [0], "the blaster takes %.0f energy a shot and no ammo (%.1f left)" % [blaster.energy_per_shot, a.energy])
+	set_energy(a, 0.0)
+	shots = a.shots
+	await fire_once(input_a)
+	checks.check(a.shots == shots, "and won't fire with no energy")
+	game.projectiles.clear()
+
+	# A bolt aimed down glances off the ground once, then stops at the wall.
+	impacts.clear()
+	var glance := Projectile.new()
+	glance.id = 9300
+	glance.weapon = Weapon.BLASTER
+	glance.damage = blaster.damage
+	glance.bounces_left = blaster.bounces
+	glance.position = Vector3(295.0, 3.0, -10.0)
+	glance.velocity = Vector3(0.0, -30.0, -147.0).normalized() * blaster.speed
+	game.projectiles.append(glance)
+	await ticks(15)
+	var at_wall := impacts.size() == 1 and impacts[0].z > -30.0 and impacts[0].z < -29.5 and impacts[0].y > 0.3
+	checks.check(at_wall and glance.bounces_left == 0 and game.projectiles.is_empty(), "a blaster bolt bounces off the ground once and stops at the next wall (%s)" % [impacts])
+
+	# Back to the usual loadout for the rest.
+	a.set_loadout(Loadout.standard())
+	input_a.command = PlayerCommand.new()
+	await ticks(30)
 
 
 ## Two match states agree on every soldier's place and health and every shot.

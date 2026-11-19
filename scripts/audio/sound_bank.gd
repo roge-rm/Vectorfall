@@ -2,7 +2,7 @@ class_name SoundBank
 extends RefCounted
 
 ## Every sound in the game, made by code once at load as 16 bit mono
-## AudioStreamWAVs: shots, blasts, hit markers, the jet and ski loops,
+## AudioStreamWAVs: shots and blasts for every weapon, hit markers, the jet and ski loops,
 ## footsteps, flag jingles, UI clicks and the bots' robot voices. Nothing is
 ## made while playing. Noise comes from fixed seeds, so the sounds are the
 ## same every run.
@@ -10,7 +10,7 @@ extends RefCounted
 const RATE := 22050
 const VOICE_RATE := 16000
 ## Every effect name get() knows.
-const NAMES: Array[String] = ["disc_fire", "disc_blast", "chaingun", "hit", "kill", "jet", "ski", "step", "land", "flag_grab", "flag_alarm", "flag_dropped", "flag_returned", "flag_captured", "flag_lost", "click", "back"]
+const NAMES: Array[String] = ["disc_fire", "disc_blast", "chaingun", "grenade_fire", "grenade_blast", "mortar_fire", "mortar_blast", "plasma_fire", "plasma_hit", "sniper_fire", "blaster_fire", "blaster_hit", "throw", "hand_grenade_blast", "mine_place", "mine_arm", "mine_blast", "pack_on", "pack_off", "repair", "shield_hit", "hit", "kill", "jet", "ski", "step", "land", "flag_grab", "flag_alarm", "flag_dropped", "flag_returned", "flag_captured", "flag_lost", "click", "back"]
 ## Vowel formants in Hz (first, second) for the robot voices.
 const VOWELS: Array[Vector2] = [Vector2(780, 1250), Vector2(520, 1850), Vector2(320, 2250), Vector2(520, 900), Vector2(350, 760)]
 ## Robot voice pitch in Hz per team: team 0 low and buzzy, team 1 higher and hollow.
@@ -53,6 +53,25 @@ static func build() -> void:
 		var bank := _syllables(rng, team)
 		for line in BotLines.TEXT.size():
 			_voices[line * 2 + team] = _say(bank, line, team)
+	# Made after the voices, so the voices' noise stays the same.
+	_streams["grenade_fire"] = _wav(_tube(rng, 0.22, 180.0, 0.8))
+	_streams["grenade_blast"] = _wav(_blast(rng, 0.7, 1.4, 0.85))
+	_streams["mortar_fire"] = _wav(_tube(rng, 0.5, 90.0, 0.95))
+	_streams["mortar_blast"] = _wav(_blast(rng, 1.6, 0.6, 1.0))
+	_streams["plasma_fire"] = _wav(_zap(rng, 0.25, 900.0, 220.0, 0.15))
+	_streams["plasma_hit"] = _wav(_fizz(rng, 0.3, 0.7))
+	_streams["sniper_fire"] = _wav(_zap(rng, 0.45, 3200.0, 140.0, 0.4))
+	_streams["blaster_fire"] = _wav(_zap(rng, 0.12, 1800.0, 600.0, 0.05))
+	_streams["blaster_hit"] = _wav(_fizz(rng, 0.1, 0.5))
+	_streams["throw"] = _wav(_thud(rng, 0.14, 2400.0, 0.35))
+	_streams["hand_grenade_blast"] = _wav(_blast(rng, 0.9, 1.15, 0.9))
+	_streams["mine_place"] = _wav(_ticks([420.0, 840.0], 0.04, 0.5))
+	_streams["mine_arm"] = _wav(_ticks([1760.0, 2350.0], 0.05, 0.45))
+	_streams["mine_blast"] = _wav(_blast(rng, 1.1, 0.85, 0.95))
+	_streams["pack_on"] = _wav(_ticks([660.0, 990.0], 0.05, 0.45))
+	_streams["pack_off"] = _wav(_ticks([990.0, 660.0], 0.05, 0.4))
+	_streams["repair"] = _wav(_loop(_repair(rng)), true)
+	_streams["shield_hit"] = _wav(_zap(rng, 0.2, 2600.0, 1500.0, 0.25))
 	build_ms = (Time.get_ticks_usec() - started) / 1000.0
 
 
@@ -153,6 +172,64 @@ static func _chaingun(rng: RandomNumberGenerator) -> PackedFloat32Array:
 	return _normalise(out, 0.8)
 
 
+## A hollow pop out of a tube with a puff of air, for the grenade launcher
+## and mortar. freq is the pop's pitch.
+static func _tube(rng: RandomNumberGenerator, length: float, freq: float, peak: float) -> PackedFloat32Array:
+	var out := _buffer(length)
+	var phase := 0.0
+	var low := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		phase += freq * (1.0 + 1.5 * exp(-t * 40.0)) / RATE
+		var pop := sin(phase * TAU) * exp(-t * 6.0 / length)
+		low += 0.15 * (rng.randf_range(-1.0, 1.0) - low)
+		out[i] = pop + low * 1.6 * exp(-t * 14.0 / length)
+	return _normalise(out, peak)
+
+
+## A boom like the disc's, length seconds long; brightness above 1 is
+## sharper and smaller, below 1 deeper and bigger.
+static func _blast(rng: RandomNumberGenerator, length: float, brightness: float, peak: float) -> PackedFloat32Array:
+	var out := _buffer(length)
+	var low := 0.0
+	var phase := 0.0
+	var fade := 3.5 / length
+	for i in out.size():
+		var t := float(i) / RATE
+		var cut := (0.03 + 0.5 * exp(-t * 7.0)) * brightness
+		low += minf(cut, 0.9) * (rng.randf_range(-1.0, 1.0) - low)
+		phase += (24.0 + 50.0 * exp(-t * 5.0)) * brightness / RATE
+		var crack := rng.randf_range(-1.0, 1.0) * exp(-t * 60.0)
+		out[i] = tanh((low * 2.2 * exp(-t * fade) + sin(phase * TAU) * 0.9 * exp(-t * fade * 1.2) + crack * 0.5) * 1.6)
+	return _normalise(out, peak)
+
+
+## A falling zap: a square wave sweeping from high to low with a little
+## noise, for the energy weapons. buzz is how much noise.
+static func _zap(rng: RandomNumberGenerator, length: float, high: float, low: float, buzz: float) -> PackedFloat32Array:
+	var out := _buffer(length)
+	var phase := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		var share := t / length
+		phase += lerpf(high, low, sqrt(share)) / RATE
+		var wave := signf(sin(phase * TAU)) * 0.5 + sin(phase * TAU * 0.5) * 0.5
+		out[i] = (wave + rng.randf_range(-1.0, 1.0) * buzz) * pow(1.0 - share, 2.0) * minf(1.0, t * 800.0)
+	return _normalise(out, 0.7)
+
+
+## A sizzle of bright noise that fades, for plasma and blaster hits.
+static func _fizz(rng: RandomNumberGenerator, length: float, peak: float) -> PackedFloat32Array:
+	var out := _buffer(length)
+	var last := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		var noise := rng.randf_range(-1.0, 1.0)
+		out[i] = (noise - last * 0.7) * exp(-t * 5.0 / length) * (0.7 + 0.3 * sin(t * TAU * 90.0))
+		last = noise
+	return _normalise(out, peak)
+
+
 ## Short pure ticks one after another, for hit markers and clicks.
 static func _ticks(freqs: Array, length: float, peak := 0.6) -> PackedFloat32Array:
 	var out := _buffer(length * freqs.size())
@@ -193,6 +270,18 @@ static func _ski(rng: RandomNumberGenerator) -> PackedFloat32Array:
 		last = low * 0.92
 		out[i] = high * (0.8 + 0.2 * sin(t * TAU * 3.0))
 	return _normalise(out, 0.5)
+
+
+## A soft warbling hum with a quiet crackle, for the repair pack.
+static func _repair(rng: RandomNumberGenerator) -> PackedFloat32Array:
+	var out := _buffer(1.1)
+	var low := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		low += 0.2 * (rng.randf_range(-1.0, 1.0) - low)
+		var wobble := 0.75 + 0.25 * sin(t * TAU * 9.0)
+		out[i] = (sin(t * TAU * 330.0) + 0.5 * sin(t * TAU * 495.0)) * wobble + low * 0.6
+	return _normalise(out, 0.45)
 
 
 ## Crossfades the last 0.1 s into the start, so the loop has no click.

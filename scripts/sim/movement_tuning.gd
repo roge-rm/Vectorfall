@@ -2,7 +2,7 @@ class_name MovementTuning
 extends Resource
 
 ## Every number that sets how a soldier moves, in metres, seconds and radians.
-## One of these per armour later on.
+## The defaults are medium armour, and for_armour() gives each armour's set.
 
 @export_group("Running")
 ## Top speed from running on flat ground.
@@ -79,3 +79,27 @@ extends Resource
 ## Splash impulses are in kg·m/s, so a heavier soldier is pushed less.
 @export var mass := 90.0
 @export var health_max := 100.0
+
+
+## A new set of numbers for an armour (SoldierBody.Armour). Collision is the
+## same size for all three.
+static func for_armour(armour: int) -> MovementTuning:
+	var t := MovementTuning.new()
+	match armour:
+		SoldierBody.Armour.LIGHT:
+			t.mass = 70.0
+			t.health_max = 75.0
+			t.energy_max = 110.0
+			t.run_speed = 9.5
+			t.jet_up_accel = 31.0
+			t.jet_side_speed = 16.0
+			t.energy_refill = 28.0
+		SoldierBody.Armour.HEAVY:
+			t.mass = 130.0
+			t.health_max = 160.0
+			t.energy_max = 90.0
+			t.run_speed = 6.5
+			t.jet_up_accel = 26.0
+			t.jet_side_speed = 11.0
+			t.energy_refill = 20.0
+	return t

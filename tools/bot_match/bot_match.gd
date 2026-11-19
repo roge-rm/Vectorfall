@@ -72,6 +72,9 @@ func _ready() -> void:
 		game.spawns[team] = map.spawn_points(team)
 	for team in 2:
 		game.add_flag(team, map.stand_point(team), map.flag_rest(team))
+	for team in 2:
+		for at in map.station_points(team):
+			game.add_station(team, at)
 	game.settings.capture_limit = 1000000
 	game.settings.time_limit = minutes * 60.0 + 10.0
 	game.start_clock()
@@ -175,6 +178,8 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		"kills": 0, "deaths": 0, "captures": 0, "returns": 0, "grabs": 0,
 		"disc_shots": 0, "disc_hits": 0, "chaingun_shots": 0, "chaingun_hits": 0,
 	}
+	# Weapon short name to [shots, hits] over all bots.
+	var weapon_shots := {}
 	for brain in director.brains:
 		var s := brain.stats
 		var avg_speed: float = s.speed_sum / maxf(s.ticks, 1)
@@ -193,6 +198,7 @@ func _report(ticks: int, wall: float) -> Dictionary:
 			"routes_completed": s.routes,
 			"avg_route_seconds": snappedf(route_avg, 0.1),
 			"role": BotBrain.ROLE_NAMES[brain.role],
+			"wears": BotLoadouts.describe(brain.soldier.loadout, false),
 			"skill": BotDirector.SKILL_NAMES[BotDirector.skill_level(brain.skill)],
 			"personality": BotBrain.PERSONALITY_NAMES[brain.personality],
 			"kills": s.kills,
@@ -211,6 +217,12 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		totals.disc_hits += s.hits[Weapon.DISC]
 		totals.chaingun_shots += s.shots[Weapon.CHAINGUN]
 		totals.chaingun_hits += s.hits[Weapon.CHAINGUN]
+		for k in Weapon.all.size():
+			var key := Weapon.all[k].short_name
+			if not weapon_shots.has(key):
+				weapon_shots[key] = [0, 0]
+			weapon_shots[key][0] += s.shots[k]
+			weapon_shots[key][1] += s.hits[k]
 		totals.distance += s.distance
 		totals.time_stuck += s.time_stuck
 		totals.stuck_spots += s.stuck_spots.size()
@@ -218,6 +230,7 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		totals.top_speed = maxf(totals.top_speed, s.top_speed)
 		totals.avg_speed += avg_speed / director.brains.size()
 	# Hits are enemies hurt, so a disc's splash on two counts twice.
+	totals["weapons"] = weapon_shots
 	totals["disc_hit_rate"] = float(totals.disc_hits) / maxf(totals.disc_shots, 1.0)
 	totals["chaingun_hit_rate"] = float(totals.chaingun_hits) / maxf(totals.chaingun_shots, 1.0)
 	# How long each grab lasted, to the drop or the capture.
@@ -294,8 +307,13 @@ func _print_summary(report: Dictionary, path: String) -> void:
 			if int(sample.seconds) % 60 == 0:
 				print("  %4.0f s  %s" % [sample.seconds, sample.plan])
 	print("Disc %d shots, %d hits (%.0f%%), chaingun %d shots, %d hits (%.0f%%)" % [totals.disc_shots, totals.disc_hits, totals.disc_hit_rate * 100.0, totals.chaingun_shots, totals.chaingun_hits, totals.chaingun_hit_rate * 100.0])
+	var used: Array[String] = []
+	for key: String in totals.weapons:
+		if totals.weapons[key][0] > 0:
+			used.append("%s %d/%d" % [key, totals.weapons[key][1], totals.weapons[key][0]])
+	print("Hits/shots by weapon: %s" % ", ".join(used))
 	for bot: Dictionary in report.bots:
-		print("  bot %d team %d %s %s: %.0f m, avg %.1f m/s, stuck %.1f s, %d spots, %d kills, %d deaths, %d caps, %d grabs, %d returns" % [bot.id, bot.team, bot.personality, bot.role, bot.distance, bot.avg_speed, bot.time_stuck, bot.stuck_spots.size(), bot.kills, bot.deaths, bot.captures, bot.grabs, bot.returns])
+		print("  bot %d team %d %s %s (%s): %.0f m, avg %.1f m/s, stuck %.1f s, %d spots, %d kills, %d deaths, %d caps, %d grabs, %d returns" % [bot.id, bot.team, bot.personality, bot.role, bot.wears, bot.distance, bot.avg_speed, bot.time_stuck, bot.stuck_spots.size(), bot.kills, bot.deaths, bot.captures, bot.grabs, bot.returns])
 	print("Report: ", path)
 
 

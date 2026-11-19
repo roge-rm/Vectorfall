@@ -11,6 +11,8 @@ enum Device { KEYBOARD, GAMEPAD, TOUCH }
 signal device_changed(device: Device)
 ## Esc, the gamepad's Start or the touch pause button, with the order menu shut.
 signal pause_requested
+## I, B or the gamepad's Back, for the loadout screen.
+signal loadout_requested
 
 ## Radians per mouse pixel.
 @export var mouse_sensitivity := 0.0025
@@ -31,9 +33,19 @@ var _mouse_look := Vector2.ZERO
 var _next_presses := 0
 var _prev_presses := 0
 var _slot_wanted := -1
+## A grenade throw or mine pressed since the last command, sent for one tick.
+## Taken from events rather than held state, so the D-pad picking from the
+## open order menu doesn't also throw.
+var _grenade_pending := false
+var _mine_pending := false
 ## An order picked from the menu, sent in the next command.
 var _order := 0
 var _order_arg := 0
+## A loadout picked on the loadout screen, sent in the next command.
+var _loadout: Dictionary = {}
+## While true, as when the loadout screen is open, commands only keep looking
+## where they were and carry orders and loadouts.
+var held_off := false
 
 
 ## The CommandSource the match asks each tick.
@@ -74,6 +86,12 @@ func _input(event: InputEvent) -> void:
 func queue_order(order: int, arg: int) -> void:
 	_order = order
 	_order_arg = arg
+
+
+## Sends the loadout you want with the next command: worn at once on a
+## station, otherwise at your next respawn.
+func want_loadout(loadout: Loadout) -> void:
+	_loadout = loadout.to_dict()
 
 
 ## V and the D-pad up open the menu; while it's open the number keys pick from
@@ -118,7 +136,7 @@ func _menu_input(event: InputEvent) -> bool:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _menu_input(event):
+	if not held_off and _menu_input(event):
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("next_weapon"):
@@ -129,6 +147,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		_slot_wanted = 0
 	elif event.is_action_pressed("weapon_2"):
 		_slot_wanted = 1
+	elif event.is_action_pressed("weapon_3"):
+		_slot_wanted = 2
+	elif event.is_action_pressed("weapon_4"):
+		_slot_wanted = 3
+	elif event.is_action_pressed("loadout"):
+		loadout_requested.emit()
+	elif event.is_action_pressed("grenade"):
+		_grenade_pending = true
+	elif event.is_action_pressed("mine"):
+		_mine_pending = true
 	if event.is_action_pressed("pause"):
 		get_viewport().set_input_as_handled()
 		pause_requested.emit()
@@ -157,6 +185,8 @@ func make_command(delta: float) -> PlayerCommand:
 		look -= touch.take_look() * touch_sensitivity * Settings.look_touch
 	if Settings.invert_look:
 		look.y = -look.y
+	if held_off:
+		look = Vector2.ZERO
 	source.yaw = wrapf(source.yaw + look.x, -PI, PI)
 	source.pitch = clampf(source.pitch + look.y, -Soldier.PITCH_LIMIT, Soldier.PITCH_LIMIT)
 	command.yaw = source.yaw
@@ -165,6 +195,17 @@ func make_command(delta: float) -> PlayerCommand:
 	command.order_arg = _order_arg
 	_order = 0
 	_order_arg = 0
+	command.loadout = _loadout
+	_loadout = {}
+	if held_off:
+		_next_presses = 0
+		_prev_presses = 0
+		_slot_wanted = -1
+		_grenade_pending = false
+		_mine_pending = false
+		if touch != null:
+			touch.take_pulses()
+		return command
 
 	if device == Device.TOUCH:
 		# Touches also make pretend mouse clicks, which mustn't fire.
@@ -184,6 +225,12 @@ func make_command(delta: float) -> PlayerCommand:
 	elif _prev_presses > 0:
 		command.buttons |= PlayerCommand.PREV_WEAPON
 		_prev_presses -= 1
+	if _grenade_pending:
+		command.buttons |= PlayerCommand.GRENADE
+		_grenade_pending = false
+	if _mine_pending:
+		command.buttons |= PlayerCommand.MINE
+		_mine_pending = false
 	command.move = Input.get_vector("move_left", "move_right", "move_back", "move_forward")
 	for pair: Array in [["fire", PlayerCommand.FIRE], ["jump", PlayerCommand.JUMP], ["jet", PlayerCommand.JET], ["use", PlayerCommand.USE], ["deploy", PlayerCommand.DEPLOY], ["ski", PlayerCommand.SKI]]:
 		if Input.is_action_pressed(pair[0]):

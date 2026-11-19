@@ -3,9 +3,10 @@ extends Control
 
 ## On-screen controls: a stick that appears where your left thumb lands, drag
 ## anywhere else on the right half to look, and round buttons for fire, jet,
-## jump (hold it to ski) and SWAP for the next weapon, and a small second FIRE
-## just above the stick. JUMP, JET and the right FIRE sit close together on
-## the right.
+## jump (hold it to ski) and the weapon in hand (a tap switches to the next),
+## small PACK, GREN and MINE buttons, and a small second FIRE just above the
+## stick. JUMP, JET and the right FIRE sit close together on the right, with
+## the small ones in the gaps round them.
 ## A touch that starts on JUMP or JET holds that button until it lifts, and
 ## also holds whichever of the three it's sliding over, so one thumb can jet
 ## and fire or ski and jet. A touch that starts on a FIRE button also looks
@@ -35,20 +36,31 @@ const BUTTONS := [
 	["JET", PlayerCommand.JET, Vector2(64.0, 64.0), 40.0, false, 19, InkUi.ORANGE, InkUi.INK],
 	["JUMP", PlayerCommand.JUMP, Vector2(151.0, 65.0), 35.0, false, 17, InkUi.CREAM, InkUi.INK],
 	["FIRE", PlayerCommand.FIRE, Vector2(118.0, 186.0), 32.0, true, 16, InkUi.CREAM, InkUi.INK],
-	["SWAP", PlayerCommand.NEXT_WEAPON, Vector2(150.0, 140.0), 24.0, false, 13, InkUi.CREAM, InkUi.INK],
+	["SWAP", PlayerCommand.NEXT_WEAPON, Vector2(150.0, 134.0), 24.0, false, 13, InkUi.CREAM, InkUi.INK],
 	["ORDERS", 0, Vector2.ZERO, 0.0, false, 16, InkUi.INK, InkUi.CREAM],
+	["PACK", PlayerCommand.USE, Vector2(108.0, 114.0), 15.0, false, 10, InkUi.CREAM, InkUi.INK],
+	["GREN", PlayerCommand.GRENADE, Vector2(84.0, 222.0), 15.0, false, 10, InkUi.CREAM, InkUi.INK],
+	["MINE", PlayerCommand.MINE, Vector2(48.0, 222.0), 15.0, false, 10, InkUi.CREAM, InkUi.INK],
 ]
-## The ORDERS button's index in BUTTONS.
+## How opaque the round buttons are when not held.
+const BUTTON_ALPHA := 0.55
+const LEFT_FIRE_ALPHA := 0.3
+## Indexes in BUTTONS of the weapon button, which shows the weapon in hand,
+## and of ORDERS, PACK, GREN and MINE.
+const WEAPON_BUTTON := 4
 const ORDERS_BUTTON := 5
+const PACK_BUTTON := 6
+const GRENADE_BUTTON := 7
+const MINE_BUTTON := 8
 ## BUTTONS indexes a touch can slide between, once it started on JET or JUMP.
 const SLIDE_GROUP := [0, 1, 2]
 ## How far past its edge a button still counts: where a touch starts, and for
 ## the buttons a sliding touch didn't start on.
 const START_REACH := 1.2
 const SLIDE_REACH := 1.3
-## Design pixels the right cluster (FIRE, JET, JUMP, SWAP) takes in from the
+## Design pixels the right cluster (FIRE, JET, JUMP and the small ones) takes in from the
 ## bottom right corner, and the stick and left FIRE from the bottom left.
-const RIGHT_SPAN := Vector2(186.0, 204.0)
+const RIGHT_SPAN := Vector2(186.0, 238.0)
 const LEFT_WIDE := 150.0
 ## Most of the screen each side may take: the right cluster within the right
 ## 30% of the width and the lower 60% of the height, the left side within the
@@ -60,7 +72,10 @@ const LEFT_SHARE := 0.25
 ## dpi stays under it and looks the same as without it.
 const MM_PER_DESIGN := 0.22
 ## Buttons sent for one tick per tap.
-const PULSES := PlayerCommand.NEXT_WEAPON
+const PULSES := PlayerCommand.NEXT_WEAPON | PlayerCommand.GRENADE | PlayerCommand.MINE
+## Buttons held while touched and also sent for a tick on the tap, so a
+## quick tap between ticks still toggles a pack.
+const HELD_AND_TAPPED := PlayerCommand.USE
 
 ## x is right and y is forward, like PlayerCommand.move.
 var stick := Vector2.ZERO
@@ -77,6 +92,15 @@ var _stick_at := Vector2.ZERO
 var menu: OrderMenu
 ## Size of the controls, times the normal size.
 var scale_factor := 1.0
+## The soldier they drive, read for the weapon in hand and what's left.
+var soldier: Soldier
+## While true, as when the loadout screen is open, touches are left to the
+## screen above.
+var blocked := false:
+	set(value):
+		blocked = value
+		if blocked:
+			release_all()
 var _orders_rect := Rect2()
 var _orders_for_size := Vector2(-1.0, -1.0)
 var _orders_for_scale := 0.0
@@ -189,6 +213,8 @@ func pause_radius() -> float:
 # Touches are tracked even while hidden, since the first touch is what shows
 # the controls.
 func _input(event: InputEvent) -> void:
+	if blocked:
+		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			_press(event.index, event.position)
@@ -264,6 +290,8 @@ func _press(index: int, at: Vector2) -> void:
 			_touches[index] = [bit, _slide_bits(bit, at)]
 		else:
 			_touches[index] = bit
+			if bit & HELD_AND_TAPPED:
+				_pulses |= bit
 		_update_buttons()
 		return
 	if at.x < size.x * 0.45:
@@ -322,6 +350,20 @@ func _draw() -> void:
 		var ink: Color = BUTTONS[k][7]
 		var label: String = BUTTONS[k][0]
 		var label_size := roundi(float(BUTTONS[k][5]) * s)
+		# Faded while there's nothing for it to do.
+		var spent := false
+		if soldier != null:
+			match k:
+				WEAPON_BUTTON:
+					label = Weapon.all[soldier.weapon_slot()].short_name
+				PACK_BUTTON:
+					spent = soldier.pack() == null
+					if soldier.pack_on:
+						fill = InkUi.ORANGE
+				GRENADE_BUTTON:
+					spent = soldier.grenades <= 0
+				MINE_BUTTON:
+					spent = soldier.mines <= 0
 		if k == ORDERS_BUTTON:
 			var rect := orders_rect()
 			draw_rect(rect, InkUi.PINK if held else fill)
@@ -329,10 +371,17 @@ func _draw() -> void:
 			continue
 		var centre := button_centre(k)
 		var radius := button_radius(k)
-		# Held buttons go ink with cream words.
-		draw_circle(centre, radius, InkUi.INK)
-		draw_circle(centre, radius - line, InkUi.INK if held else Color(fill, 0.92))
-		InkUi.centred(self, centre, label, InkUi.Face.BLACK, label_size, InkUi.CREAM if held else ink)
+		# See-through so the view shows behind, the left FIRE most of all.
+		# Held buttons go solid ink with cream words.
+		var a := 1.0 if held else (LEFT_FIRE_ALPHA if BUTTONS[k][4] or spent else BUTTON_ALPHA)
+		var words_a := minf(1.0, a + 0.3)
+		# Long weapon names shrink to fit inside the circle.
+		var fit := InkUi.width(label, InkUi.Face.BLACK, label_size)
+		if fit > radius * 1.7:
+			label_size = maxi(1, floori(label_size * radius * 1.7 / fit))
+		draw_circle(centre, radius, Color(InkUi.INK, a))
+		draw_circle(centre, radius - line, InkUi.INK if held else Color(fill, a))
+		InkUi.centred(self, centre, label, InkUi.Face.BLACK, label_size, InkUi.CREAM if held else Color(ink, words_a))
 	var origin := _stick_origin
 	var knob := _stick_at
 	if not _touches.values().has("stick"):

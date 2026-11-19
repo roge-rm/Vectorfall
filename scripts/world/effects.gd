@@ -4,7 +4,8 @@ extends Node3D
 ## Blasts and sparks where shots hit, from the match's impacted signal, in
 ## flat ink style: a lumpy outlined ball with a ring and a few chunks thrown
 ## out for a blast, a small burst for a hit. The nodes are made once and
-## reused. Only for looks.
+## reused. Sniper shots draw a beam from the muzzle to where the shot is,
+## which thins away once it's gone. Only for looks.
 
 const SHADER := preload("res://shaders/explosion.gdshader")
 const BLAST_TIME := 0.6
@@ -12,11 +13,18 @@ const SPARK_TIME := 0.1
 const POOL := 12
 const CHUNKS := 4
 const GRAVITY := 20.0
+const BEAMS := 6
+const BEAM_TIME := 0.35
+const BEAM_WIDTH := 0.09
+const BEAM_COLOUR := WeaponModels.SNIPER_GLOW
 
 var _blasts: Array[Blast] = []
 var _sparks: Array[Blast] = []
 var _next_blast := 0
 var _next_spark := 0
+var _beams: Array[Beam] = []
+var _next_beam := 0
+var _game: Match
 
 
 class Blast:
@@ -26,6 +34,16 @@ class Blast:
 	var chunks: Array[MeshInstance3D] = []
 	var throws: Array[Vector3] = []
 	var radius := 1.0
+	var time := -1.0
+
+
+class Beam:
+	var view: MeshInstance3D
+	var start := Vector3.ZERO
+	var end := Vector3.ZERO
+	## The shot it follows, while it flies.
+	var shot: Projectile
+	## Seconds since the shot was gone, -1 while it flies or unused.
 	var time := -1.0
 
 
@@ -64,6 +82,19 @@ func _init() -> void:
 			blast.throws.append(Vector3(cos(angle) * 0.9, 1.5 + 0.35 * (c % 2), sin(angle) * 0.9))
 		_blasts.append(blast)
 		_sparks.append(_make(spark_mesh, spark_material))
+	# A box 1 m long along -z from its origin, stretched to each beam.
+	var beam_mesh := BoxMesh.new()
+	beam_mesh.size = Vector3(1.0, 1.0, 1.0)
+	var beam_material := Cel.glow(BEAM_COLOUR)
+	for k in BEAMS:
+		var beam := Beam.new()
+		beam.view = MeshInstance3D.new()
+		beam.view.mesh = beam_mesh
+		beam.view.material_override = beam_material
+		beam.view.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		beam.view.visible = false
+		add_child(beam.view)
+		_beams.append(beam)
 
 
 func _make(mesh: Mesh, material: Material) -> Blast:
@@ -102,7 +133,23 @@ static func lumpy_ball(sides: int, rings: int, lumps: float, spikes: float) -> A
 
 
 func watch(game: Match) -> void:
+	_game = game
 	game.impacted.connect(_on_impacted)
+	game.fired.connect(_on_fired)
+
+
+func _on_fired(_soldier_id: int, weapon_slot: int) -> void:
+	if weapon_slot != Weapon.SNIPER or _game.projectiles.is_empty():
+		return
+	# The match adds the shot before it says it fired.
+	var shot: Projectile = _game.projectiles.back()
+	var beam := _beams[_next_beam]
+	_next_beam = (_next_beam + 1) % BEAMS
+	beam.shot = shot
+	beam.start = shot.position + shot.muzzle_offset
+	beam.end = shot.position
+	beam.time = -1.0
+	_pose_beam(beam, 0.0)
 
 
 func _on_impacted(weapon_slot: int, at: Vector3, normal: Vector3) -> void:
@@ -134,6 +181,9 @@ func _start(made: Blast, at: Vector3, normal: Vector3, radius: float) -> void:
 
 
 func _process(delta: float) -> void:
+	for beam in _beams:
+		if beam.shot != null or beam.time >= 0.0:
+			_pose_beam(beam, delta)
 	for made in _blasts:
 		if made.time >= 0.0:
 			made.time += delta
@@ -169,3 +219,26 @@ func pose_blast(made: Blast, life: float) -> void:
 		made.chunks[c].position = Vector3(throw.x * t, throw.y * t - 0.5 * GRAVITY * t * t, throw.z * t)
 		made.chunks[c].rotation = Vector3(t * 9.0, t * 7.0 + c, 0.0)
 		made.chunks[c].visible = life < 0.85
+
+
+## Follows the shot while it flies, then thins away along its whole length.
+func _pose_beam(beam: Beam, delta: float) -> void:
+	if beam.shot != null:
+		beam.end = beam.shot.position
+		if _game == null or not _game.projectiles.has(beam.shot):
+			beam.shot = null
+			beam.time = 0.0
+	else:
+		beam.time += delta
+	var life := maxf(beam.time, 0.0) / BEAM_TIME
+	var length := beam.start.distance_to(beam.end)
+	if life >= 1.0:
+		beam.time = -1.0
+	beam.view.visible = life < 1.0 and length >= 0.05
+	if not beam.view.visible:
+		return
+	var dir := (beam.end - beam.start) / length
+	var up := Vector3.UP if absf(dir.y) < 0.99 else Vector3.RIGHT
+	var width := BEAM_WIDTH * (1.0 - life)
+	var basis := Basis.looking_at(dir, up).scaled_local(Vector3(width, width, length))
+	beam.view.global_transform = Transform3D(basis, (beam.start + beam.end) * 0.5)

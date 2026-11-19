@@ -4,8 +4,11 @@ extends SceneTree
 ## the player is standing on its base, the touch controls show only after a
 ## touch, and the touch stick and buttons, holding JUMP to ski, FIRE and SWAP too, end
 ## up in the player's commands, the left FIRE fires with the order menu open,
-## and the outline setting turns outlines on and
-## off.
+## GREN, MINE and PACK throw and switch the pack, and the outline setting
+## turns outlines on and off. You start in your saved loadout, each base has
+## two stations, stepping onto yours opens the loadout screen and a pick there
+## is worn at once, and the LOADOUT button while dead sets what you respawn
+## in.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/main_scene_test.gd
 
 var checks := TestWorld.Checks.new()
@@ -23,6 +26,7 @@ func ticks(n: int) -> void:
 func _run() -> void:
 	# Defaults, not your settings.
 	Settings.path = "user://no-settings.cfg"
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.path))
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(main)
 	await ticks(300)
@@ -32,6 +36,11 @@ func _run() -> void:
 	checks.check(from_flag > 190.0 and from_flag < 215.0, "the player starts 190 to 215 m beside their flag (%.1f m)" % from_flag)
 	checks.check(main.game.entities.size() == 1 + main.setup.own_bots + main.setup.enemy_bots, "the match has you and the bots")
 	checks.check(main.enemy.team != player.team and not main.enemy.dead, "the enemy bots are on the other team")
+	checks.check(player.loadout.equals(Settings.loadout(0)) and player.weapons.size() == 3, "you start in the first saved loadout")
+	var per_team := [0, 0]
+	for id: int in main.game.stations:
+		per_team[main.game.stations[id].team] += 1
+	checks.check(per_team == [2, 2], "each base has two stations (%s)" % [per_team])
 	var moving := 0
 	var leaving := 0
 	for brain: BotBrain in main.bots.brains:
@@ -213,6 +222,19 @@ func _run() -> void:
 	await ticks(3)
 	checks.check(player.weapon == Weapon.CHAINGUN, "a tap on SWAP switches to the chaingun")
 
+	# GREN and MINE throw once a tap, PACK switches the shield on and off.
+	var grenades := player.grenades
+	await _tap(touch, to_window, TouchControls.GRENADE_BUTTON)
+	checks.check(player.grenades == grenades - 1, "a tap on GREN throws a hand grenade")
+	await ticks(40)
+	var mines := player.mines
+	await _tap(touch, to_window, TouchControls.MINE_BUTTON)
+	checks.check(player.mines == mines - 1, "a tap on MINE places a mine")
+	await _tap(touch, to_window, TouchControls.PACK_BUTTON)
+	var shield_on := player.pack_on
+	await _tap(touch, to_window, TouchControls.PACK_BUTTON)
+	checks.check(shield_on and not player.pack_on, "taps on PACK switch the shield on and off")
+
 	var key := InputEventKey.new()
 	key.physical_keycode = KEY_W
 	key.pressed = true
@@ -221,4 +243,55 @@ func _run() -> void:
 	checks.check(not touch.visible and touch.buttons == 0, "a key press hides the touch controls and lets go of their buttons")
 	key.pressed = false
 	Input.parse_input_event(key)
+	await ticks(2)
+
+	# Onto your own station: the loadout screen opens, you stand still, and a
+	# pick is worn at once.
+	var station: InventoryStation
+	for id: int in main.game.stations:
+		if main.game.stations[id].team == player.team:
+			station = main.game.stations[id]
+	player.global_position = station.global_position + Vector3.UP * 0.3
+	player.velocity = Vector3.ZERO
+	await ticks(10)
+	var screen: LoadoutScreen = main.loadout_screen
+	checks.check(screen.visible and main.input.held_off, "stepping onto your station opens the loadout screen")
+	screen.pick_slot(1)
+	await ticks(3)
+	checks.check(player.loadout.equals(Settings.loadout(1)) and player.loadout.armour == SoldierBody.Armour.LIGHT, "a loadout picked on the station is worn at once")
+	checks.check(Settings.loadout_slot == 1, "and is the last one used")
+	screen.close()
+	await ticks(2)
+	checks.check(not screen.visible and not main.input.held_off, "closing the screen gives you back control")
+
+	# Dead: the LOADOUT button opens it, and the pick is for the respawn.
+	player.global_position = station.global_position + Vector3(6.0, 0.3, 0.0)
+	await ticks(5)
+	main.game.damage(player, 1000.0, main.enemy.entity_id, Weapon.DISC, main.enemy.global_position)
+	await process_frame
+	await process_frame
+	checks.check(main.hud.loadout_button.visible, "the LOADOUT button shows while you're dead")
+	main.hud.loadout_button.pressed.emit()
+	await process_frame
+	checks.check(screen.visible, "it opens the loadout screen")
+	screen.pick_slot(2)
+	await ticks(3)
+	checks.check(player.next_loadout.equals(Settings.loadout(2)) and player.loadout.armour == SoldierBody.Armour.LIGHT, "a pick while dead is for the respawn")
+	await ticks(int(Match.RESPAWN_DELAY * 60.0) + 5)
+	checks.check(not player.dead and player.loadout.armour == SoldierBody.Armour.HEAVY, "you respawn in it")
+	checks.check(not screen.visible and not main.hud.loadout_button.visible, "the screen and button go once you're back")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.path))
 	checks.finish(self)
+
+
+## A quick tap on a touch button, down and up in the same frame.
+func _tap(touch: TouchControls, to_window: Transform2D, k: int) -> void:
+	var tap := InputEventScreenTouch.new()
+	tap.index = 6
+	tap.pressed = true
+	tap.position = to_window * touch.button_centre(k)
+	Input.parse_input_event(tap)
+	tap = tap.duplicate()
+	tap.pressed = false
+	Input.parse_input_event(tap)
+	await ticks(3)

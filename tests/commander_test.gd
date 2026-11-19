@@ -6,8 +6,9 @@ extends SceneTree
 ## stand-in player, that bots escort a person who takes the enemy flag, that
 ## fewer bots defend while a person sits at home and that one warns and covers
 ## it, that bots go after the
-## carrier of our flag and split up to cut it off, and that the commander's
-## state saves and loads whole.
+## carrier of our flag and split up to cut it off, that roles get their
+## loadouts and a bot whose role changes near a station goes and changes, and
+## that the commander's state saves and loads whole.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/commander_test.gd
 
 const R := BotBrain.Role
@@ -54,6 +55,9 @@ func _run() -> void:
 	await _escorts_person()
 	await _person_defends()
 	await _chases_carrier()
+	_loadout_table()
+	await _roles_wear_loadouts()
+	await _changes_at_station()
 	await _state_round_trip()
 	checks.finish(self)
 
@@ -289,6 +293,80 @@ func _chases_carrier() -> void:
 
 
 ## The director's state, commanders too, saves and loads whole.
+## The role to loadout table: armour and the pack or weapon each role is for.
+func _loadout_table() -> void:
+	var P := BotBrain.Personality
+	var A := SoldierBody.Armour
+	var ok := true
+	for personality in BotBrain.PERSONALITY_NAMES.size():
+		for kit in BotLoadouts.choices(R.DEFENCE, personality):
+			ok = ok and BotLoadouts.loadout(kit).armour == A.HEAVY and BotLoadouts.loadout(kit).weapons.has(Weapon.MORTAR)
+		for role: int in [R.LIGHT_DEFENCE, R.CHASE]:
+			for kit in BotLoadouts.choices(role, personality):
+				ok = ok and BotLoadouts.loadout(kit).armour == A.LIGHT
+		for kit in BotLoadouts.choices(R.ESCORT, personality):
+			ok = ok and BotLoadouts.loadout(kit).armour == A.MEDIUM
+	checks.check(ok, "defence is heavy with a mortar, light defence and chase light, escorts medium")
+	var sniper := BotLoadouts.loadout(BotLoadouts.choices(R.MIDFIELD, P.SNIPER)[0])
+	checks.check(sniper.weapons.has(Weapon.SNIPER) and sniper.pack == Pack.JAMMER, "a sniper in midfield carries the sniper rifle and a jammer")
+	var runner := BotLoadouts.loadout(BotLoadouts.choices(R.OFFENCE, P.AGGRESSIVE)[0])
+	checks.check(runner.armour == A.LIGHT and runner.pack == Pack.ENERGY, "an aggressive runner is light with an energy pack")
+	var repair := BotLoadouts.loadout(BotLoadouts.choices(R.REPAIR, P.DEFAULT)[0])
+	checks.check(repair.pack == Pack.REPAIR and repair.armour == A.MEDIUM, "repair is medium with the repair pack")
+
+
+## Every bot starts in a loadout its role and personality choose, and sends
+## a new role's loadout for its respawn within a think.
+func _roles_wear_loadouts() -> void:
+	var setup := _match(8, 8)
+	var director: BotDirector = setup.director
+	var ok := true
+	var heavy := 0
+	for brain in director.brains:
+		var worn := brain.soldier.loadout
+		var kit: int = brain.kit_picks.get(brain.role, -1)
+		ok = ok and BotLoadouts.choices(brain.role, brain.personality).has(kit) and worn.equals(BotLoadouts.loadout(kit))
+		if brain.role == R.DEFENCE and worn.armour == SoldierBody.Armour.HEAVY:
+			heavy += 1
+	checks.check(ok and heavy == 2, "every bot starts in a loadout for its role, both defences heavy (%d)" % heavy)
+	var brain: BotBrain = null
+	for other in director.brains:
+		if other.soldier.team == 0 and other.role == R.OFFENCE:
+			brain = other
+			break
+	director.commander(0)._lock(brain, R.LIGHT_DEFENCE, 0, -1, 0, 0)
+	await ticks(BotDirector.THINK_TICKS + 2)
+	var next := brain.soldier.next_loadout
+	checks.check(next.armour == SoldierBody.Armour.LIGHT and next.equals(brain.wanted_loadout()), "a bot moved to light defence sends its loadout for the next respawn (%s)" % BotLoadouts.describe(next, false))
+	await _done(setup)
+
+
+## A bot moved to defence beside its base's station walks onto the pad and
+## comes off it heavy.
+func _changes_at_station() -> void:
+	var setup := _match(1, 0)
+	var game: Match = setup.game
+	var director: BotDirector = setup.director
+	for team in 2:
+		for at in map.station_points(team):
+			game.add_station(team, at)
+	var brain: BotBrain = director.brains[0]
+	brain.soldier.set_loadout(Loadout.standard())
+	var start := Vector3(map.base_x(0) + map.front(0) * 8.0, 0.0, -12.0)
+	start.y = map.surface_at(start.x, start.z) + 0.2
+	brain.soldier.global_position = start
+	brain.soldier.velocity = Vector3.ZERO
+	director.commander(0)._lock(brain, R.DEFENCE, 0, -1, 0, 0)
+	var went := false
+	for i in 60 * 20:
+		await physics_frame
+		went = went or brain.goal == BotBrain.Goal.STATION
+		if brain.soldier.loadout.armour == SoldierBody.Armour.HEAVY:
+			break
+	checks.check(went and brain.soldier.loadout.equals(brain.wanted_loadout()), "a bot moved to defence by its base goes to a station and changes to %s" % BotLoadouts.describe(brain.soldier.loadout, false))
+	await _done(setup)
+
+
 func _state_round_trip() -> void:
 	var setup := _match(4, 4)
 	var director: BotDirector = setup.director

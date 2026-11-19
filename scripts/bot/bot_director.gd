@@ -90,6 +90,10 @@ var _perches := {}
 var _perches_lock := Mutex.new()
 ## Team to its commander, made with the team's first bot.
 var commanders := {}
+## Team to the tops of its stations' pads, made on the main thread when the
+## stations change, for bots to read in work().
+var _pads := {}
+var _pads_made := -1
 var _lanes: Lanes
 ## The last tick the commanders were given, so they run once a tick.
 var _commanded_tick := -1
@@ -139,12 +143,17 @@ func add_bot(team: int, spawn: Transform3D, skill := -1.0) -> BotBrain:
 	brain.soldier = game.add_soldier(team, spawn, brain)
 	brain.soldier.display_name = "Bot %d" % brain.soldier.entity_id
 	brain.rng.seed = hash([game.seed_value, brain.soldier.entity_id])
+	brain.kit_rng.seed = hash([brain.rng.seed, "kit"])
 	brain.reset()
 	brains.append(brain)
 	if not commanders.has(team):
 		commanders[team] = TeamCommander.new(team, self)
 		commanders[team].watch()
 	assign_roles()
+	if game.tick == 0:
+		# Before the match starts every bot wears its role's loadout.
+		for other in brains:
+			other.dress()
 	return brain
 
 
@@ -192,6 +201,8 @@ func run_bots(delta: float) -> void:
 		other.take_snapshot()
 	for team: int in game.flags:
 		game.flags[team].take_snapshot()
+	if _pads_made != game.stations.size():
+		_make_pads()
 	if Prof.on:
 		Prof.add("bots.snapshot", Time.get_ticks_usec() - prof_t)
 		var commander_t := Time.get_ticks_usec()
@@ -260,6 +271,23 @@ func run_bots(delta: float) -> void:
 	Soldier.use_snapshot = false
 	if Prof.on:
 		Prof.add("bots.serial_after", Time.get_ticks_usec() - prof_t)
+
+
+func _make_pads() -> void:
+	_pads_made = game.stations.size()
+	_pads = { 0: [] as Array[Vector3], 1: [] as Array[Vector3] }
+	var ids := game.stations.keys()
+	ids.sort()
+	for id: int in ids:
+		var station := game.stations[id]
+		if _pads.has(station.team):
+			_pads[station.team].append(station.position + Vector3.UP * InventoryStation.PAD_TOP)
+
+
+## The tops of a team's station pads, as of this tick's bot phase.
+func station_pads(team: int) -> Array[Vector3]:
+	var none: Array[Vector3] = []
+	return _pads.get(team, none)
 
 
 ## Calls work(k) for k from 0 to count - 1, on WorkerThreadPool or serially.

@@ -11,6 +11,14 @@ const WORLD_LAYER := 1
 const SOLDIER_LAYER := 2
 ## Seconds from death to respawning.
 const RESPAWN_DELAY := 4.0
+## Mines: most out per soldier, seconds to arm, how close an enemy sets one
+## off and how close a blast sets one off, in metres.
+const MINE_LIMIT := 3
+const MINE_ARM_TIME := 2.0
+const MINE_TRIGGER := 2.5
+const MINE_SPLASH_TRIGGER := 2.0
+## Half angle in radians around where you look that a repair pack reaches.
+const REPAIR_CONE := 0.9
 
 signal fired(soldier_id: int, weapon: int)
 ## A soldier took damage. from is where it came from: the blast or the shooter.
@@ -21,6 +29,14 @@ signal killed(victim_id: int, killer_id: int, weapon: int)
 ## A projectile hit something or blew up. normal is the surface's.
 signal impacted(weapon: int, position: Vector3, normal: Vector3)
 signal respawned(soldier_id: int)
+## A thrown mine stuck where it landed, and later armed.
+signal mine_placed(mine_id: int, at: Vector3)
+signal mine_armed(mine_id: int, at: Vector3)
+## A soldier's pack went on or off: a shield or jammer switched, or a repair
+## pack starting or stopping.
+signal pack_switched(soldier_id: int, on: bool)
+## A shield pack stopped some damage, taken from energy instead.
+signal shield_hit(victim_id: int, amount: float, from: Vector3)
 ## Flag events. team is the flag's team, and soldier_id who took, dropped or
 ## returned it, or 0 when it went home by itself.
 signal flag_taken(team: int, soldier_id: int)
@@ -30,6 +46,10 @@ signal flag_returned(team: int, soldier_id: int)
 signal flag_captured(team: int, soldier_id: int)
 ## winner is a team, or -1 for a draw.
 signal match_over(winner: int)
+## A soldier stepped onto one of its team's inventory stations, and a station
+## put a loadout on a soldier or restocked it.
+signal station_entered(station_id: int, soldier_id: int)
+signal station_used(station_id: int, soldier_id: int)
 ## A soldier gave its team's bots an order (Orders.Kind) in its command this
 ## tick, sent before it moves.
 signal ordered(soldier_id: int, order: int, arg: int)
@@ -46,12 +66,16 @@ var sources: Dictionary[int, CommandSource] = {}
 var next_id := 1
 ## Shots in flight, oldest first.
 var projectiles: Array[Projectile] = []
+## Mines stuck to the world, oldest first.
+var mines: Array[Mine] = []
 ## Team to the places its soldiers respawn. Set from the map.
 var spawns: Dictionary[int, Array] = {}
 var settings := MatchSettings.new()
 ## Team to its flag, and to the spot on its stand a carrier touches to score.
 var flags: Dictionary[int, Flag] = {}
 var stands: Dictionary[int, Vector3] = {}
+## Inventory stations by id.
+var stations: Dictionary[int, InventoryStation] = {}
 var scores: Array[int] = [0, 0]
 var time_left := 0.0
 var over := false
@@ -95,7 +119,9 @@ func step(delta: float) -> void:
 		if command.order != 0:
 			ordered.emit(id, command.order, command.order_arg)
 		entities[id].simulate(command, delta)
+	_step_stations(delta, ids)
 	_step_projectiles(delta)
+	_step_mines(delta)
 	_step_flags(delta)
 
 
@@ -123,10 +149,12 @@ func _profiled_step(delta: float) -> void:
 		t = Time.get_ticks_usec()
 		entities[id].simulate(command, delta)
 		Prof.add("soldier_sim", Time.get_ticks_usec() - t)
+	_step_stations(delta, ids)
 	t = Time.get_ticks_usec()
 	_step_projectiles(delta)
 	Prof.add("projectiles", Time.get_ticks_usec() - t)
 	Prof.count("projectiles_live", projectiles.size())
+	_step_mines(delta)
 	t = Time.get_ticks_usec()
 	_step_flags(delta)
 	Prof.add("flags", Time.get_ticks_usec() - t)
@@ -198,6 +226,65 @@ func add_flag(team: int, stand: Vector3, rest: Vector3) -> Flag:
 	flags[team] = flag
 	stands[team] = stand
 	return flag
+
+
+## Puts an inventory station for a team with its pad's foot at a point.
+func add_station(team: int, at: Vector3) -> InventoryStation:
+	var station := InventoryStation.new()
+	station.entity_id = next_id
+	next_id += 1
+	station.team = team
+	station.position = at
+	add_child(station)
+	stations[station.entity_id] = station
+	return station
+
+
+## The station a soldier is standing on, or null.
+func station_under(who: Soldier) -> InventoryStation:
+	for id: int in stations:
+		if stations[id].holds(who):
+			return stations[id]
+	return null
+
+
+## Each station counts down its cooldowns, then puts the wanted loadout on
+## each soldier that just stepped on (once its cooldown is over) and on each
+## one on the pad whose wanted loadout differs from what it wears.
+func _step_stations(delta: float, ids: Array) -> void:
+	if stations.is_empty():
+		return
+	var station_ids := stations.keys()
+	station_ids.sort()
+	for station_id: int in station_ids:
+		var station := stations[station_id]
+		var waiting := station.cooldowns.keys()
+		waiting.sort()
+		for id: int in waiting:
+			station.cooldowns[id] -= delta
+			if station.cooldowns[id] <= 0.0:
+				station.cooldowns.erase(id)
+		var now: Array[int] = []
+		for id: int in ids:
+			var who := soldier(id)
+			if who != null and station.holds(who):
+				now.append(id)
+		for id in now:
+			var who := soldier(id)
+			var entered := not station.on.has(id)
+			if entered:
+				station_entered.emit(station_id, id)
+			var changed := not who.next_loadout.equals(who.loadout)
+			if changed or (entered and not station.cooldowns.has(id)):
+				if changed:
+					# During the cooldown a change keeps what was left, so
+					# swapping loadouts can't refill.
+					who.set_loadout(who.next_loadout, station.cooldowns.has(id))
+				else:
+					who.restock()
+				station.cooldowns[id] = InventoryStation.COOLDOWN
+				station_used.emit(station_id, id)
+		station.on = now
 
 
 ## Starts the match clock again with the time limit in the settings.
@@ -305,8 +392,12 @@ func _end(team: int) -> void:
 	match_over.emit(team)
 
 
-func add_soldier(team: int, spawn: Transform3D, source: CommandSource = null) -> Soldier:
+## Adds a soldier in a loadout, by default medium with the disc launcher and
+## chaingun.
+func add_soldier(team: int, spawn: Transform3D, source: CommandSource = null, loadout: Loadout = null) -> Soldier:
 	var soldier := Soldier.new()
+	if loadout != null:
+		soldier.set_loadout(loadout)
 	soldier.entity_id = next_id
 	next_id += 1
 	soldier.team = team
@@ -333,7 +424,7 @@ func soldier(id: int) -> Soldier:
 ## Fires one shot of the soldier's current weapon from its eye, with spread
 ## from the match's random numbers and some of its velocity.
 func fire(shooter: Soldier) -> void:
-	var weapon := Weapon.all[shooter.weapon]
+	var weapon := Weapon.all[shooter.weapon_slot()]
 	var eye := shooter.eye_transform()
 	var dir := -eye.basis.z
 	if weapon.spread > 0.0:
@@ -341,6 +432,18 @@ func fire(shooter: Soldier) -> void:
 		var angle := rng.randf() * TAU
 		var off := sqrt(rng.randf()) * tan(weapon.spread)
 		dir = (dir + (eye.basis.x * cos(angle) + eye.basis.y * sin(angle)) * off).normalized()
+	_launch(shooter, weapon, dir, eye.basis * Soldier.MUZZLE)
+
+
+## Throws a hand grenade or a mine (Weapon.HAND_GRENADE or Weapon.MINE) from
+## the soldier's eye where it's looking, from the left hand.
+func throw(shooter: Soldier, slot: int) -> void:
+	var eye := shooter.eye_transform()
+	_launch(shooter, Weapon.all[slot], -eye.basis.z, eye.basis * Soldier.THROW_HAND)
+
+
+func _launch(shooter: Soldier, weapon: Weapon, dir: Vector3, muzzle_offset: Vector3) -> void:
+	var eye := shooter.eye_transform()
 	var shot := Projectile.new()
 	shot.id = next_id
 	next_id += 1
@@ -349,13 +452,17 @@ func fire(shooter: Soldier) -> void:
 	shot.team = shooter.team
 	shot.position = eye.origin
 	shot.velocity = dir * weapon.speed + shooter.velocity * weapon.inherit
-	shot.muzzle_offset = eye.basis * Soldier.MUZZLE
+	shot.damage = weapon.damage_with(shooter.energy, shooter.tuning.energy_max)
+	shot.bounces_left = weapon.bounces
+	shot.muzzle_offset = muzzle_offset
 	projectiles.append(shot)
 	fired.emit(shooter.entity_id, weapon.slot)
 
 
 ## Moves every shot along its path for one tick, with a ray cast over the
-## whole step so even the fastest can't pass through anything.
+## whole step so even the fastest can't pass through anything. A shot with
+## bounces left glances off the world, and one with a fuse blows up where it
+## is when the fuse runs out.
 func _step_projectiles(delta: float) -> void:
 	if projectiles.is_empty():
 		return
@@ -372,12 +479,34 @@ func _step_projectiles(delta: float) -> void:
 			exclude.append(owner_body.get_rid())
 		if Prof.on:
 			Prof.count("ray_by_projectile")
-		var hit := world_ray(shot.position, to, WORLD_LAYER | SOLDIER_LAYER, exclude)
+		# A thrown mine passes through soldiers and sticks to the world.
+		var is_mine := shot.weapon == Weapon.MINE
+		var hit := world_ray(shot.position, to, WORLD_LAYER if is_mine else WORLD_LAYER | SOLDIER_LAYER, exclude)
 		shot.age += delta
-		if not hit.is_empty():
+		if is_mine:
+			if not hit.is_empty():
+				_place_mine(shot, hit.position, hit.normal)
+			elif shot.age < weapon.lifetime:
+				shot.position = to
+				kept.append(shot)
+		elif not hit.is_empty():
 			var victim := hit.collider as Soldier
 			var normal: Vector3 = hit.normal
-			_impact(shot, hit.position + normal * 0.05, normal, victim)
+			if victim == null and shot.bounces_left != 0:
+				# The rest of the tick's move is dropped, which is under 2 cm at
+				# grenade speeds after a bounce.
+				shot.position = hit.position + normal * 0.05
+				shot.velocity = shot.velocity.bounce(normal) * weapon.bounce_keep
+				if shot.bounces_left > 0:
+					shot.bounces_left -= 1
+				if weapon.fuse > 0.0 and shot.age >= weapon.fuse:
+					_impact(shot, shot.position, normal, null)
+				else:
+					kept.append(shot)
+			else:
+				_impact(shot, hit.position + normal * 0.05, normal, victim)
+		elif weapon.fuse > 0.0 and shot.age >= weapon.fuse:
+			_impact(shot, to, Vector3.UP, null)
 		elif shot.age >= weapon.lifetime:
 			pass
 		else:
@@ -390,24 +519,29 @@ func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier) ->
 	var weapon := Weapon.all[shot.weapon]
 	shot.position = at
 	impacted.emit(weapon.slot, at, normal)
-	if victim != null:
+	# A shot with no direct damage, like a grenade, just blows up on the
+	# soldier it hits.
+	var direct := victim if victim != null and shot.damage > 0.0 else null
+	if direct != null:
 		var push := shot.velocity.normalized() * weapon.hit_impulse
 		if weapon.splash_radius > 0.0:
-			push = (victim.centre() - at).normalized() * weapon.splash_impulse
-		victim.push(push)
+			push = (direct.centre() - at).normalized() * weapon.splash_impulse
+		direct.push(push)
 		var from := at
 		var attacker := soldier(shot.shooter)
 		if attacker != null:
 			from = attacker.global_position
-		damage(victim, weapon.damage, shot.shooter, weapon.slot, from)
+		damage(direct, shot.damage, shot.shooter, weapon.slot, from)
 	if weapon.splash_radius > 0.0:
-		explode(at, weapon.slot, shot.shooter, victim)
+		explode(at, weapon.slot, shot.shooter, direct)
 
 
 ## A blast from a weapon at a point: splash damage and a push on every living
 ## soldier in range that the blast can see, less for those further away.
-func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = null) -> void:
+func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = null, attacker_team := -1) -> void:
 	var weapon := Weapon.all[weapon_slot]
+	# With the attacker gone, its team still takes no damage, as in damage().
+	var orphan_team := attacker_team if soldier(attacker_id) == null else -1
 	var ids := entities.keys()
 	ids.sort()
 	for id: int in ids:
@@ -425,11 +559,73 @@ func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = nu
 		var away := target.centre() - at
 		away = away.normalized() if away.length() > 0.01 else Vector3.UP
 		target.push(away * weapon.splash_impulse_at(distance))
+		if target.team == orphan_team:
+			continue
 		damage(target, weapon.splash_damage_at(distance), attacker_id, weapon_slot, at)
+	_set_off_mines_near(at)
+
+
+## A thrown mine sticks where it landed. A soldier's oldest mine goes off if
+## this one is past MINE_LIMIT.
+func _place_mine(shot: Projectile, at: Vector3, normal: Vector3) -> void:
+	var own: Array[Mine] = []
+	for other in mines:
+		if other.owner_id == shot.shooter:
+			own.append(other)
+	var mine := Mine.new()
+	mine.id = shot.id
+	mine.owner_id = shot.shooter
+	mine.team = shot.team
+	mine.normal = normal
+	mine.position = at + normal * 0.05
+	mine.arm_in = MINE_ARM_TIME
+	mines.append(mine)
+	mine_placed.emit(mine.id, mine.position)
+	for k in own.size() - MINE_LIMIT + 1:
+		if mines.has(own[k]):
+			_blow_mine(own[k])
+
+
+## Arms mines, and sets off armed ones with a living enemy close by.
+func _step_mines(delta: float) -> void:
+	if mines.is_empty():
+		return
+	var ids := entities.keys()
+	ids.sort()
+	for mine in mines.duplicate():
+		if not mines.has(mine):
+			continue
+		mine.age += delta
+		if not mine.armed():
+			mine.arm_in = maxf(mine.arm_in - delta, 0.0)
+			if mine.armed():
+				mine_armed.emit(mine.id, mine.position)
+			continue
+		for id: int in ids:
+			var who := soldier(id)
+			if who != null and not who.dead and who.team != mine.team and who.distance_to_body(mine.position) <= MINE_TRIGGER:
+				_blow_mine(mine)
+				break
+
+
+## Every mine close to a blast goes off too, armed or not.
+func _set_off_mines_near(at: Vector3) -> void:
+	for mine in mines.duplicate():
+		if mines.has(mine) and mine.position.distance_to(at) <= MINE_SPLASH_TRIGGER:
+			_blow_mine(mine)
+
+
+## Takes a mine out and blows it up, which can set off others near it.
+func _blow_mine(mine: Mine) -> void:
+	mines.erase(mine)
+	var at := mine.position + mine.normal * 0.1
+	impacted.emit(Weapon.MINE, at, mine.normal)
+	explode(at, Weapon.MINE, mine.owner_id, null, mine.team)
 
 
 ## Takes health off a soldier, less for your own shots and none from your
-## teammates', and kills it at zero.
+## teammates', and kills it at zero. A shield takes what it can from energy
+## first and goes off when energy runs out.
 func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, from: Vector3) -> void:
 	if victim.dead or amount <= 0.0:
 		return
@@ -438,6 +634,15 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 		amount *= Weapon.all[weapon_slot].self_damage_share
 	elif attacker != null and attacker.team == victim.team:
 		return
+	if victim.shielded():
+		var per_point := victim.pack().energy_per_point
+		var stopped := minf(amount, victim.energy / per_point)
+		victim.energy = maxf(victim.energy - stopped * per_point, 0.0)
+		amount -= stopped
+		if stopped > 0.0:
+			shield_hit.emit(victim.entity_id, stopped, from)
+		if victim.energy <= 0.0:
+			victim.switch_pack(false)
 	victim.health = maxf(victim.health - amount, 0.0)
 	if attacker != null and attacker.team != victim.team:
 		hit.emit(attacker_id, victim.entity_id, weapon_slot)
@@ -448,6 +653,33 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 		if held != null:
 			_drop_flag(held, victim)
 		killed.emit(victim.entity_id, attacker_id, weapon_slot)
+
+
+## The nearest hurt living teammate a soldier is looking towards, within
+## reach metres of its eye and not behind a wall, or null.
+func repair_target(healer: Soldier, reach: float) -> Soldier:
+	var eye := healer.eye_transform()
+	var ahead := -eye.basis.z
+	var best: Soldier = null
+	var best_distance := reach
+	var ids := entities.keys()
+	ids.sort()
+	for id: int in ids:
+		var other := soldier(id)
+		if other == null or other == healer or other.dead or other.team != healer.team or other.health >= other.tuning.health_max:
+			continue
+		var distance := other.distance_to_body(eye.origin)
+		if distance > best_distance:
+			continue
+		var to := other.centre() - eye.origin
+		# In front: within about 50° of where you look, or touching.
+		if distance > 0.3 and ahead.angle_to(to) > REPAIR_CONE:
+			continue
+		if not line_clear(eye.origin, other.centre()):
+			continue
+		best = other
+		best_distance = distance
+	return best
 
 
 ## Puts a dead soldier back at one of its team's spawn points, picked with the
@@ -480,6 +712,9 @@ func get_state() -> Dictionary:
 	var flag_states := {}
 	for team in flags:
 		flag_states[team] = flags[team].get_state()
+	var station_states := {}
+	for id: int in stations:
+		station_states[id] = stations[id].get_state()
 	return {
 		"scores": scores.duplicate(),
 		"time_left": time_left,
@@ -487,12 +722,14 @@ func get_state() -> Dictionary:
 		"winner": winner,
 		"stands": stands.duplicate(),
 		"flags": flag_states,
+		"stations": station_states,
 		"tick": tick,
 		"seed": seed_value,
 		"rng_state": rng.state,
 		"next_id": next_id,
 		"entities": states,
 		"projectiles": shots,
+		"mines": mines.map(func(mine: Mine) -> Dictionary: return mine.get_state()),
 		"sources": source_states,
 	}
 
@@ -529,6 +766,16 @@ func set_state(state: Dictionary) -> void:
 			add_flag(team, stands[team], flag_state.home)
 			flags[team].entity_id = flag_state.id
 		flags[team].set_state(flag_state)
+	var station_states: Dictionary = state.get("stations", {})
+	for id: int in station_states:
+		if not stations.has(id):
+			var made := InventoryStation.new()
+			made.entity_id = id
+			made.team = station_states[id].team
+			made.position = station_states[id].position
+			add_child(made)
+			stations[id] = made
+		stations[id].set_state(station_states[id])
 	var source_states: Dictionary = state.get("sources", {})
 	for id: int in source_states:
 		if sources.has(id):
@@ -536,3 +783,6 @@ func set_state(state: Dictionary) -> void:
 	projectiles.clear()
 	for shot_state: Dictionary in state.get("projectiles", []):
 		projectiles.append(Projectile.from_state(shot_state))
+	mines.clear()
+	for mine_state: Dictionary in state.get("mines", []):
+		mines.append(Mine.from_state(mine_state))
