@@ -84,7 +84,7 @@ func _process(delta: float) -> void:
 		want = Shown.DESTROYED
 	else:
 		var game := asset.get_parent() as Match
-		if game != null and not game.powered(asset.team):
+		if game != null and not game.asset_powered(asset):
 			want = Shown.UNPOWERED
 	if want != shown:
 		_show(want, asset.team)

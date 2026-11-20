@@ -90,10 +90,11 @@ var _perches := {}
 var _perches_lock := Mutex.new()
 ## Team to its commander, made with the team's first bot.
 var commanders := {}
-## Team to the tops of its stations' pads, made on the main thread when the
-## stations change, for bots to read in work().
+## Working stations and free deploy sites, copied before bots work.
 var _pads := {}
-var _pads_made := -1
+var deploy_sites: Array[Array] = [[], []]
+var deploy_open: Array[Array] = [[], []]
+var deploy_slots: Array[Array] = [[], []]
 ## Teams whose force fields are on this tick, as bits (1 << team), set before
 ## the bots work.
 var fields_on := 0
@@ -118,6 +119,9 @@ func _init(match_node: Match, route_graph: RouteGraph) -> void:
 	name = "BotDirector"
 	game = match_node
 	graph = route_graph
+	for team in 2:
+		for point in graph.interest_points(RouteGraph.DEPLOY, team):
+			deploy_sites[team].append(graph.points[point])
 	# Done now, while the map loads, so the first bot to plan doesn't stall a
 	# tick on them.
 	graph.packed()
@@ -125,6 +129,8 @@ func _init(match_node: Match, route_graph: RouteGraph) -> void:
 		links_near_spawns(team, BotBrain.CARRIER_KEEP_OFF)
 	game.add_child(self)
 	game.bots = self
+	_make_pads()
+	_snapshot_deploy()
 	game.fired.connect(_on_fired)
 	game.impacted.connect(_on_impacted)
 	game.damaged.connect(_on_damaged)
@@ -217,8 +223,8 @@ func run_bots(delta: float) -> void:
 		other.take_snapshot()
 	for team: int in game.flags:
 		game.flags[team].take_snapshot()
-	if _pads_made != game.stations.size():
-		_make_pads()
+	_make_pads()
+	_snapshot_deploy()
 	fields_on = 0
 	for id: int in game.fields:
 		if game.fields[id].on:
@@ -308,9 +314,15 @@ func _snapshot_assets() -> void:
 	ids.sort()
 	for id: int in ids:
 		var machine := game.assets[id]
-		if not _asset_spots.has(id):
-			_asset_spots[id] = _spots_for(machine)
-		var spots: Array = _asset_spots[id]
+		var spots: Array
+		if machine.deployed:
+			var foot := machine.global_position
+			var approach := foot - BaseAsset.direction(machine.facing, 0.0) * Match.DEPLOY_DISTANCE
+			spots = [approach, foot, [], []]
+		else:
+			if not _asset_spots.has(id):
+				_asset_spots[id] = _spots_for(machine)
+			spots = _asset_spots[id]
 		base_assets[id] = {
 			"id": id,
 			"team": machine.team,
@@ -321,6 +333,7 @@ func _snapshot_assets() -> void:
 			"health": machine.health,
 			"max": machine.max_health(),
 			"destroyed": machine.destroyed,
+			"powered": game.asset_powered(machine),
 			"target": machine.target_id,
 			"stand": spots[0],
 			"raid": spots[1],
@@ -392,14 +405,28 @@ func shut_for(team: int) -> int:
 	return fields_on & ~(1 << team)
 
 
+func _snapshot_deploy() -> void:
+	for team in 2:
+		if deploy_sites[team].is_empty():
+			continue
+		deploy_open[team] = []
+		for at: Vector3 in deploy_sites[team]:
+			if game.deploy_clear(at):
+				deploy_open[team].append(at)
+		deploy_slots[team] = []
+		for slot in [Pack.TURRET, Pack.SENSOR, Pack.STATION]:
+			var pack := Pack.all[slot]
+			if game.deploy_count(team, pack.deploy_kind) < pack.team_limit:
+				deploy_slots[team].append(slot)
+
+
 func _make_pads() -> void:
-	_pads_made = game.stations.size()
 	_pads = { 0: [] as Array[Vector3], 1: [] as Array[Vector3] }
 	var ids := game.stations.keys()
 	ids.sort()
 	for id: int in ids:
 		var station := game.stations[id]
-		if _pads.has(station.team):
+		if _pads.has(station.team) and game.station_working(station):
 			_pads[station.team].append(station.position + Vector3.UP * InventoryStation.PAD_TOP)
 
 

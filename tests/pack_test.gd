@@ -1,6 +1,6 @@
 extends SceneTree
 
-## Checks the five packs: their data and a loadout dropping an unknown one,
+## Checks pack data: their data and a loadout dropping an unknown one,
 ## the ammo pack's bigger loads at set_loadout and respawn, the energy pack's
 ## quicker refill, the shield toggling with each press, draining, taking
 ## damage from energy and going off at no energy, the jammer toggling and
@@ -81,7 +81,7 @@ func wear(pack: int) -> void:
 
 func _run() -> void:
 	# Data.
-	checks.check(Pack.all.size() == 5 and Pack.all[Pack.JAMMER].slot == Pack.JAMMER and Pack.get_pack(Loadout.NO_PACK) == null, "five packs, by slot, and none for NO_PACK")
+	checks.check(Pack.all.size() == 8 and Pack.all[Pack.JAMMER].slot == Pack.JAMMER and Pack.all[Pack.STATION].slot == Pack.STATION and Pack.get_pack(Loadout.NO_PACK) == null, "eight packs, by slot, and none for NO_PACK")
 	var odd := Loadout.make(Armour.LIGHT, [Weapon.DISC], 9)
 	var kept := Loadout.make(Armour.LIGHT, [Weapon.DISC], Pack.SHIELD)
 	checks.check(odd.pack == Loadout.NO_PACK and kept.pack == Pack.SHIELD, "a loadout drops an unknown pack and keeps a real one")

@@ -259,7 +259,7 @@ func _pick_asset(brain: BotBrain) -> int:
 			continue
 		var lob := lobbing(pos, info)
 		var distance := pos.distance_to(asset_aim(pos, info))
-		var shooting_me: bool = info.kind == BaseAsset.Kind.TURRET and info.target == me and brain.director.power[info.team]
+		var shooting_me: bool = info.kind == BaseAsset.Kind.TURRET and info.target == me and info.powered
 		var score := distance
 		if raid:
 			if distance > RAID_REACH:

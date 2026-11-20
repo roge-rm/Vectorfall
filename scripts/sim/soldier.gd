@@ -84,6 +84,8 @@ var throw_pending := NO_THROW
 var pack_on := false
 ## The use button was held last tick, so a press toggles a pack once.
 var use_held := false
+var deploy_held := false
+var deploy_ready := true
 ## Who the repair pack healed this tick: this soldier's id, a teammate's, or
 ## 0 for no one.
 var repair_target := 0
@@ -164,6 +166,8 @@ func set_loadout(value: Loadout, keep_stock := false) -> void:
 	if fixed.pack != loadout.pack:
 		pack_on = false
 		repair_target = 0
+	if not keep_stock:
+		deploy_ready = true
 	loadout = fixed
 	next_loadout = fixed.duplicate()
 	tuning = MovementTuning.for_armour(fixed.armour)
@@ -294,6 +298,7 @@ func die() -> void:
 
 ## Full ammo, hand grenades and mines for the loadout worn.
 func restock() -> void:
+	deploy_ready = true
 	for k in weapons.size():
 		ammo[k] = max_ammo(k)
 	grenades = Pack.scaled(loadout.grenades, loadout.pack)
@@ -563,7 +568,14 @@ func _use_pack(command: PlayerCommand, delta: float) -> void:
 	var pressed := command.has(PlayerCommand.USE) and not use_held
 	use_held = command.has(PlayerCommand.USE)
 	repair_target = 0
+	var deploying := command.has(PlayerCommand.DEPLOY)
+	var deploy_pressed := deploying and not deploy_held
+	deploy_held = deploying
 	var p := pack()
+	if p != null and p.use == Pack.Use.DEPLOY:
+		if game != null and (pressed or deploy_pressed):
+			game.deploy(self, p)
+		return
 	if p == null or p.use == Pack.Use.ALWAYS:
 		pack_on = false
 		return
@@ -676,6 +688,8 @@ func get_state() -> Dictionary:
 		"throw_pending": throw_pending,
 		"pack_on": pack_on,
 		"use_held": use_held,
+		"deploy_held": deploy_held,
+		"deploy_ready": deploy_ready,
 		"repair_target": repair_target,
 	}
 
@@ -717,5 +731,7 @@ func set_state(state: Dictionary) -> void:
 	throw_pending = state.get("throw_pending", NO_THROW)
 	pack_on = state.get("pack_on", false)
 	use_held = state.get("use_held", false)
+	deploy_held = state.get("deploy_held", false)
+	deploy_ready = state.get("deploy_ready", true)
 	repair_target = state.get("repair_target", 0)
 	_set_alive_layers(not dead)

@@ -9,13 +9,13 @@ extends StaticBody3D
 ## The match changes it only on physics ticks, and its look is made in
 ## _ready().
 
-enum Kind { GENERATOR, TURRET, SENSOR }
+enum Kind { GENERATOR, TURRET, SENSOR, STATION }
 
 ## Per kind: most health, and the body's radius and height in metres.
-const MAX_HEALTH: Array[float] = [400.0, 250.0, 150.0]
-const RADIUS: Array[float] = [1.3, 0.7, 0.45]
-const HEIGHT: Array[float] = [2.2, 1.8, 2.6]
-const NAMES: Array[String] = ["Generator", "Turret", "Sensor"]
+const MAX_HEALTH: Array[float] = [400.0, 250.0, 150.0, 175.0]
+const RADIUS: Array[float] = [1.3, 0.7, 0.45, 1.5]
+const HEIGHT: Array[float] = [2.2, 1.8, 2.6, 0.24]
+const NAMES: Array[String] = ["Generator", "Turret", "Sensor", "Inventory station"]
 ## A turret aims at the nearest enemy it can see within TURRET_RANGE metres,
 ## looking round every LOOK_TICKS ticks with up to LOOK_RAYS line of sight
 ## rays. It turns at TURN_RATE radians a second, 90°, and fires when its aim
@@ -43,6 +43,7 @@ var kind := Kind.GENERATOR
 var facing := 0.0
 var health := 0.0
 var destroyed := false
+var deployed := false
 ## A turret's aim, as a yaw and pitch in radians like a soldier's look.
 var aim_yaw := 0.0
 var aim_pitch := 0.0
@@ -70,7 +71,7 @@ static func make(of_kind: Kind, of_team: int) -> BaseAsset:
 
 func _ready() -> void:
 	name = "%s%d" % [NAMES[kind], entity_id]
-	collision_layer = Match.ASSET_LAYER
+	collision_layer = Match.PAD_LAYER if kind == Kind.STATION else Match.ASSET_LAYER
 	collision_mask = 0
 	rotation.y = facing
 	var shape := CollisionShape3D.new()
@@ -80,7 +81,8 @@ func _ready() -> void:
 	shape.shape = cylinder
 	shape.position = Vector3.UP * height() * 0.5
 	add_child(shape)
-	head = AssetLook.build(self, kind, team)
+	if kind != Kind.STATION:
+		head = AssetLook.build(self, kind, team)
 	_pose_head()
 
 
@@ -157,6 +159,7 @@ func get_state() -> Dictionary:
 		"facing": facing,
 		"health": health,
 		"destroyed": destroyed,
+		"deployed": deployed,
 		"aim_yaw": aim_yaw,
 		"aim_pitch": aim_pitch,
 		"target_id": target_id,
@@ -175,6 +178,7 @@ func set_state(state: Dictionary) -> void:
 	rotation.y = facing
 	health = state.health
 	destroyed = state.destroyed
+	deployed = state.get("deployed", false)
 	aim_yaw = state.get("aim_yaw", facing)
 	aim_pitch = state.get("aim_pitch", 0.0)
 	target_id = state.get("target_id", 0)

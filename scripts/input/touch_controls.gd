@@ -388,6 +388,9 @@ func _draw() -> void:
 					label = Weapon.all[soldier.weapon_slot()].short_name
 				PACK_BUTTON:
 					spent = soldier.pack() == null
+					if soldier.pack() != null and soldier.pack().use == Pack.Use.DEPLOY:
+						label = "PLACE"
+						spent = not soldier.deploy_ready
 					if soldier.pack_on:
 						fill = InkUi.ORANGE
 				GRENADE_BUTTON:

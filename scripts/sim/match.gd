@@ -15,6 +15,12 @@ const WORLD_LAYER := 1
 const SOLDIER_LAYER := 2
 const ASSET_LAYER := 4
 const FIELD_LAYER := 8
+# Shots can hit a deployed station pad. Soldiers can walk through its rim.
+const PAD_LAYER := 32
+const DEPLOY_DISTANCE := 3.0
+const DEPLOY_SPACING := 3.5
+const DEPLOY_SPEED := 8.0
+
 ## Seconds from death to respawning.
 const RESPAWN_DELAY := 4.0
 ## Mines: most out per soldier, seconds to arm, how close an enemy sets one
@@ -41,6 +47,7 @@ signal mine_armed(mine_id: int, at: Vector3)
 ## A soldier's pack went on or off: a shield or jammer switched, or a repair
 ## pack starting or stopping.
 signal pack_switched(soldier_id: int, on: bool)
+signal deploy_result(soldier_id: int, text: String)
 ## A shield pack stopped some damage, taken from energy instead.
 signal shield_hit(victim_id: int, amount: float, from: Vector3)
 ## Flag events. team is the flag's team, and soldier_id who took, dropped or
@@ -262,11 +269,12 @@ func add_flag(team: int, stand: Vector3, rest: Vector3) -> Flag:
 
 
 ## Puts an inventory station for a team with its pad's foot at a point.
-func add_station(team: int, at: Vector3) -> InventoryStation:
+func add_station(team: int, at: Vector3, asset_id := 0) -> InventoryStation:
 	var station := InventoryStation.new()
 	station.entity_id = next_id
 	next_id += 1
 	station.team = team
+	station.asset_id = asset_id
 	station.position = at
 	add_child(station)
 	stations[station.entity_id] = station
@@ -277,24 +285,106 @@ func add_station(team: int, at: Vector3) -> InventoryStation:
 ## while their team has no power.
 func station_under(who: Soldier) -> InventoryStation:
 	for id: int in stations:
-		if stations[id].holds(who) and powered(stations[id].team):
+		if stations[id].holds(who) and station_working(stations[id]):
 			return stations[id]
 	return null
 
 
 ## Puts a base asset of a kind (BaseAsset.Kind) for a team with its foot at a
 ## point, facing a yaw in radians.
-func add_asset(team: int, kind: BaseAsset.Kind, at: Vector3, facing := 0.0) -> BaseAsset:
+func add_asset(team: int, kind: BaseAsset.Kind, at: Vector3, facing := 0.0, deployed := false) -> BaseAsset:
 	var made := BaseAsset.make(kind, team)
 	made.entity_id = next_id
 	next_id += 1
 	made.position = at
 	made.facing = facing
+	if deployed:
+		made.aim_yaw = facing
+	made.deployed = deployed
 	add_child(made)
 	assets[made.entity_id] = made
 	if kind == BaseAsset.Kind.GENERATOR and not generators.has(team):
 		generators[team] = made
 	return made
+
+
+func asset_powered(machine: BaseAsset) -> bool:
+	return machine.deployed or powered(machine.team)
+
+
+func station_working(station: InventoryStation) -> bool:
+	if station.asset_id == 0:
+		return powered(station.team)
+	var machine := asset(station.asset_id)
+	return machine != null and not machine.destroyed
+
+
+func deploy_count(team: int, kind: BaseAsset.Kind) -> int:
+	var count := 0
+	for machine: BaseAsset in assets.values():
+		if machine.deployed and machine.team == team and machine.kind == kind:
+			count += 1
+	return count
+
+
+func deploy_clear(at: Vector3) -> bool:
+	for stand: Vector3 in stands.values():
+		if stand.distance_to(at) < DEPLOY_SPACING:
+			return false
+	for machine: BaseAsset in assets.values():
+		if machine.position.distance_to(at) < DEPLOY_SPACING:
+			return false
+	for station: InventoryStation in stations.values():
+		if station.asset_id == 0 and station.position.distance_to(at) < DEPLOY_SPACING:
+			return false
+	return true
+
+
+func deploy(who: Soldier, pack: Pack) -> void:
+	if not who.deploy_ready:
+		deploy_result.emit(who.entity_id, "Pack empty")
+		return
+	if deploy_count(who.team, pack.deploy_kind) >= pack.team_limit:
+		deploy_result.emit(who.entity_id, "Team limit reached")
+		return
+	var at := _deploy_ground(who, pack.deploy_kind)
+	if at == Vector3.INF:
+		deploy_result.emit(who.entity_id, "Stand on clear, level ground to deploy")
+		return
+	var machine := add_asset(who.team, pack.deploy_kind, at, who.yaw, true)
+	if machine.kind == BaseAsset.Kind.STATION:
+		add_station(who.team, at, machine.entity_id)
+	who.deploy_ready = false
+	deploy_result.emit(who.entity_id, "%s deployed" % BaseAsset.NAMES[machine.kind])
+
+
+func _deploy_ground(who: Soldier, kind: BaseAsset.Kind) -> Vector3:
+	if not who.grounded or who.horizontal_speed() > DEPLOY_SPEED:
+		return Vector3.INF
+	var ahead := BaseAsset.direction(who.yaw, 0.0)
+	var at := who.position + ahead * DEPLOY_DISTANCE
+	var ground := world_ray(at + Vector3.UP * 1.4, at + Vector3.DOWN * 1.4, WORLD_LAYER)
+	if ground.is_empty() or ground.normal.y < 0.94:
+		return Vector3.INF
+	at = ground.position
+	if not deploy_clear(at) or not line_clear(who.eye_transform().origin, at + Vector3.UP * 0.25):
+		return Vector3.INF
+	var radius := BaseAsset.RADIUS[kind]
+	for direction in [Vector3.FORWARD, Vector3.BACK, Vector3.LEFT, Vector3.RIGHT]:
+		var rim: Vector3 = at + direction * radius
+		var support := world_ray(rim + Vector3.UP * 0.45, rim + Vector3.DOWN * 0.45, WORLD_LAYER)
+		if support.is_empty() or support.normal.y < 0.94:
+			return Vector3.INF
+	var shape := CylinderShape3D.new()
+	shape.radius = radius
+	shape.height = maxf(BaseAsset.HEIGHT[kind], 0.9)
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.transform.origin = at + Vector3.UP * (0.45 + shape.height * 0.5)
+	query.collision_mask = WORLD_LAYER | SOLDIER_LAYER | ASSET_LAYER | enemy_fields(who.team) | field_layer(who.team)
+	if not get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty():
+		return Vector3.INF
+	return at
 
 
 ## The physics layer bit a team's force fields are on.
@@ -401,7 +491,7 @@ func _step_turrets(delta: float) -> void:
 		var turret := assets[id]
 		if turret.kind != BaseAsset.Kind.TURRET:
 			continue
-		if turret.destroyed or not powered(turret.team):
+		if turret.destroyed or not asset_powered(turret):
 			turret.target_id = 0
 			continue
 		turret.cooldown = maxf(turret.cooldown - delta, 0.0)
@@ -481,7 +571,7 @@ func _step_sensors() -> void:
 	asset_ids.sort()
 	for id: int in asset_ids:
 		var sensor := assets[id]
-		if sensor.kind == BaseAsset.Kind.SENSOR and not sensor.destroyed and (sensor.team == 0 or sensor.team == 1) and powered(sensor.team):
+		if sensor.kind == BaseAsset.Kind.SENSOR and not sensor.destroyed and (sensor.team == 0 or sensor.team == 1) and asset_powered(sensor):
 			tops[sensor.team].append(sensor.global_position + Vector3.UP * sensor.height())
 	if tops[0].is_empty() and tops[1].is_empty():
 		return
@@ -526,7 +616,7 @@ func _step_stations(delta: float, ids: Array) -> void:
 			station.cooldowns[id] -= delta
 			if station.cooldowns[id] <= 0.0:
 				station.cooldowns.erase(id)
-		if not powered(station.team):
+		if not station_working(station):
 			station.on.clear()
 			continue
 		var now: Array[int] = []
@@ -749,7 +839,7 @@ func _step_projectiles(delta: float) -> void:
 		# A thrown mine passes through soldiers and sticks to the world or
 		# an asset.
 		var is_mine := shot.weapon == Weapon.MINE
-		var mask := WORLD_LAYER | ASSET_LAYER
+		var mask := WORLD_LAYER | ASSET_LAYER | PAD_LAYER
 		var hit := world_ray(shot.position, to, mask if is_mine else mask | SOLDIER_LAYER, exclude)
 		shot.age += delta
 		if is_mine:
@@ -1088,6 +1178,13 @@ func set_state(state: Dictionary) -> void:
 			flags[team].entity_id = flag_state.id
 		flags[team].set_state(flag_state)
 	var station_states: Dictionary = state.get("stations", {})
+	for id: int in stations.keys():
+		var station := stations[id]
+		var saved: Dictionary = station_states.get(id, {})
+		if station.asset_id != 0 and (saved.is_empty() or station.team != saved.team):
+			remove_child(station)
+			station.queue_free()
+			stations.erase(id)
 	for id: int in station_states:
 		if not stations.has(id):
 			var made := InventoryStation.new()
@@ -1098,12 +1195,20 @@ func set_state(state: Dictionary) -> void:
 			stations[id] = made
 		stations[id].set_state(station_states[id])
 	var asset_states: Dictionary = state.get("assets", {})
+	for id: int in assets.keys():
+		var machine := assets[id]
+		var saved: Dictionary = asset_states.get(id, {})
+		if machine.deployed and (saved.is_empty() or machine.kind != saved.asset or machine.team != saved.team):
+			remove_child(machine)
+			machine.queue_free()
+			assets.erase(id)
 	for id: int in asset_states:
 		if not assets.has(id):
 			var made := BaseAsset.make(asset_states[id].asset, asset_states[id].team)
 			made.entity_id = id
 			made.position = asset_states[id].position
 			made.facing = asset_states[id].facing
+			made.deployed = asset_states[id].get("deployed", false)
 			add_child(made)
 			assets[id] = made
 		assets[id].set_state(asset_states[id])
@@ -1135,5 +1240,6 @@ func set_state(state: Dictionary) -> void:
 	mines.clear()
 	for mine_state: Dictionary in state.get("mines", []):
 		mines.append(Mine.from_state(mine_state))
+	next_id = state.next_id
 	if is_inside_tree():
 		_step_sensors()

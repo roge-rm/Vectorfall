@@ -1271,7 +1271,7 @@ func _check_repairs() -> void:
 		var lock: Dictionary = order_locks.get(id, {})
 		var ordered: bool = not lock.is_empty() and lock.order == Orders.Kind.REPAIR_BASE
 		var list := everything if ordered else jobs
-		var stuck := brain != null and not brain.soldier.dead and brain.soldier.loadout.pack != Pack.REPAIR and not game.powered(team)
+		var stuck := brain != null and not brain.soldier.dead and brain.soldier.loadout.pack != Pack.REPAIR and director.station_pads(team).is_empty()
 		var late := game.tick - int(entry.since) > int(REPAIR_TIME * 60.0)
 		if brain == null or (not ordered and (list.is_empty() or late or stuck)):
 			repairers.erase(id)
@@ -1299,12 +1299,11 @@ func _check_repairs() -> void:
 ## The bot best placed to repair an asset of ours, or null: by metres to go,
 ## a living one carrying a repair pack from where it is, a dead one at home in
 ## a calm role from its spawn once it respawns in the repair loadout, or a
-## living one at home going by a station for it while the base has power.
+## living one going by a working station for it.
 ## Carriers, chasers, escorts and bots already on a job or an order are left
 ## out, except that ordered lets in bots already ordered to repair.
 func _repair_pick(asset_id: int, ordered := false) -> BotBrain:
 	var at := game.asset(asset_id).global_position
-	var powered := game.powered(team)
 	var pads := director.station_pads(team)
 	var best: BotBrain = null
 	var best_cost := INF
@@ -1321,7 +1320,7 @@ func _repair_pick(asset_id: int, ordered := false) -> BotBrain:
 		elif brain.role in [BotBrain.Role.DEFENCE, BotBrain.Role.LIGHT_DEFENCE, BotBrain.Role.MIDFIELD, BotBrain.Role.REPAIR]:
 			if s.dead:
 				cost = _spawn_distance(at) + RESPAWN_COST
-			elif powered and not pads.is_empty():
+			elif not pads.is_empty():
 				var pad := pads[0]
 				for each in pads:
 					if each.distance_to(s.at()) < pad.distance_to(s.at()):
@@ -1365,7 +1364,7 @@ func _flag_turret() -> int:
 	ids.sort()
 	for id: int in ids:
 		var machine := game.assets[id]
-		if machine.team == enemy and machine.kind == BaseAsset.Kind.TURRET and not machine.destroyed and machine.guard_points.is_empty():
+		if machine.team == enemy and machine.kind == BaseAsset.Kind.TURRET and not machine.destroyed and not machine.deployed and machine.guard_points.is_empty():
 			return id
 	return 0
 
@@ -1388,7 +1387,7 @@ func _raid_target() -> int:
 		if machine.team != enemy or machine.destroyed or machine.kind == BaseAsset.Kind.GENERATOR:
 			continue
 		# Turrets before the sensor.
-		var d := machine.global_position.distance_to(stand) + (1000.0 if machine.kind == BaseAsset.Kind.SENSOR else 0.0)
+		var d := machine.global_position.distance_to(stand) + (1000.0 if machine.kind != BaseAsset.Kind.TURRET else 0.0)
 		if d < best_d:
 			best_d = d
 			best = id

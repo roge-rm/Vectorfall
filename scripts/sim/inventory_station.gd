@@ -21,6 +21,7 @@ const COOLDOWN := 4.0
 
 var entity_id := 0
 var team := 0
+var asset_id := 0
 ## Soldiers on the pad after the last tick, by id, lowest first.
 var on: Array[int] = []
 ## Soldier id to seconds until stepping on restocks it again.
@@ -39,7 +40,7 @@ func _ready() -> void:
 ## Its look goes dark while its team has no power.
 func _process(_delta: float) -> void:
 	var game := get_parent() as Match
-	var powered := game == null or game.powered(team)
+	var powered := game == null or game.station_working(self)
 	if powered != _shown_powered:
 		_shown_powered = powered
 		StationLook.set_powered(self, team, powered)
@@ -60,6 +61,7 @@ func get_state() -> Dictionary:
 		"kind": "station",
 		"id": entity_id,
 		"team": team,
+		"asset_id": asset_id,
 		"position": position,
 		"on": on.duplicate(),
 		"cooldowns": cooldowns.duplicate(),
@@ -69,6 +71,7 @@ func get_state() -> Dictionary:
 func set_state(state: Dictionary) -> void:
 	entity_id = state.id
 	team = state.team
+	asset_id = state.get("asset_id", 0)
 	position = state.position
 	on.assign(state.get("on", []))
 	cooldowns.assign(state.get("cooldowns", {}))

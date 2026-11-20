@@ -571,6 +571,14 @@ static func _pack_part(parts: Array, b: Dictionary) -> void:
 			_add(parts, _drum(0.03, 0.05, 0.006), _at(foot.x, foot.y + 0.02, foot.z), PLATE)
 			_add(parts, _drum(0.05, 0.015, 0.004), _at(tip.x, tip.y - mast * 0.35, tip.z), PLATE, 1)
 
+		Pack.TURRET, Pack.SENSOR, Pack.STATION:
+			var size := Vector3(0.28, 0.32, 0.15) * k
+			var c := at + Vector3.BACK * size.z * 0.5
+			_add(parts, _block(size, 0.025), Transform3D(Basis.IDENTITY, c), PLATE)
+			_add(parts, _block(Vector3(size.x * 0.9, 0.065, size.z + 0.02), 0.012), Transform3D(Basis.IDENTITY, c), TEAM)
+			var latch := c + Vector3(0.0, 0.09, size.z * 0.5)
+			_add(parts, _block(Vector3(0.095, 0.07, 0.045) * k, 0.01), Transform3D(Basis.IDENTITY, latch), DARK)
+
 
 func _process(delta: float) -> void:
 	if soldier == null:

@@ -11,10 +11,12 @@ const SHIELD := 1
 const ENERGY := 2
 const AMMO := 3
 const JAMMER := 4
+const TURRET := 5
+const SENSOR := 6
+const STATION := 7
 
-## How a pack is worked: held down, switched on and off with each press, or
-## always on with no button.
-enum Use { HOLD, TOGGLE, ALWAYS }
+## A pack can be held, toggled, passive or placed with one press.
+enum Use { HOLD, TOGGLE, ALWAYS, DEPLOY }
 
 static var all: Array[Pack] = make_all()
 
@@ -25,6 +27,9 @@ var short_name := ""
 var use := Use.ALWAYS
 ## Energy a second taken while it's on.
 var drain := 0.0
+## Equipment and team limit for placement packs.
+var deploy_kind := BaseAsset.Kind.GENERATOR
+var team_limit := 0
 
 ## Repair: health a second on yourself, and on a teammate in front of you
 ## within reach metres.
@@ -89,6 +94,19 @@ static func make_all() -> Array[Pack]:
 	jammer.drain = 5.0
 	jammer.jam_sight = 20.0
 	list.append(jammer)
+	for spec in [
+		[TURRET, "Turret pack", "TURRET", BaseAsset.Kind.TURRET, 2],
+		[SENSOR, "Sensor pack", "SENSOR", BaseAsset.Kind.SENSOR, 2],
+		[STATION, "Station pack", "STATION", BaseAsset.Kind.STATION, 1],
+	]:
+		var deploy := Pack.new()
+		deploy.slot = spec[0]
+		deploy.name = spec[1]
+		deploy.short_name = spec[2]
+		deploy.use = Use.DEPLOY
+		deploy.deploy_kind = spec[3]
+		deploy.team_limit = spec[4]
+		list.append(deploy)
 	return list
 
 

@@ -118,6 +118,7 @@ func watch(value: Match) -> void:
 	game.power_lost.connect(_on_power_lost)
 	game.power_back.connect(_on_power_back)
 	game.asset_damaged.connect(_on_asset_damaged)
+	game.deploy_result.connect(_on_deploy_result)
 
 
 func _say(text: String) -> void:
@@ -166,6 +167,11 @@ func _on_power_lost(team: int) -> void:
 
 func _on_power_back(team: int) -> void:
 	_say("Our power is back" if _mine(team) else "Enemy power is back")
+
+
+func _on_deploy_result(soldier_id: int, text: String) -> void:
+	if soldier != null and soldier_id == soldier.entity_id:
+		_say(text)
 
 
 func _on_asset_damaged(asset_id: int, _attacker_id: int, _amount: float, _from: Vector3) -> void:
@@ -553,6 +559,8 @@ func _draw_kit(u: float, middle: float, bottom: float) -> float:
 	var gap := 0.0
 	if pack != null:
 		tag_words = pack.short_name + (" ON" if soldier.pack_on and pack.use == Pack.Use.TOGGLE else "")
+		if pack.use == Pack.Use.DEPLOY and not soldier.deploy_ready:
+			tag_words += " EMPTY"
 		tag_wide = InkUi.width(tag_words, InkUi.Face.BLACK, px) + 10.0 * u
 		gap = 6.0 * u
 	var left := middle - (tag_wide + gap + text_wide) * 0.5

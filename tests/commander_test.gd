@@ -60,6 +60,7 @@ func _run() -> void:
 	await _chases_carrier()
 	_loadout_table()
 	await _roles_wear_loadouts()
+	await _deploys_on_ochre_fold()
 	await _changes_at_station()
 	await _sends_raid()
 	await _raid_through_opening()
@@ -333,13 +334,17 @@ func _roles_wear_loadouts() -> void:
 	var director: BotDirector = setup.director
 	var ok := true
 	var heavy := 0
+	var engineers := 0
 	for brain in director.brains:
 		var worn := brain.soldier.loadout
 		var kit: int = brain.kit_picks.get(brain.role, -1)
-		ok = ok and BotLoadouts.choices(brain.role, brain.personality).has(kit) and worn.equals(BotLoadouts.loadout(kit))
+		ok = ok and BotLoadouts.choices(brain.role, brain.personality).has(kit) and worn.equals(brain.wanted_loadout())
+		if (brain.role == R.DEFENCE and worn.pack == Pack.TURRET) or (brain.role == R.LIGHT_DEFENCE and worn.pack == Pack.SENSOR):
+			engineers += 1
 		if brain.role == R.DEFENCE and worn.armour == SoldierBody.Armour.HEAVY:
 			heavy += 1
 	checks.check(ok and heavy == 2, "every bot starts in a loadout for its role, both defences heavy (%d)" % heavy)
+	checks.check(engineers == 4, "each team starts with a turret and sensor pack (%d)" % engineers)
 	var brain: BotBrain = null
 	for other in director.brains:
 		if other.soldier.team == 0 and other.role == R.OFFENCE:
@@ -349,6 +354,21 @@ func _roles_wear_loadouts() -> void:
 	await ticks(BotDirector.THINK_TICKS + 2)
 	var next := brain.soldier.next_loadout
 	checks.check(next.armour == SoldierBody.Armour.LIGHT and next.equals(brain.wanted_loadout()), "a bot moved to light defence sends its loadout for the next respawn (%s)" % BotLoadouts.describe(next, false))
+	await _done(setup)
+
+
+func _deploys_on_ochre_fold() -> void:
+	var setup := _match(8, 8, 3, true)
+	var game: Match = setup.game
+	game.prepare_terrain()
+	var deployed := [0, 0]
+	for i in 45 * 60:
+		await physics_frame
+		deployed[0] = game.deploy_count(0, BaseAsset.Kind.TURRET) + game.deploy_count(0, BaseAsset.Kind.SENSOR)
+		deployed[1] = game.deploy_count(1, BaseAsset.Kind.TURRET) + game.deploy_count(1, BaseAsset.Kind.SENSOR)
+		if deployed[0] > 0 and deployed[1] > 0:
+			break
+	checks.check(deployed[0] > 0 and deployed[1] > 0, "defensive bots deploy on Ochre Fold (%s)" % str(deployed))
 	await _done(setup)
 
 

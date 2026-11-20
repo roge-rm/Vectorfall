@@ -19,8 +19,8 @@ extends CommandSource
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
 ## goal_target.
-enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX }
-const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base"]
+enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX, DEPLOY }
+const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base", "deploy"]
 ## OFFENCE takes out the enemy flag turret (role_target) while it works,
 ## then goes for the enemy flag and carries it, DEFENCE holds by the flag,
 ## LIGHT_DEFENCE watches the way enemies come in and chases carriers, ESCORT
@@ -117,6 +117,14 @@ const MEET_RANGE := 450.0
 const STATION_RANGE := 60.0
 const STATION_TIME := 20.0
 const STATION_WAIT := 90.0
+const DEPLOY_TRY_TICKS := 20 * 60
+const DEPLOY_RETRY_TICKS := 30 * 60
+const DEPLOY_SITE_RANGE := 220.0
+const ROLE_PACKS := {
+	Role.DEFENCE: Pack.TURRET,
+	Role.LIGHT_DEFENCE: Pack.SENSOR,
+	Role.MIDFIELD: Pack.STATION,
+}
 ## Goals a bot may leave for a station or to repair a teammate.
 const CALM_GOALS: Array[Goal] = [Goal.DEFEND, Goal.MIDFIELD, Goal.RALLY, Goal.RETREAT]
 
@@ -231,6 +239,7 @@ var kit_rng := RandomNumberGenerator.new()
 ## start another.
 var station_until := -1
 var no_station_until := 0
+var deploy_retry := 0
 var _disc_check := false
 var _disc_from := Vector3.ZERO
 var _disc_to := Vector3.ZERO
@@ -402,6 +411,7 @@ func work(delta: float) -> void:
 	else:
 		combat.apply(self, command, delta)
 	gear.apply(self, command)
+	_aim_deploy(command)
 	if _command.loadout.size() > 0:
 		command.loadout = _command.loadout
 	yaw = command.yaw
@@ -415,7 +425,13 @@ func work(delta: float) -> void:
 func wanted_loadout() -> Loadout:
 	if not kit_picks.has(role):
 		kit_picks[role] = BotLoadouts.pick(role, personality, kit_rng)
-	return BotLoadouts.loadout(kit_picks[role])
+	var worn := BotLoadouts.loadout(kit_picks[role])
+	if role_slot != 0 or director.deploy_open[soldier.team].is_empty():
+		return worn
+	var deploy_pack: int = ROLE_PACKS.get(role, Loadout.NO_PACK)
+	if deploy_pack in director.deploy_slots[soldier.team]:
+		worn.pack = deploy_pack
+	return worn
 
 
 ## Once each think period, alive or dead, sends the role's loadout when the
@@ -593,6 +609,9 @@ func _choose_goal() -> Array:
 	var own: Flag = game.flags.get(soldier.team)
 	if own != null and own.mode != Flag.Mode.HOME:
 		return next
+	var deploy_at := _deploy_goal()
+	if deploy_at != Vector3.INF:
+		return [Goal.DEPLOY, deploy_at]
 	var pad := _station_detour()
 	if pad != Vector3.INF:
 		return [Goal.STATION, pad]
@@ -600,6 +619,42 @@ func _choose_goal() -> Array:
 	if mate != null and not mate.dead:
 		return [Goal.HELP, mate.at()]
 	return next
+
+
+func _deploy_goal() -> Vector3:
+	var slot := soldier.loadout.pack
+	var team := soldier.team
+	if not soldier.deploy_ready or slot not in director.deploy_slots[team] or game.tick < deploy_retry:
+		return Vector3.INF
+	if goal == Goal.DEPLOY and game.tick - goal_started >= DEPLOY_TRY_TICKS:
+		deploy_retry = game.tick + DEPLOY_RETRY_TICKS
+		return Vector3.INF
+	var pos := soldier.at()
+	var best := Vector3.INF
+	var best_distance := DEPLOY_SITE_RANGE
+	for site: Vector3 in director.deploy_open[team]:
+		var distance := pos.distance_to(site)
+		if distance < best_distance:
+			best = site
+			best_distance = distance
+	return best
+
+
+func _aim_deploy(command: PlayerCommand) -> void:
+	if goal != Goal.DEPLOY or not soldier.deploy_ready or not soldier.grounded or combat.fighting(self) or escape_ticks > 0:
+		return
+	var to := goal_target - soldier.at()
+	var range_to := Vector2(to.x, to.z).length()
+	if range_to > 5.0 or absf(to.y) > 1.5:
+		return
+	command.yaw = atan2(-to.x, -to.z) if range_to > 0.01 else yaw
+	command.pitch = -0.25
+	command.buttons &= ~(PlayerCommand.SKI | PlayerCommand.JUMP | PlayerCommand.JET)
+	var error := range_to - Match.DEPLOY_DISTANCE
+	command.move = Vector2(0.0, clampf(error * 0.7, -1.0, 1.0))
+	# Release between attempts so a failed placement can be tried again.
+	if absf(error) < 0.55 and soldier.horizontal_speed() < 4.0 and game.tick % 12 == 0:
+		command.buttons |= PlayerCommand.DEPLOY
 
 
 ## The pad of the nearest station in reach while the loadout worn isn't the
@@ -732,13 +787,13 @@ func _role_goal() -> Array:
 
 ## Where a repair bot goes, as [Goal, position], or empty with nothing to
 ## fix: the spot by its asset with a repair pack on; without one, a station
-## while the base has power, or else the spot anyway to guard it until it
+## with power, or else the spot anyway to guard it until it
 ## respawns in its role's loadout.
 func _fix_goal() -> Array:
 	var info := director.asset_info(role_target)
 	if info.is_empty() or info.team != soldier.team:
 		return []
-	if soldier.loadout.pack != Pack.REPAIR and director.power[soldier.team]:
+	if soldier.loadout.pack != Pack.REPAIR:
 		var pos := soldier.at()
 		var best := Vector3.INF
 		for pad in director.station_pads(soldier.team):
@@ -1383,6 +1438,7 @@ func get_state() -> Dictionary:
 		"kit_rng_state": kit_rng.state,
 		"station_until": station_until,
 		"no_station_until": no_station_until,
+		"deploy_retry": deploy_retry,
 		"path": path.duplicate(),
 		"path_index": path_index,
 		"path_start": path_start,
@@ -1440,6 +1496,7 @@ func set_state(state: Dictionary) -> void:
 		kit_rng.state = state.kit_rng_state
 	station_until = state.get("station_until", -1)
 	no_station_until = state.get("no_station_until", 0)
+	deploy_retry = state.get("deploy_retry", 0)
 	path.assign(state.path)
 	path_index = state.path_index
 	path_start = state.path_start

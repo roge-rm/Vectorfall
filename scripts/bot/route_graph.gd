@@ -16,8 +16,8 @@ const SPAWN := "spawn"
 const WAY_IN := "way_in"
 const DEFENCE := "defence"
 const HIGH_GROUND := "high_ground"
-## Perches with a long view, ways to a team's flag, and where vehicle pads
-## and deployables will go in later milestones.
+## Perches, approaches to a team's flag, vehicle pads and spots for
+## deployables.
 const SNIPER := "sniper"
 const FLAG_APPROACH := "flag_approach"
 const VEHICLE_PAD := "vehicle_pad"
