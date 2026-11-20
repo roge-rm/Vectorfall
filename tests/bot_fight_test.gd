@@ -4,7 +4,9 @@ extends SceneTree
 ## where a crossing target will be, an expert bot standing still hits an
 ## enemy running back and forth in front of it with a third of its discs or more, a mortar
 ## lob lands on its mark and a heavy bot lands mortar shells on a still enemy, a light bot
-## picks the sniper rifle for an enemy far off, the commander
+## picks the sniper rifle for an enemy far off, a heavy bot on a raid
+## destroys a generator in a set-up room, a bot shoots back at a turret
+## shooting it, the commander
 ## counts a person not read yet as offence, bots with no one against them take the enemy flag and
 ## capture it, and two seeded matches with fighting and flags play out the
 ## same.
@@ -28,6 +30,8 @@ func _run() -> void:
 	_lob_maths()
 	await _mortar_still_target()
 	await _sniper_far_target()
+	await _raid_destroys_generator()
+	await _shoots_back_at_turret()
 	_roles()
 	await _captures_alone()
 	await _same_seed_fight()
@@ -180,6 +184,77 @@ func _sniper_far_target() -> void:
 	var shots: int = brain.stats.shots[Weapon.SNIPER]
 	checks.check(picked and shots >= 2 and brain.stats.shots[Weapon.DISC] == 0, "a light bot picks the sniper rifle for an enemy 150 m away and fires it (%d shots, %d hits, %d discs)" % [shots, brain.stats.hits[Weapon.SNIPER], brain.stats.shots[Weapon.DISC]])
 	setup[0].free()
+	await ticks(2)
+
+
+## A heavy bot on a raid destroys an enemy generator 40 m away, inside a
+## room of three walls open towards it. Then the bot leaves it alone.
+func _raid_destroys_generator() -> void:
+	var setup := _range_setup(5, BotLoadouts.loadout(BotLoadouts.Kit.HEAVY_SHIELD), 400.0)
+	var holder: Node3D = setup[0]
+	var game: Match = setup[1]
+	var brain: BotBrain = setup[2]
+	setup[3].global_position = Vector3(400.0, 0.2, 60.0)
+	for wall in [[Vector3(44.5, 2.0, 0.0), Vector3(1.0, 4.0, 10.0)], [Vector3(40.0, 2.0, -5.0), Vector3(10.0, 4.0, 1.0)], [Vector3(40.0, 2.0, 5.0), Vector3(10.0, 4.0, 1.0)]]:
+		_wall(holder, wall[0], wall[1])
+	var generator := game.add_asset(1, BaseAsset.Kind.GENERATOR, Vector3(41.0, 0.0, 0.0))
+	# The commander's raid, set up by hand as there are no flags.
+	var boss := brain.director.commander(0)
+	boss.raiders[brain.soldier.entity_id] = true
+	boss.raid_target = generator.entity_id
+	boss.raid_until = 1000000
+	brain.director.assign_roles()
+	var seconds := -1.0
+	for i in 60 * 60:
+		await physics_frame
+		if generator.destroyed:
+			seconds = i / 60.0
+			break
+	var used := []
+	for slot in [Weapon.MORTAR, Weapon.DISC, Weapon.GRENADE_LAUNCHER, Weapon.CHAINGUN]:
+		if brain.stats.shots[slot] > 0:
+			used.append("%s %d" % [Weapon.all[slot].short_name, brain.stats.shots[slot]])
+	checks.check(generator.destroyed and not game.powered(1), "a heavy bot on a raid destroys the enemy generator in its room in %.1f s (%s)" % [seconds, ", ".join(used)])
+	await ticks(60)
+	checks.check(brain.combat.asset_id == 0, "and then stops shooting at it")
+	holder.free()
+	await ticks(2)
+
+
+func _wall(parent: Node, centre: Vector3, size: Vector3) -> void:
+	var body := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	shape.shape = box
+	body.add_child(shape)
+	body.position = centre
+	parent.add_child(body)
+
+
+## A bot going past an enemy turret that shoots at it shoots back with the
+## disc until the turret is destroyed.
+func _shoots_back_at_turret() -> void:
+	var setup := _range_setup(6, Loadout.make(SoldierBody.Armour.MEDIUM, [Weapon.DISC, Weapon.CHAINGUN]), 400.0)
+	var holder: Node3D = setup[0]
+	var game: Match = setup[1]
+	var brain: BotBrain = setup[2]
+	setup[3].global_position = Vector3(400.0, 0.2, 60.0)
+	brain.soldier.health = 100000.0
+	brain.soldier.tuning.health_max = 100000.0
+	var turret := game.add_asset(1, BaseAsset.Kind.TURRET, Vector3(35.0, 0.0, 0.0), PI * 0.5)
+	var hurt := [false]
+	game.damaged.connect(func(victim: int, attacker: int, _amount: float, _from: Vector3) -> void:
+		if victim == brain.soldier.entity_id and attacker == turret.entity_id:
+			hurt[0] = true)
+	var seconds := -1.0
+	for i in 60 * 40:
+		await physics_frame
+		if turret.destroyed:
+			seconds = i / 60.0
+			break
+	checks.check(hurt[0] and turret.destroyed, "a bot shot by a turret shoots back and destroys it in %.1f s (%d discs)" % [seconds, brain.stats.shots[Weapon.DISC]])
+	holder.free()
 	await ticks(2)
 
 

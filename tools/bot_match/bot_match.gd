@@ -11,6 +11,9 @@ extends Node
 ##   --skill0 N    team 0's skill level, 0 beginner to 4 expert (2, normal)
 ##   --skill1 N    team 1's (2)
 ##   --plain       every bot the default personality
+##   --no-base     no generators, turrets, sensors or force fields, for
+##                 comparing
+##   --no-raids    the commanders send no raids on the enemy base
 ##   --serial-bots bots work one after another on the main thread instead of
 ##                 on worker threads, for comparing; the match is the same
 ##   --profile     time each part of every tick and the map build, and print
@@ -31,18 +34,26 @@ var minutes := 5.0
 var check := false
 var skills: Array[int] = [BotDirector.NORMAL, BotDirector.NORMAL]
 var plain := false
+var no_base := false
 var profile := false
 ## Map build parts timed with --profile, name to microseconds, and counts.
 var build_parts := {}
 var build_counts := {}
 ## Every flag event, in order.
 var flag_events: Array[Dictionary] = []
+## Base assets destroyed and repaired back to working, by kind name, and
+## every such event in order.
+var destroyed := { "generator": 0, "turret": 0, "sensor": 0 }
+var repaired := { "generator": 0, "turret": 0, "sensor": 0 }
+var asset_events: Array[Dictionary] = []
 
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	check = args.has("--check")
 	plain = args.has("--plain")
+	no_base = args.has("--no-base")
+	TeamCommander.raids = not args.has("--no-raids")
 	profile = args.has("--profile")
 	Prof.on = profile
 	BotDirector.threads = not args.has("--serial-bots")
@@ -75,6 +86,8 @@ func _ready() -> void:
 	for team in 2:
 		for at in map.station_points(team):
 			game.add_station(team, at)
+		if not no_base:
+			map.add_base_power(game, team)
 	game.settings.capture_limit = 1000000
 	game.settings.time_limit = minutes * 60.0 + 10.0
 	game.start_clock()
@@ -90,6 +103,8 @@ func _ready() -> void:
 	game.killed.connect(_on_killed)
 	for event in ["taken", "dropped", "returned", "captured"]:
 		game.connect("flag_" + event, _on_flag_event.bind(event))
+	game.asset_destroyed.connect(_on_asset_event.bind("destroyed"))
+	game.asset_repaired.connect(_on_asset_event.bind("repaired"))
 	var prepared := Time.get_ticks_usec()
 	game.prepare_terrain()
 	print("Terrain collision made for the start in %.0f ms" % ((Time.get_ticks_usec() - prepared) / 1000.0))
@@ -122,6 +137,21 @@ func _on_flag_event(team: int, soldier_id: int, event: String) -> void:
 		"position": [snappedf(at.x, 0.1), snappedf(at.y, 0.1), snappedf(at.z, 0.1)],
 		"speed": snappedf(s.velocity.length(), 0.1) if s != null else 0.0,
 		"near": _near_counts(s) if s != null else [0, 0],
+	})
+
+
+func _on_asset_event(asset_id: int, soldier_id: int, event: String) -> void:
+	var machine := game.asset(asset_id)
+	var kind := BaseAsset.NAMES[machine.kind].to_lower()
+	(destroyed if event == "destroyed" else repaired)[kind] += 1
+	var brain := director.brain_of(soldier_id)
+	asset_events.append({
+		"seconds": snappedf(game.tick / 60.0, 0.1),
+		"event": event,
+		"asset": kind,
+		"team": machine.team,
+		"by": soldier_id,
+		"by_role": BotBrain.ROLE_NAMES[brain.role] if brain != null else "",
 	})
 
 
@@ -164,7 +194,7 @@ func _run() -> void:
 	if check:
 		var totals: Dictionary = report.totals
 		var ok: bool = totals.time_stuck < 60.0
-		print("CHECK %s seed %d: %d captures, %d grabs, %d returns, %.1f s stuck" % ["ok" if ok else "FAIL", seed_value, totals.captures, totals.grabs, totals.returns, totals.time_stuck])
+		print("CHECK %s seed %d: %d captures, %d grabs, %d returns, %.1f s stuck, %d generators destroyed, %d repaired, %d turrets destroyed, %d repaired" % ["ok" if ok else "FAIL", seed_value, totals.captures, totals.grabs, totals.returns, totals.time_stuck, destroyed.generator, repaired.generator, destroyed.turret, repaired.turret])
 		get_tree().quit(0 if ok else 1)
 		return
 	get_tree().quit()
@@ -282,6 +312,9 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		"speed_up": snappedf(seconds / maxf(wall, 0.001), 0.01),
 		"scores": game.scores.duplicate(),
 		"flag_events": flag_events,
+		"assets_destroyed": destroyed,
+		"assets_repaired": repaired,
+		"asset_events": asset_events,
 		"carrier_lives": lives,
 		"commanders": commanders,
 		"totals": totals,
@@ -300,6 +333,7 @@ func _print_summary(report: Dictionary, path: String) -> void:
 		var t: Dictionary = report.teams[team]
 		print("Team %d (%s): %d kills, %d deaths, %d captures, %d grabs, %d returns, discs %d of %d hit" % [team, t.skill, t.kills, t.deaths, t.captures, t.grabs, t.returns, t.disc_hits, t.disc_shots])
 	print("Carriers held the flag %.1f s on average, %.1f s at most" % [totals.carrier_life_avg, totals.carrier_life_max])
+	print("Destroyed %s, repaired %s" % [str(report.assets_destroyed), str(report.assets_repaired)])
 	for team: int in report.commanders:
 		var boss: Dictionary = report.commanders[team]
 		print("Team %d commander: %d decisions, lanes %s, attacks by lane %s, enemy carriers home by lane %s, our carriers by lane %s" % [team, boss.decisions.size(), str(boss.lane_names), str(boss.attack_lanes), str(boss.escape_lanes), str(boss.carry_lanes)])

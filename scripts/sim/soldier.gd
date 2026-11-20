@@ -117,7 +117,7 @@ func _init() -> void:
 	floor_max_angle = deg_to_rad(50.0)
 	floor_constant_speed = true
 	collision_layer = Match.SOLDIER_LAYER
-	collision_mask = Match.WORLD_LAYER | Match.SOLDIER_LAYER
+	collision_mask = Match.WORLD_LAYER | Match.SOLDIER_LAYER | Match.ASSET_LAYER
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
 	capsule.radius = tuning.radius
@@ -141,6 +141,7 @@ func _ready() -> void:
 
 func set_team(value: int) -> void:
 	team = value
+	_set_alive_layers(not dead)
 	body.set_look(team, loadout.armour, loadout.pack)
 
 
@@ -325,9 +326,12 @@ func revive(where: Transform3D) -> void:
 	_set_alive_layers(true)
 
 
+## Living soldiers are on the soldier layer and bump into each other. All
+## collide with the world, assets and the other team's force fields.
 func _set_alive_layers(alive: bool) -> void:
 	collision_layer = Match.SOLDIER_LAYER if alive else 0
-	collision_mask = Match.WORLD_LAYER | Match.SOLDIER_LAYER if alive else Match.WORLD_LAYER
+	var solid := Match.WORLD_LAYER | Match.ASSET_LAYER | Match.enemy_fields(team)
+	collision_mask = solid | Match.SOLDIER_LAYER if alive else solid
 
 
 func eye_transform() -> Transform3D:
@@ -567,14 +571,19 @@ func _use_pack(command: PlayerCommand, delta: float) -> void:
 		if pressed:
 			switch_pack(not pack_on and energy > 0.0)
 	elif use_held and energy > 0.0 and game != null:
-		# A hurt teammate in front of you first, then yourself.
+		# A hurt teammate in front of you first, then one of your team's
+		# assets, then yourself.
 		var target := game.repair_target(self, p.reach)
 		if target == null and health < tuning.health_max:
 			target = self
-		if target != null:
-			var rate := p.self_repair if target == self else p.other_repair
-			target.health = minf(target.health + rate * delta, target.tuning.health_max)
-			repair_target = target.entity_id
+		if target is BaseAsset:
+			game.repair_asset(target, p.other_repair * delta, entity_id)
+			repair_target = (target as BaseAsset).entity_id
+		elif target != null:
+			var mate := target as Soldier
+			var rate := p.self_repair if mate == self else p.other_repair
+			mate.health = minf(mate.health + rate * delta, mate.tuning.health_max)
+			repair_target = mate.entity_id
 		switch_pack(target != null)
 	else:
 		switch_pack(false)

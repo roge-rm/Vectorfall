@@ -79,6 +79,9 @@ class Search:
 	var energy := 0.0
 	var avoid := {}
 	var heading := Vector2.ZERO
+	## Teams whose force fields are shut to this search, as bits (1 << team).
+	## Links through them are left out.
+	var shut := 0
 	## What BotDirector keeps the route under once found, or empty.
 	var key := []
 	## Points taken off the heap so far, the work done.
@@ -100,7 +103,7 @@ class Search:
 	func to_state() -> Dictionary:
 		return {
 			"start": start, "goal": goal, "speed": speed, "energy": energy,
-			"avoid": avoid.duplicate(), "heading": heading, "key": key.duplicate(),
+			"avoid": avoid.duplicate(), "heading": heading, "shut": shut, "key": key.duplicate(),
 			"expanded": expanded, "done": done, "result": PackedInt32Array(result),
 			"cost": cost.duplicate(), "speeds": speeds.duplicate(), "energies": energies.duplicate(),
 			"came": came.duplicate(), "closed": closed.duplicate(),
@@ -114,6 +117,7 @@ class Search:
 		for field: String in ["start", "goal", "speed", "energy", "heading", "expanded", "done", "heap_n"]:
 			search.set(field, state[field])
 		search.avoid = state.avoid.duplicate()
+		search.shut = state.get("shut", 0)
 		search.key = state.key.duplicate()
 		search.result.assign(Array(state.result))
 		for field: String in ["cost", "speeds", "energies", "came", "closed", "heap_key", "heap_at"]:
@@ -122,16 +126,17 @@ class Search:
 
 
 ## The quickest list of points from start to goal, or an empty list if
-## there's no way. avoid maps links to extra seconds, and heading is the
-## flat direction the bot is moving in, if it's moving.
-func plan(graph: RouteGraph, start: int, goal: int, speed: float, energy: float, avoid := {}, heading := Vector2.ZERO) -> Array[int]:
-	var search := begin(graph, start, goal, speed, energy, avoid, heading)
+## there's no way. avoid maps links to extra seconds, heading is the flat
+## direction the bot is moving in, if it's moving, and shut holds the teams
+## whose force fields it can't pass, as bits (1 << team).
+func plan(graph: RouteGraph, start: int, goal: int, speed: float, energy: float, avoid := {}, heading := Vector2.ZERO, shut := 0) -> Array[int]:
+	var search := begin(graph, start, goal, speed, energy, avoid, heading, shut)
 	step(search, -1)
 	return search.result
 
 
 ## A search for plan() to run with step().
-func begin(graph: RouteGraph, start: int, goal: int, speed: float, energy: float, avoid := {}, heading := Vector2.ZERO) -> Search:
+func begin(graph: RouteGraph, start: int, goal: int, speed: float, energy: float, avoid := {}, heading := Vector2.ZERO, shut := 0) -> Search:
 	var search := Search.new()
 	search.graph = graph
 	search.start = start
@@ -140,7 +145,13 @@ func begin(graph: RouteGraph, start: int, goal: int, speed: float, energy: float
 	search.energy = energy
 	search.avoid = avoid
 	search.heading = heading
+	search.shut = shut
 	if start < 0 or goal < 0 or not graph.reachable(start, goal):
+		search.done = true
+		return search
+	# A room behind a shut field has no way in, so don't search the map.
+	var room := graph.room_of(goal)
+	if room >= 0 and (shut & (1 << room)) != 0 and graph.room_of(start) != room:
 		search.done = true
 		return search
 	var n := graph.points.size()
@@ -198,6 +209,8 @@ func step(search: Search, budget: int) -> bool:
 	var slot_steep := graph.slot_steep
 	var slot_energy := graph.slot_energy
 	var slot_must_jet := graph.slot_must_jet
+	var slot_field := graph.slot_field
+	var shut := search.shut
 	var slot_link := graph.slot_link
 	var t := tuning
 	var run := t.run_speed
@@ -252,6 +265,8 @@ func step(search: Search, budget: int) -> bool:
 		for s in range(out_first[at], out_first[at + 1]):
 			var to := slot_to[s]
 			if closed[to] != 0:
+				continue
+			if shut != 0 and slot_field[s] >= 0 and (shut & (1 << slot_field[s])) != 0:
 				continue
 			# Turning loses the speed across the new way, and turning back
 			# all but stops you.

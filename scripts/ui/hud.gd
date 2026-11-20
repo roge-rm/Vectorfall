@@ -6,8 +6,10 @@ extends Control
 ## flags, a feed of what your bots say and who killed whom, the crosshair and
 ## hit markers, arrows towards whoever hurt you, health and energy arcs by the
 ## crosshair, the weapon line with the pack and what's left to throw over it,
-## flag messages, markers and arrows for
-## both flags, the respawn count and the end of match card. It only reads the
+## flag and base power messages, markers and arrows for
+## both flags, a power mark by each team's score, a marker on your
+## generator while it's hit or down, the respawn count and the end of match
+## card. It only reads the
 ## soldier and the match and hears the match's signals. Sizes are design
 ## pixels on a 390 pixel high screen (InkUi.unit()), and while the touch
 ## controls show, the feed and the weapon line keep clear of them.
@@ -27,6 +29,10 @@ const MESSAGE_TIME := 3.5
 ## Design pixels the HUD keeps between itself and the touch controls.
 const TOUCH_GAP := 6.0
 const COMPASS_NAMES: Array[String] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+## Design pixels each score cell grows by for its power mark.
+const BOLT_ROOM := 16.0
+## Seconds your generator's marker shows after it's hit.
+const GENERATOR_HIT_TIME := 4.0
 
 var soldier: Soldier
 var game: Match
@@ -42,6 +48,8 @@ var _hurts: Array[Dictionary] = []
 var _flash := 0.0
 var _message := ""
 var _message_left := 0.0
+## Seconds left on your generator's under attack marker.
+var _generator_hit_left := 0.0
 var _end: Control
 var _end_band: MenuKit.Band
 var _end_score: Label
@@ -107,6 +115,9 @@ func watch(value: Match) -> void:
 	game.flag_returned.connect(_on_flag_returned)
 	game.flag_captured.connect(_on_flag_captured)
 	game.match_over.connect(_on_match_over)
+	game.power_lost.connect(_on_power_lost)
+	game.power_back.connect(_on_power_back)
+	game.asset_damaged.connect(_on_asset_damaged)
 
 
 func _say(text: String) -> void:
@@ -149,6 +160,20 @@ func _on_flag_captured(team: int, _soldier_id: int) -> void:
 	_say("%s team captured the flag" % Soldier.TEAM_NAMES[team])
 
 
+func _on_power_lost(team: int) -> void:
+	_say("Our generator is down" if _mine(team) else "Enemy generator destroyed")
+
+
+func _on_power_back(team: int) -> void:
+	_say("Our power is back" if _mine(team) else "Enemy power is back")
+
+
+func _on_asset_damaged(asset_id: int, _attacker_id: int, _amount: float, _from: Vector3) -> void:
+	var hit := game.asset(asset_id)
+	if hit != null and hit.kind == BaseAsset.Kind.GENERATOR and _mine(hit.team):
+		_generator_hit_left = GENERATOR_HIT_TIME
+
+
 func _on_match_over(team: int) -> void:
 	_end.visible = true
 	_end_band.title = "DRAW" if team < 0 else ("%s team wins" % Soldier.TEAM_NAMES[team]).to_upper()
@@ -178,6 +203,11 @@ func _on_killed(victim_id: int, killer_id: int, weapon_slot: int) -> void:
 	var killer := game.soldier(killer_id)
 	var weapon := Weapon.all[weapon_slot].short_name.to_lower()
 	var parts: Array = []
+	var machine := game.asset(killer_id)
+	if killer == null and machine != null:
+		parts = [[BaseAsset.NAMES[machine.kind], InkUi.Face.SERIF_BOLD], [" " + weapon + " ", InkUi.Face.ITALIC], [_name(victim), InkUi.Face.SERIF_BOLD]]
+		_add_line(parts, machine.team, FEED_TIME)
+		return
 	if killer == null or killer == victim:
 		parts = [[_name(victim), InkUi.Face.SERIF_BOLD], [" " + weapon + ", self", InkUi.Face.ITALIC]]
 	else:
@@ -227,6 +257,7 @@ func _process(delta: float) -> void:
 		if _lines[k].left <= 0.0:
 			_lines.remove_at(k)
 	_message_left = maxf(_message_left - delta, 0.0)
+	_generator_hit_left = maxf(_generator_hit_left - delta, 0.0)
 	_hit_left = maxf(_hit_left - delta, 0.0)
 	_flash = maxf(_flash - delta, 0.0)
 	# Each arc fades in while its bar isn't full and out a second after it is.
@@ -318,6 +349,8 @@ func _draw() -> void:
 	_bottom_edge = _draw_status(u, avoid)
 	_draw_feed(u, avoid)
 	if game != null:
+		_draw_sensor_marks(u)
+		_draw_generator_marker(u)
 		_draw_flag_markers(u)
 	if _message_left > 0.0:
 		_banner(Vector2(centre.x, size.y * 0.3), _message, 20, clampf(_message_left, 0.0, 1.0))
@@ -368,7 +401,7 @@ func _draw_score(u: float) -> float:
 	var status := _status_line()
 	var cells: Array[float] = []
 	for team in 2:
-		cells.append((28.0 + 8.0) * u + InkUi.width(str(game.scores[team]), InkUi.Face.BLACK, score_px) + InkUi.width(Soldier.TEAM_NAMES[team], InkUi.Face.ITALIC, name_px))
+		cells.append((28.0 + 8.0 + BOLT_ROOM) * u + InkUi.width(str(game.scores[team]), InkUi.Face.BLACK, score_px) + InkUi.width(Soldier.TEAM_NAMES[team], InkUi.Face.ITALIC, name_px))
 	var middle := 32.0 * u + maxf(InkUi.width(_clock_text(), InkUi.Face.BOLD, clock_px), InkUi.width(status, InkUi.Face.ITALIC, status_px))
 	var tall := 34.0 * u
 	var wide := cells[0] + middle + cells[1] + line * 2.0
@@ -391,6 +424,9 @@ func _draw_score(u: float) -> float:
 			var baseline := 26.0 * u
 			var score := str(game.scores[team])
 			var team_name := Soldier.TEAM_NAMES[team]
+			# The power mark sits on the inner end, by the clock.
+			var bolt_x := rect.end.x - 13.0 * u if side == 0 else rect.position.x + 13.0 * u
+			_power_mark(Vector2(bolt_x, inner * 0.5), 16.0 * u, ink, power_mark_on(team))
 			if side == 0:
 				var after := InkUi.words(self, Vector2(x + 14.0 * u, baseline), score, InkUi.Face.BLACK, score_px, ink)
 				InkUi.words(self, Vector2(x + 22.0 * u + after, baseline), team_name, InkUi.Face.ITALIC, name_px, ink)
@@ -670,6 +706,90 @@ func _draw_flag_markers(u: float) -> void:
 			if box.intersects(words):
 				text_at.x = box.position.x - half_width
 		InkUi.text(self, text_at, shown, font_size, colour.lightened(0.15))
+
+
+## A lightning bolt half as wide as tall, centred on at: filled with power,
+## an outline with a stroke through it without.
+func _power_mark(at: Vector2, tall: float, colour: Color, on: bool) -> void:
+	var points := PackedVector2Array()
+	for p: Vector2 in [Vector2(0.12, -0.5), Vector2(-0.25, 0.08), Vector2(-0.02, 0.08), Vector2(-0.12, 0.5), Vector2(0.25, -0.08), Vector2(0.02, -0.08)]:
+		points.append(at + p * tall)
+	if on:
+		draw_colored_polygon(points, colour)
+		return
+	var closed := points.duplicate()
+	closed.append(points[0])
+	var line := maxf(1.0, tall * 0.1)
+	draw_polyline(closed, Color(colour, 0.6), line, true)
+	draw_line(at + Vector2(-0.35, -0.4) * tall, at + Vector2(0.35, 0.4) * tall, colour, line * 1.5, true)
+
+
+## A marker on your generator while it's being hit or is down, with what's
+## wrong and how far it is, kept on screen.
+func _draw_generator_marker(u: float) -> void:
+	var words := generator_marker()
+	if words.is_empty():
+		return
+	var own := game.generator(soldier.team)
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var point := own.centre() + Vector3.UP * 1.5
+	var margin := minf(size.x, size.y) * 0.1
+	var at := Vector2(size.x * 0.5, size.y - margin)
+	if not camera.is_position_behind(point):
+		at = camera.unproject_position(point)
+	var top := _top_edge + margin
+	at = Vector2(clampf(at.x, margin, size.x - margin), clampf(at.y, top, maxf(_bottom_edge - margin, top)))
+	at = _clear_of_touch(at, 20.0 * u)
+	var colour := InkUi.PINK
+	var radius := 9.0 * u
+	draw_circle(at, radius + maxf(2.0, 2.0 * u), InkUi.INK)
+	draw_circle(at, radius, InkUi.CREAM if own.destroyed else colour)
+	_power_mark(at, radius * 1.4, InkUi.INK, not own.destroyed)
+	InkUi.text(self, at + Vector2(0.0, radius * 2.6), words, _px(12.0), colour)
+
+
+## The words on your generator's marker, or empty while it doesn't show.
+func generator_marker() -> String:
+	if soldier == null or game == null or (soldier.team != 0 and soldier.team != 1):
+		return ""
+	var own := game.generator(soldier.team)
+	if own == null or (not own.destroyed and _generator_hit_left <= 0.0):
+		return ""
+	var metres := roundi(soldier.global_position.distance_to(own.global_position))
+	return (("Generator down  %d m" if own.destroyed else "Generator hit  %d m") % metres).to_upper()
+
+
+## True while a team's power mark shows power on.
+func power_mark_on(team: int) -> bool:
+	return game != null and game.powered(team)
+
+
+## The notice showing now, or empty.
+func notice() -> String:
+	return _message if _message_left > 0.0 else ""
+
+
+## A small open diamond over each enemy your team's sensor sees, while it's
+## on screen. Match.sensed already leaves out jammers.
+func _draw_sensor_marks(u: float) -> void:
+	if soldier.team != 0 and soldier.team != 1:
+		return
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var radius := 5.0 * u
+	for id in game.sensed[soldier.team]:
+		var other := game.soldier(id)
+		if other == null or other.dead:
+			continue
+		var point := other.global_position + Vector3.UP * (other.tuning.height + 0.8)
+		if camera.is_position_behind(point):
+			continue
+		var at := camera.unproject_position(point)
+		if Rect2(Vector2.ZERO, size).has_point(at):
+			_diamond(at, radius, Palette.team(other.team), false)
 
 
 ## True for a flag carried by an enemy with a sensor jammer on, which the

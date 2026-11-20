@@ -58,6 +58,18 @@ const SNIPER_REACH := 1.35
 const LOW_HEALTH := 35.0
 ## Seconds a hit tells the bot who's shooting at it.
 const HURT_MEMORY := 3.0
+## On a raid, enemy base assets within this many metres are shot at, and an
+## enemy soldier closer than RAID_SELF_DEFENCE comes first.
+const RAID_REACH := 90.0
+## Under this many metres above a generator's foot and within ROOM_REACH
+## of it a bot is in its room and shoots it straight, else at the room's
+## floor through an opening, from no further than LOB_REACH.
+const IN_ROOM := 2.5
+const ROOM_REACH := 10.0
+const LOB_REACH := 12.0
+## How far off the floor point, in metres, a shot through an opening may go.
+const LOB_SPOT := 0.5
+const RAID_SELF_DEFENCE := 25.0
 
 ## The soldier being fought, or 0 for none.
 var target_id := 0
@@ -80,10 +92,16 @@ var dodge_side := 1.0
 ## Ticks left to aim a hand grenade, and the first tick it may throw another.
 var throw_ticks := 0
 var next_grenade_tick := 0
+## The enemy base asset being shot at when there's no soldier to fight, or
+## 0, and the asset the last look had a clear line to, or 0.
+var asset_id := 0
+var asset_seen := 0
 
 
 func reset() -> void:
 	target_id = 0
+	asset_id = 0
+	asset_seen = 0
 	aiming = false
 	aim_error = Vector2.ZERO
 	dodge_ticks = 0
@@ -97,7 +115,7 @@ func hurt_recently(tick: int) -> bool:
 
 ## True while it has a target or was just hit.
 func fighting(brain: BotBrain) -> bool:
-	return target_id != 0 or hurt_recently(brain.game.tick)
+	return target_id != 0 or asset_id != 0 or hurt_recently(brain.game.tick)
 
 
 ## Energy to keep for the jets before using an energy weapon or pack.
@@ -188,6 +206,12 @@ func think(brain: BotBrain) -> void:
 		if score < best_score:
 			best_score = score
 			best = id
+	var machine := _pick_asset(brain)
+	if machine != 0 and best != 0 and (brain.role != BotBrain.Role.GENERATOR or s.at().distance_to(perception.guess_position(best, game.tick)) < RAID_SELF_DEFENCE):
+		machine = 0
+	if machine != 0:
+		best = 0
+	asset_id = machine
 	if best != target_id:
 		target_id = best
 		var spread := lerpf(0.35, 0.06, brain.skill)
@@ -210,6 +234,154 @@ func think(brain: BotBrain) -> void:
 		if dodge_ticks <= 0 and brain.rng.randf() < 0.3:
 			dodge_ticks = brain.rng.randi_range(20, 50)
 			dodge_side = -dodge_side
+	elif asset_id != 0:
+		var info := brain.director.asset_info(asset_id)
+		var eye := s.eye_transform().origin
+		weapon = pick_asset_weapon(brain, eye.distance_to(asset_aim(eye, info)), lobbing(eye, info))
+
+
+## The enemy base asset to shoot at, or 0. On a raid: a turret aiming at
+## the bot, then the raid's target, then the nearest working one, within
+## RAID_REACH. Otherwise only a turret that's shooting at it, when where the
+## bot is going is inside that turret's reach, so going round won't lose it.
+## Only one some carried weapon can hit from here.
+func _pick_asset(brain: BotBrain) -> int:
+	var s := brain.soldier
+	var me := s.entity_id
+	var pos := s.at()
+	var raid := brain.role == BotBrain.Role.GENERATOR or (brain.role == BotBrain.Role.OFFENCE and brain.goal == BotBrain.Goal.RAID)
+	var best := 0
+	var best_score := INF
+	var ids := brain.director.base_assets.keys()
+	for id: int in ids:
+		var info: Dictionary = brain.director.base_assets[id]
+		if info.team == s.team or info.destroyed:
+			continue
+		var lob := lobbing(pos, info)
+		var distance := pos.distance_to(asset_aim(pos, info))
+		var shooting_me: bool = info.kind == BaseAsset.Kind.TURRET and info.target == me and brain.director.power[info.team]
+		var score := distance
+		if raid:
+			if distance > RAID_REACH:
+				continue
+			if shooting_me:
+				score -= 100.0
+			elif id == brain.role_target:
+				score -= 50.0
+		else:
+			if not shooting_me or hurt_by != id or not hurt_recently(brain.game.tick) or distance > BaseAsset.TURRET_RANGE:
+				continue
+			if brain.goal_target.distance_to(info.centre) > BaseAsset.TURRET_RANGE and not brain.holding():
+				continue
+		if id == asset_id:
+			score -= 10.0
+		if pick_asset_weapon(brain, distance, lob) < 0:
+			continue
+		if score < best_score:
+			best_score = score
+			best = id
+	return best
+
+
+## True for shooting a generator through an opening from above: it has
+## floor points to shoot at and the point is above its room.
+static func lobbing(from: Vector3, info: Dictionary) -> bool:
+	return not info.get("lobs", []).is_empty() and not in_room(from, info)
+
+
+## True for a point in an asset's room: under IN_ROOM above its foot and
+## within ROOM_REACH of it across the ground.
+static func in_room(from: Vector3, info: Dictionary) -> bool:
+	var foot: Vector3 = info.foot
+	return from.y < foot.y + IN_ROOM and Vector2(from.x - foot.x, from.z - foot.z).length() < ROOM_REACH
+
+
+## Where to shoot an asset from a point: the nearest floor point under an
+## opening when lobbing, else its middle.
+static func asset_aim(from: Vector3, info: Dictionary) -> Vector3:
+	if not lobbing(from, info):
+		return info.centre
+	var lobs: Array = info.lobs
+	var best: Vector3 = lobs[0]
+	for at: Vector3 in lobs:
+		if at.distance_to(from) < best.distance_to(from):
+			best = at
+	return best
+
+
+## The carried weapon best for shooting a base asset this far from the eye,
+## or -1 if none can. lob is for shooting a generator's room floor.
+static func pick_asset_weapon(brain: BotBrain, distance: float, lob := false) -> int:
+	var s := brain.soldier
+	var best := -1
+	var best_score := 0.0
+	for slot in s.weapons:
+		var score := asset_weapon_score(brain, slot, distance, lob)
+		if score > best_score:
+			best_score = score
+			best = slot
+	return best
+
+
+## How well a weapon suits a base asset at this distance, higher is better
+## and 0 for one it can't or shouldn't fire. Assets stand still, so the
+## splash weapons do best.
+static func asset_weapon_score(brain: BotBrain, slot: int, distance: float, lob := false) -> float:
+	var s := brain.soldier
+	if not s.loaded(slot):
+		return 0.0
+	if lob:
+		# Down through an opening to the floor, where only the blast reaches
+		# the generator.
+		if distance > LOB_REACH:
+			return 0.0
+		match slot:
+			Weapon.MORTAR:
+				return 90.0
+			Weapon.GRENADE_LAUNCHER:
+				return 80.0
+			Weapon.DISC:
+				return 70.0
+		return 0.0
+	match slot:
+		Weapon.MORTAR:
+			return 90.0 if distance > MORTAR_MIN and distance < MORTAR_RANGE else 0.0
+		Weapon.DISC:
+			return 70.0 if distance > DISC_MIN and distance < disc_range(brain) else 0.0
+		Weapon.GRENADE_LAUNCHER:
+			return 65.0 if distance > 10.0 and distance < GRENADE_RANGE else 0.0
+		Weapon.PLASMA:
+			return 55.0 if distance > 6.0 and distance < PLASMA_RANGE else 0.0
+		Weapon.CHAINGUN:
+			return (75.0 if distance < DISC_MIN else 50.0) if distance < CHAIN_RANGE else 0.0
+		Weapon.BLASTER:
+			if s.energy < Weapon.all[slot].energy_per_shot + jet_reserve(brain):
+				return 0.0
+			return 40.0 if distance < BLASTER_RANGE else 0.0
+		Weapon.SNIPER:
+			return 30.0 if distance > 30.0 and distance < SNIPER_RANGE and s.energy >= SNIPER_ENERGY else 0.0
+	return 0.0
+
+
+## Main thread, before work(), on the ticks the bot looks: checks with a ray
+## from the eye that nothing but the asset is in the way, the world and the
+## asset team's force fields. Keeps the last answer when the tick's rays are
+## used up.
+func look_at_asset(brain: BotBrain) -> void:
+	if asset_id == 0:
+		asset_seen = 0
+		return
+	var machine := brain.game.asset(asset_id)
+	if machine == null or machine.destroyed:
+		asset_seen = 0
+		return
+	if not brain.director.take_ray():
+		return
+	var blocks := Match.WORLD_LAYER
+	var eye := brain.soldier.eye_transform().origin
+	var info := brain.director.asset_info(asset_id)
+	var aim := asset_aim(eye, info) if not info.is_empty() else machine.centre()
+	asset_seen = asset_id if brain.game.world_ray(eye, aim, blocks).is_empty() else 0
 
 
 ## The carried weapon best for a target at this distance, by how well each
@@ -285,7 +457,12 @@ func apply(brain: BotBrain, command: PlayerCommand, delta: float) -> void:
 	var other := game.soldier(target_id) if target_id != 0 else null
 	if other == null or other.dead or not brain.perception.knows(target_id):
 		target_id = 0
-		aiming = false
+		var info := brain.director.asset_info(asset_id) if asset_id != 0 else {}
+		if info.is_empty() or info.destroyed:
+			asset_id = 0
+			aiming = false
+			return
+		_apply_asset(brain, command, delta, info)
 		return
 	if not aiming:
 		aim_yaw = s.yaw
@@ -323,22 +500,7 @@ func apply(brain: BotBrain, command: PlayerCommand, delta: float) -> void:
 	var to := aim_at - eye
 	var want_yaw := atan2(-to.x, -to.z) + aim_error.x
 	var want_pitch := aim_error.y + (lob_pitch(to, w) if w.gravity > 0.0 else atan2(to.y, Vector2(to.x, to.z).length()))
-	var turn := turn_rate_for(brain.skill) * delta
-	var dyaw := wrapf(want_yaw - aim_yaw, -PI, PI)
-	aim_yaw = wrapf(aim_yaw + clampf(dyaw, -turn, turn), -PI, PI)
-	aim_pitch = clampf(aim_pitch + clampf(want_pitch - aim_pitch, -turn, turn), -1.4, 1.4)
-
-	# The steering's push, kept the same way in the world.
-	var world := Basis(Vector3.UP, command.yaw) * Vector3(command.move.x, 0.0, -command.move.y)
-	if dodge_ticks > 0:
-		dodge_ticks -= 1
-		if brain.holding():
-			world = Basis(Vector3.UP, aim_yaw) * Vector3(dodge_side, 0.0, 0.0)
-	command.yaw = aim_yaw
-	command.pitch = aim_pitch
-	var local := Basis(Vector3.UP, aim_yaw).inverse() * world
-	command.move = Vector2(local.x, -local.z).limit_length(1.0)
-	command.weapon = s.carried(weapon)
+	_turn(brain, command, delta, want_yaw, want_pitch)
 
 	var off := absf(wrapf(want_yaw - aim_yaw, -PI, PI)) + absf(want_pitch - aim_pitch)
 	var distance := to.length()
@@ -373,6 +535,63 @@ func apply(brain: BotBrain, command: PlayerCommand, delta: float) -> void:
 		# with a ray after the bot phase's work, taking the fire back if not.
 		var forward := -Basis.from_euler(Vector3(aim_pitch, aim_yaw, 0.0)).z
 		brain.check_disc(eye, eye + forward * DISC_MIN)
+	command.buttons |= PlayerCommand.FIRE
+
+
+## Turns the look towards a yaw and pitch at the bot's turn rate, and turns
+## the steering's command with it. The push stays the same in the world.
+func _turn(brain: BotBrain, command: PlayerCommand, delta: float, want_yaw: float, want_pitch: float) -> void:
+	var turn := turn_rate_for(brain.skill) * delta
+	var dyaw := wrapf(want_yaw - aim_yaw, -PI, PI)
+	aim_yaw = wrapf(aim_yaw + clampf(dyaw, -turn, turn), -PI, PI)
+	aim_pitch = clampf(aim_pitch + clampf(want_pitch - aim_pitch, -turn, turn), -1.4, 1.4)
+	# The steering's push, kept the same way in the world.
+	var world := Basis(Vector3.UP, command.yaw) * Vector3(command.move.x, 0.0, -command.move.y)
+	if dodge_ticks > 0:
+		dodge_ticks -= 1
+		if brain.holding():
+			world = Basis(Vector3.UP, aim_yaw) * Vector3(dodge_side, 0.0, 0.0)
+	command.yaw = aim_yaw
+	command.pitch = aim_pitch
+	var local := Basis(Vector3.UP, aim_yaw).inverse() * world
+	command.move = Vector2(local.x, -local.z).limit_length(1.0)
+	command.weapon = brain.soldier.carried(weapon)
+
+
+## Aims at a base asset's middle and fires once the aim is on it, it's in
+## range and the last look had a clear line to it. It stands still, so there's
+## no lead.
+func _apply_asset(brain: BotBrain, command: PlayerCommand, delta: float, info: Dictionary) -> void:
+	var s := brain.soldier
+	if not aiming:
+		aim_yaw = s.yaw
+		aim_pitch = s.pitch
+		aiming = true
+	var eye := s.eye_transform().origin
+	var w := Weapon.all[weapon]
+	var lob := lobbing(eye, info)
+	var to: Vector3 = asset_aim(eye, info) - eye
+	var want_yaw := atan2(-to.x, -to.z) + aim_error.x
+	var want_pitch := aim_error.y + (lob_pitch(to, w) if w.gravity > 0.0 else atan2(to.y, Vector2(to.x, to.z).length()))
+	_turn(brain, command, delta, want_yaw, want_pitch)
+	if asset_seen != asset_id or s.weapon_slot() != weapon:
+		return
+	var distance := to.length()
+	var off := absf(wrapf(want_yaw - aim_yaw, -PI, PI)) + absf(want_pitch - aim_pitch)
+	var tolerance := maxf(atan2(LOB_SPOT if lob else info.radius, distance), 0.02)
+	if off > tolerance or asset_weapon_score(brain, weapon, distance, lob) <= 0.0:
+		return
+	if w.uses_energy() and s.energy < w.energy_per_shot + jet_reserve(brain) and weapon != Weapon.SNIPER:
+		return
+	# Through an opening the floor's edge shields the shooter from the blast.
+	var keep := 0.0 if lob else self_blast_range(weapon) * (1.0 if s.health > LOW_HEALTH else 1.5)
+	if lob and s.cooldown > 0.0:
+		return
+	if keep > 0.0:
+		if s.cooldown > 0.0 or distance < keep:
+			return
+		var forward := -Basis.from_euler(Vector3(aim_pitch, aim_yaw, 0.0)).z
+		brain.check_disc(eye, eye + forward * minf(DISC_MIN, distance - info.radius - 0.5))
 	command.buttons |= PlayerCommand.FIRE
 
 
@@ -466,6 +685,8 @@ func get_state() -> Dictionary:
 		"dodge_side": dodge_side,
 		"throw_ticks": throw_ticks,
 		"next_grenade_tick": next_grenade_tick,
+		"asset_id": asset_id,
+		"asset_seen": asset_seen,
 	}
 
 
@@ -483,3 +704,5 @@ func set_state(state: Dictionary) -> void:
 	dodge_side = state.dodge_side
 	throw_ticks = state.get("throw_ticks", 0)
 	next_grenade_tick = state.get("next_grenade_tick", 0)
+	asset_id = state.get("asset_id", 0)
+	asset_seen = state.get("asset_seen", 0)

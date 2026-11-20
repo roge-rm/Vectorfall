@@ -8,7 +8,8 @@ extends SceneTree
 ## turns outlines on and off. You start in your saved loadout, each base has
 ## two stations, stepping onto yours opens the loadout screen and a pick there
 ## is worn at once, and the LOADOUT button while dead sets what you respawn
-## in.
+## in. The base power notices, power marks and generator marker show, and an
+## unpowered station offers no loadouts.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/main_scene_test.gd
 
 var checks := TestWorld.Checks.new()
@@ -280,6 +281,39 @@ func _run() -> void:
 	await ticks(int(Match.RESPAWN_DELAY * 60.0) + 5)
 	checks.check(not player.dead and player.loadout.armour == SoldierBody.Armour.HEAVY, "you respawn in it")
 	checks.check(not screen.visible and not main.hud.loadout_button.visible, "the screen and button go once you're back")
+
+	# Power: with your generator down you get the notice, its power mark goes
+	# off, your generator gets a marker and your station stops offering
+	# loadouts. Repaired, it comes back. Then the same for the enemy's.
+	var game: Match = main.game
+	var own: BaseAsset = game.generator(player.team)
+	var theirs: BaseAsset = game.generator(1 - player.team)
+	checks.check(main.hud.power_mark_on(0) and main.hud.power_mark_on(1) and main.hud.generator_marker() == "", "both power marks start on, with no generator marker")
+	game.damage_asset(own, 10.0, main.enemy.entity_id, 1 - player.team, Vector3.ZERO)
+	await process_frame
+	checks.check(main.hud.generator_marker().begins_with("GENERATOR HIT"), "a hit on your generator puts a marker on it (%s)" % main.hud.generator_marker())
+	game.damage_asset(own, 1000.0, main.enemy.entity_id, 1 - player.team, Vector3.ZERO)
+	await process_frame
+	checks.check(main.hud.notice() == "Our generator is down", "your generator down gives a notice (%s)" % main.hud.notice())
+	checks.check(not main.hud.power_mark_on(player.team) and main.hud.power_mark_on(1 - player.team), "and turns your power mark off")
+	checks.check(main.hud.generator_marker().begins_with("GENERATOR DOWN"), "and marks it down")
+	player.global_position = station.global_position + Vector3.UP * 0.3
+	player.velocity = Vector3.ZERO
+	await ticks(10)
+	checks.check(game.station_under(player) == null and not screen.visible and not main.hud.loadout_button.visible, "an unpowered station doesn't open the loadout screen or show LOADOUT")
+	var ring := station.get_node("Ring") as MeshInstance3D
+	checks.check(not ring.material_override is StandardMaterial3D, "its ring goes out")
+	player.global_position = station.global_position + Vector3(6.0, 0.3, 0.0)
+	await ticks(3)
+	game.repair_asset(own, 1000.0, player.entity_id)
+	await process_frame
+	checks.check(main.hud.notice() == "Our power is back" and main.hud.power_mark_on(player.team), "repaired, the notice says so and the mark is on")
+	game.damage_asset(theirs, 1000.0, player.entity_id, player.team, Vector3.ZERO)
+	await process_frame
+	checks.check(main.hud.notice() == "Enemy generator destroyed" and not main.hud.power_mark_on(1 - player.team), "the enemy generator down gives its notice")
+	game.repair_asset(theirs, 1000.0, main.enemy.entity_id)
+	await process_frame
+	checks.check(main.hud.notice() == "Enemy power is back", "and its repair too")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.path))
 	checks.finish(self)
 

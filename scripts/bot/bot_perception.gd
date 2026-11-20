@@ -2,8 +2,8 @@ class_name BotPerception
 extends RefCounted
 
 ## What one bot knows about the enemy soldiers: those it has seen in its view
-## cone with nothing in the way, heard firing or jetting nearby, or seen
-## before. Each contact keeps a last known position and velocity, and fades
+## cone with nothing in the way, heard firing or jetting nearby, seen by its
+## team's sensor, or seen before. Each contact keeps a last known position and velocity, and fades
 ## from memory when it's neither seen nor heard for a while. A soldier coming
 ## into view is only noticed after the bot's reaction time. Line of sight
 ## takes ray casts from the director's budget, shared by every bot each tick.
@@ -106,6 +106,13 @@ func listen(me: Soldier, game: Match, director: BotDirector) -> void:
 			continue
 		if other.jetting and other.at().distance_to(me.at()) < JET_RANGE:
 			_hear(other.entity_id, other.at(), other.vel(), now)
+	# Enemies the team's sensor sees, as the director copied them, known like
+	# a sound so they fade the same way.
+	if me.team == 0 or me.team == 1:
+		for id in director.sensed[me.team]:
+			var other := game.soldier(id)
+			if other != null and not other.dead:
+				_hear(id, other.at(), other.vel(), now)
 	# Shots and blasts since the last think.
 	for sound: Dictionary in director.sounds:
 		if sound.seq <= heard_up_to or me.at().distance_to(sound.position) > sound.range:

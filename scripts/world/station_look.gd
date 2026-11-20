@@ -4,13 +4,15 @@ extends RefCounted
 ## The look of an inventory station, in two draw calls: one merged ink mesh
 ## (a bevelled round plinth with a team coloured top, dark trim blocks round
 ## its rim and a team coloured diamond floating over it) and a glowing ring
-## round the pad's top. Its origin is the bottom of the plinth.
+## round the pad's top. Its origin is the bottom of the plinth. Without power
+## its team colour darkens and the ring goes out.
 
 const PLINTH := Color(0.86, 0.84, 0.94, 0.0)
 const TRIM := Color(0.15, 0.14, 0.18, 0.0)
 const TEAM_PART := Color(1.0, 1.0, 1.0, 1.0)
 ## Height of the diamond's middle over the pad.
 const MARKER_HEIGHT := 2.4
+const RING_OFF := Color(0.2, 0.19, 0.23)
 
 
 static func build(parent: Node3D, team: int) -> void:
@@ -50,3 +52,14 @@ static func build(parent: Node3D, team: int) -> void:
 	ring.scale = Vector3(1.0, 0.25, 1.0)
 	ring.position = Vector3.UP * (top + 0.01)
 	parent.add_child(ring)
+
+
+## Shows a station's look powered or not.
+static func set_powered(parent: Node3D, team: int, powered: bool) -> void:
+	var colour := Palette.team(team)
+	var look := parent.get_node_or_null("Look") as MeshInstance3D
+	if look != null:
+		Cel.set_team(look, colour if powered else colour.darkened(0.6))
+	var ring := parent.get_node_or_null("Ring") as MeshInstance3D
+	if ring != null:
+		ring.material_override = Cel.glow(colour.lightened(0.3)) if powered else Cel.material(RING_OFF)

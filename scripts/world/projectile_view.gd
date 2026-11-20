@@ -21,7 +21,7 @@ const SHELL_COLOUR := WeaponModels.SHELL
 const PLASMA_COLOUR := WeaponModels.PLASMA_GLOW
 const BOLT_COLOUR := WeaponModels.BLASTER_GLOW
 ## Kind for each weapon slot, -1 for not drawn here.
-const KINDS: Array[int] = [Kind.DISC, Kind.TRACER, Kind.GRENADE, Kind.SHELL, Kind.PLASMA, -1, Kind.BOLT, Kind.HAND_GRENADE, -1]
+const KINDS: Array[int] = [Kind.DISC, Kind.TRACER, Kind.GRENADE, Kind.SHELL, Kind.PLASMA, -1, Kind.BOLT, Kind.HAND_GRENADE, -1, Kind.PLASMA]
 const MAX_MINES := 128
 ## A mine's light blinks for BLINK_ON seconds every BLINK_EVERY, twice as
 ## often while it arms.

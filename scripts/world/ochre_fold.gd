@@ -197,7 +197,15 @@ func _build_ground() -> void:
 	var row := CELLS + 1
 	var heights := PackedFloat32Array()
 	var patches := PackedFloat32Array()
+	var shown := PackedFloat32Array()
 	var middle := CELLS / 2
+	# Under each generator room the ground drops below the room's floor, so
+	# it doesn't show or collide inside. Every corner of a cell that reaches
+	# into the room drops, so no slope comes up inside; that stays under the
+	# deck as the room is more than a cell from the deck's edges. The coarser
+	# levels of detail keep the ground as it was, so they show no dip by the
+	# base from far off.
+	var dropped := room_floor() - 1.5
 	# The map is mirrored in x, so work out the +x half and copy it over. Rows
 	# are worked out on worker threads, which only read the noise and each
 	# fill their own slot of rows.
@@ -207,25 +215,31 @@ func _build_ground() -> void:
 		var z := -HALF + j * CELL
 		var h := PackedFloat32Array()
 		var p := PackedFloat32Array()
+		var d := PackedFloat32Array()
 		h.resize(row)
 		p.resize(row)
+		d.resize(row)
 		for i in range(middle, row):
 			var x := -HALF + i * CELL
-			var hv := _shape(x, z)
+			var dv := _shape(x, z)
+			var hv := minf(dv, dropped) if under_room(x, z, CELL) else dv
 			var pv := patch_noise.get_noise_2d(x, z) * 0.5 + 0.5
 			h[i] = hv
 			p[i] = pv
+			d[i] = dv
 			h[CELLS - i] = hv
 			p[CELLS - i] = pv
-		rows[j] = [h, p]
+			d[CELLS - i] = dv
+		rows[j] = [h, p, d]
 	WorkerThreadPool.wait_for_group_task_completion(WorkerThreadPool.add_group_task(fill_row, row))
 	heights.clear()
 	patches.clear()
 	for j in row:
 		heights.append_array(rows[j][0])
 		patches.append_array(rows[j][1])
+		shown.append_array(rows[j][2])
 	var shaped := Time.get_ticks_usec()
-	terrain = Terrain.new(CELLS, CELL, Vector2(-HALF, -HALF), heights, patches)
+	terrain = Terrain.new(CELLS, CELL, Vector2(-HALF, -HALF), heights, patches, shown)
 	add_child(terrain)
 	terrain_seconds = (Time.get_ticks_usec() - shaped) / 1000000.0
 
@@ -334,6 +348,10 @@ func _probe() -> String:
 		var x := fposmod(k * 137.5, 1380.0) - 690.0 + 0.37 * k
 		var z := fposmod(k * 71.3, 1180.0) - 590.0 + 0.11 * k
 		text += " %.3f %d" % [surface_at(x, z), 1 if blocked_at(x, z) else 0]
+	# The deck over each generator room and its openings.
+	for team in 2:
+		for at in [base_place(team, OPENING_AT.x, OPENING_AT.y, 0.0), base_place(team, -2.0, 0.0, 0.0)]:
+			text += " %.3f" % surface_at(at.x, at.z)
 	return text
 
 
@@ -430,6 +448,7 @@ func build_route_graph() -> RouteGraph:
 		graph.add_link(foot, top, RouteGraph.Kind.JET, true)
 		graph.add_link(top, foot, RouteGraph.Kind.SKI)
 	link_tower_tops(graph)
+	link_generator_rooms(graph)
 	if Prof.on:
 		Prof.add("build.graph.mesas_towers", Time.get_ticks_usec() - graph_t)
 	return graph

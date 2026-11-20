@@ -7,6 +7,8 @@ extends RefCounted
 ## speed won't carry it over and save energy on the way down, slow down
 ## before tight turns and the goal, and hop over things it runs into.
 
+## Least energy a heavy waits for below a wall it has to jet over.
+const HEAVY_WALL_ENERGY := 40.0
 ## Speed the bot slows to for the goal and the tightest turns, in m/s.
 const ARRIVE_SPEED := 8.0
 const CORNER_SPEED := 12.0
@@ -153,7 +155,7 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 		hop_ticks = maxi(hop_ticks - BotBrain.WORK_TICKS, 0)
 		jet = s.energy > 2.0
 		doing = "hop"
-	elif wall_ahead and s.grounded and s.energy < link.energy and not climbing:
+	elif wall_ahead and s.grounded and s.energy < wall_energy(s, link) and not climbing:
 		# Not enough energy to get over: wait for it by the wall.
 		wish = Vector3.ZERO if to_target < 8.0 else dir
 		ski = false
@@ -206,6 +208,14 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 	if jump:
 		command.buttons |= PlayerCommand.JUMP
 	return command
+
+
+## Energy to wait for below a wall a link has to jet: a heavy's weak jet
+## needs twice the link's and at least HEAVY_WALL_ENERGY.
+static func wall_energy(s: Soldier, link: RouteGraph.Link) -> float:
+	if s.loadout.armour == SoldierBody.Armour.HEAVY:
+		return minf(maxf(link.energy * 2.0, HEAVY_WALL_ENERGY), rest_until(s))
+	return link.energy
 
 
 ## Energy to wait for, at most a little under the armour's full tank.

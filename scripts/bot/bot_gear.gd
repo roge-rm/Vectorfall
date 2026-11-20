@@ -2,8 +2,8 @@ class_name BotGear
 extends RefCounted
 
 ## A bot's pack and mines. Repair: held on itself when hurt and out of a
-## fight, or on a hurt teammate close by, person or bot, which it walks up to
-## and looks at. Shield: on in a fight while the energy lasts, off otherwise.
+## fight, on a hurt teammate close by, person or bot, which it walks up to
+## and looks at, or on the base asset a repair bot was sent to. Shield: on in a fight while the energy lasts, off otherwise.
 ## Jammer: on while carrying a flag, and for a sniper while it isn't
 ## shooting. Defence lays a few mines towards the flag's approaches while it
 ## stands guard. Runs in BotBrain.work(), so it reads only snapshotted
@@ -105,6 +105,16 @@ func _repair(brain: BotBrain, command: PlayerCommand, fighting: bool) -> bool:
 	var s := brain.soldier
 	if fighting or s.energy < PACK_RESERVE * (0.6 if s.pack_on else 1.0):
 		return false
+	if brain.goal == BotBrain.Goal.FIX and not brain.combat.aiming:
+		# The base asset it was sent to, once it's in reach.
+		var info := brain.director.asset_info(brain.role_target)
+		if not info.is_empty() and info.health < info.max:
+			var eye := s.eye_transform().origin
+			var to: Vector3 = info.centre - eye
+			if Vector2(to.x, to.z).length() < info.radius + MATE_REACH:
+				command.yaw = atan2(-to.x, -to.z)
+				command.pitch = atan2(to.y, Vector2(to.x, to.z).length())
+				return true
 	var mate := brain.game.soldier(mate_id) if mate_id != 0 else null
 	if mate != null and not mate.dead and mate.health < mate.tuning.health_max and not brain.combat.aiming:
 		var eye := s.eye_transform().origin

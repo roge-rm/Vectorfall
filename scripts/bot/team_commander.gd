@@ -7,8 +7,11 @@ extends RefCounted
 ## on the team counts as one of its players, with a role read from what they
 ## do, so the bots fill the rest. It learns within a match which lanes enemy
 ## attackers come in by and enemy carriers run home by, and which lanes worked
-## for its own carriers. It thinks twice a second on its own tick, uses no ray
-## casts and no random numbers, and keeps everything in get_state().
+## for its own carriers. It reads base power too: now and then it sends a few
+## offence bots on a raid on the enemy generator, or their turrets while the
+## generator room's fields are on, and sends a bot to repair any of our base
+## assets that's destroyed. It thinks twice a second on its own tick, uses no
+## ray casts and no random numbers, and keeps everything in get_state().
 
 ## Ticks between thinks; team 1 thinks half way between team 0's.
 const THINK_TICKS := 30
@@ -66,6 +69,19 @@ const ORDER_TIME := 50.0
 const ORDER_DEFENDERS := 2
 const ORDER_ESCORTS := 2
 const ORDER_ATTACKERS := 2
+## Raids on the enemy base: the first not before RAID_FIRST seconds, each up
+## to RAID_TIME seconds with RAID_GAP between, RAID_SIZE bots from the offence
+## of a team of RAID_TEAM or more.
+const RAID_FIRST := 15.0
+const RAID_TIME := 150.0
+const RAID_GAP := 45.0
+const RAID_SIZE := 2
+const RAID_TEAM := 5
+## A repair bot gives up on an asset after REPAIR_TIME seconds. Picking one,
+## metres added for a bot that has to respawn first or go by a station.
+const REPAIR_TIME := 90.0
+const RESPAWN_COST := 60.0
+const STATION_COST := 30.0
 ## Seconds between reports to the team, and before the same report again.
 ## Answers to orders and warnings don't wait for the first.
 const REPORT_GAP := 3.0
@@ -77,6 +93,9 @@ const CHAT_KEPT := 100
 signal warned(team: int, person_id: int, enemy_id: int)
 ## A bot says a line (BotLines.Line) to its team, as text and later voice.
 signal said(team: int, speaker_id: int, line: int, text: String)
+
+## Off, commanders send no raids of their own, for comparing in bot matches.
+static var raids := true
 
 var team := 0
 var director: BotDirector
@@ -126,6 +145,15 @@ var said_ticks := {}
 var chat: Array[Dictionary] = []
 ## The lane last reported for the enemy carrier of our flag, or -1.
 var reported_lane := -1
+## Bots raiding the enemy base by id, the enemy asset they're after, the tick
+## the raid ends and the first tick another may start.
+var raiders := {}
+var raid_target := 0
+var raid_until := -1
+var next_raid := int(RAID_FIRST * 60.0)
+## Bots sent to repair our base by id, each { asset, since, from }: the asset,
+## the tick it was given, and the role it came from, whose place it takes.
+var repairers := {}
 
 
 func _init(on_team: int, bots: BotDirector) -> void:
@@ -143,6 +171,8 @@ func watch() -> void:
 	game.flag_captured.connect(_on_flag_captured)
 	game.flag_returned.connect(_on_flag_returned)
 	game.ordered.connect(_on_ordered)
+	game.power_lost.connect(_on_power_lost)
+	game.asset_repaired.connect(_on_asset_repaired)
 
 
 func _lanes() -> Lanes:
@@ -178,6 +208,10 @@ func think(force := false) -> void:
 		_plan_chase()
 		_report_carrier()
 	_check_orders()
+	if not game.assets.is_empty():
+		_check_repairs()
+		if not game.flags.is_empty():
+			_check_raid()
 	_assign(force)
 	_assign_pickups()
 	_help_people()
@@ -533,6 +567,22 @@ func _assign(force: bool) -> void:
 		if not lock.is_empty() and not next.has(brain):
 			next[brain] = lock.role
 			want[lock.role] = maxi(want[lock.role] - 1, 0)
+	# Raiders take offence places, and repair bots the places of the roles
+	# they came from.
+	for brain in team_brains:
+		var id := brain.soldier.entity_id
+		if next.has(brain):
+			continue
+		if raiders.has(id):
+			next[brain] = BotBrain.Role.GENERATOR
+			want[BotBrain.Role.OFFENCE] = maxi(want[BotBrain.Role.OFFENCE] - 1, 0)
+		elif repairers.has(id):
+			next[brain] = BotBrain.Role.REPAIR
+			var from: int = repairers[id].from
+			if want.get(from, 0) > 0:
+				want[from] -= 1
+			else:
+				want[BotBrain.Role.OFFENCE] = maxi(want[BotBrain.Role.OFFENCE] - 1, 0)
 	# Keep the best placed in each role up to its count.
 	for role in BotBrain.ROLE_NAMES.size():
 		var in_role: Array[BotBrain] = []
@@ -599,6 +649,12 @@ func _assign(force: bool) -> void:
 		brain.role_slot = slots.get(role, 0)
 		slots[role] = brain.role_slot + 1
 		brain.role_target = escort_of if role == BotBrain.Role.ESCORT else (enemy_carrier if role == BotBrain.Role.CHASE else 0)
+		if role == BotBrain.Role.REPAIR:
+			brain.role_target = repairers[id].asset if repairers.has(id) else _own_generator()
+		elif role == BotBrain.Role.GENERATOR:
+			brain.role_target = raid_target
+		elif role == BotBrain.Role.OFFENCE:
+			brain.role_target = _flag_turret()
 		var lock: Dictionary = order_locks.get(id, {})
 		if not lock.is_empty() and lock.role == role and lock.target != 0:
 			brain.role_target = lock.target
@@ -619,6 +675,10 @@ func _better(a: BotBrain, b: BotBrain, role: int) -> bool:
 
 func _may_move(brain: BotBrain, to: int) -> bool:
 	if URGENT_ROLES.has(to) or URGENT_ROLES.has(brain.role):
+		return true
+	# Off a raid or a repair that's over.
+	var id := brain.soldier.entity_id
+	if (brain.role == BotBrain.Role.REPAIR and not repairers.has(id)) or (brain.role == BotBrain.Role.GENERATOR and not raiders.has(id)):
 		return true
 	return (game.tick - int(role_since.get(brain.soldier.entity_id, -1000000))) / 60.0 >= MIN_ROLE_TIME
 
@@ -641,6 +701,10 @@ func _describe_plan(situation: Dictionary) -> String:
 		why.append("ahead")
 	if situation.get("runner", false):
 		why.append("a person runs for theirs")
+	if not raiders.is_empty() and game.asset(raid_target) != null:
+		why.append("raid on their %s" % BaseAsset.NAMES[game.asset(raid_target).kind].to_lower())
+	if not repairers.is_empty():
+		why.append("repairing")
 	return ", ".join(parts) + ("" if why.is_empty() else " (" + ", ".join(why) + ")")
 
 
@@ -986,6 +1050,11 @@ func get_state() -> Dictionary:
 		"said_ticks": said_ticks.duplicate(),
 		"chat": chat.duplicate(true),
 		"reported_lane": reported_lane,
+		"raiders": raiders.duplicate(),
+		"raid_target": raid_target,
+		"raid_until": raid_until,
+		"next_raid": next_raid,
+		"repairers": repairers.duplicate(true),
 	}
 
 
@@ -1016,6 +1085,11 @@ func set_state(state: Dictionary) -> void:
 	said_ticks = state.said_ticks.duplicate()
 	chat.assign(state.chat.duplicate(true))
 	reported_lane = state.reported_lane
+	raiders = state.get("raiders", {}).duplicate()
+	raid_target = state.get("raid_target", 0)
+	raid_until = state.get("raid_until", -1)
+	next_raid = state.get("next_raid", int(RAID_FIRST * 60.0))
+	repairers = state.get("repairers", {}).duplicate(true)
 
 
 func _on_flag_returned(flag_team: int, _soldier_id: int) -> void:
@@ -1099,8 +1173,7 @@ func _on_ordered(soldier_id: int, kind: int, arg: int) -> void:
 		Orders.Kind.DEFEND_FLAG:
 			_send(game.stands[team], ORDER_DEFENDERS, BotBrain.Role.DEFENCE, 0, until, kind, soldier_id, BotLines.Line.DEFENCE_YES, [BotBrain.Role.DEFENCE])
 		Orders.Kind.REPAIR_BASE:
-			# Stand-in until there's a base to repair: one bot home on defence.
-			_send(game.stands[team], 1, BotBrain.Role.DEFENCE, 0, until, kind, soldier_id, BotLines.Line.REPAIR_YES, [BotBrain.Role.DEFENCE])
+			_order_repair(soldier_id, until)
 		Orders.Kind.ESCORT_ME:
 			if person.dead:
 				return
@@ -1110,13 +1183,302 @@ func _on_ordered(soldier_id: int, kind: int, arg: int) -> void:
 				return
 			_send(pos, 1, BotBrain.Role.ESCORT, soldier_id, until, kind, soldier_id, BotLines.Line.COVER_YES, [])
 		Orders.Kind.ATTACK_GENERATOR:
-			# Stand-in until there are generators: bots on offence.
-			_send(game.stands[1 - team], ORDER_ATTACKERS, BotBrain.Role.OFFENCE, 0, until, kind, soldier_id, BotLines.Line.ATTACK_YES, [BotBrain.Role.OFFENCE])
+			_order_raid(soldier_id, until)
 		Orders.Kind.TAKE_FLAG:
 			_send(game.stands[1 - team], 1, BotBrain.Role.OFFENCE, 0, until, kind, soldier_id, BotLines.Line.TAKE_YES, [BotBrain.Role.OFFENCE])
 			urgent_until = until
 		Orders.Kind.SET_ROLE:
 			_set_role(person, Orders.arg_bot(arg), Orders.arg_role(arg))
+
+
+## "Repair the base": the bot best placed to repair goes, or the nearest if
+## none is, to our most needed asset, or to the generator to stand by it.
+func _order_repair(by: int, until: int) -> void:
+	var kind := Orders.Kind.REPAIR_BASE
+	var jobs := repair_jobs(true)
+	var job := jobs[0] if not jobs.is_empty() else _own_generator()
+	if job == 0:
+		return
+	var at := game.asset(job).global_position
+	var pick := _repair_pick(job, true)
+	var roles := {}
+	for brain in brains():
+		roles[brain.soldier.entity_id] = brain.role
+	if pick != null:
+		_lock(pick, BotBrain.Role.REPAIR, 0, until, kind, by)
+		_answer(pick.soldier.entity_id, BotLines.Line.REPAIR_YES)
+	else:
+		_send(at, 1, BotBrain.Role.REPAIR, 0, until, kind, by, BotLines.Line.REPAIR_YES, [BotBrain.Role.REPAIR])
+	for id: int in order_locks:
+		if order_locks[id].order == kind and not repairers.has(id):
+			repairers[id] = { "asset": job, "since": game.tick, "from": roles.get(id, BotBrain.Role.DEFENCE) }
+
+
+## "Attack the generator": the nearest bots go on a raid on their generator,
+## or their base's turrets while it can't be reached.
+func _order_raid(by: int, until: int) -> void:
+	var kind := Orders.Kind.ATTACK_GENERATOR
+	var target := raid_target if raid_target != 0 else _raid_target()
+	if target == 0:
+		# Nothing of theirs left working: their flag instead.
+		_send(game.stands[1 - team], ORDER_ATTACKERS, BotBrain.Role.OFFENCE, 0, until, kind, by, BotLines.Line.ATTACK_YES, [BotBrain.Role.OFFENCE])
+		return
+	if raiders.is_empty():
+		_decide("raid on their %s by order" % BaseAsset.NAMES[game.asset(target).kind].to_lower())
+	raid_target = target
+	raid_until = maxi(raid_until, until)
+	_send(game.asset(target).global_position, ORDER_ATTACKERS, BotBrain.Role.GENERATOR, 0, until, kind, by, BotLines.Line.ATTACK_YES, [BotBrain.Role.GENERATOR])
+	for id: int in order_locks:
+		if order_locks[id].order == kind:
+			raiders[id] = true
+
+
+## Our assets that need repairing, most needed first: destroyed ones, the
+## generator first, then by id. With damaged, ones with any damage too.
+func repair_jobs(damaged := false) -> Array[int]:
+	var found: Array[int] = []
+	var ids := game.assets.keys()
+	ids.sort()
+	for id: int in ids:
+		var machine := game.assets[id]
+		if machine.team == team and (machine.destroyed or (damaged and machine.health < machine.max_health())):
+			found.append(id)
+	found.sort_custom(func(a: int, b: int) -> bool:
+		var ka := [0 if game.assets[a].destroyed else 1, 0 if game.assets[a].kind == BaseAsset.Kind.GENERATOR else 1, a]
+		var kb := [0 if game.assets[b].destroyed else 1, 0 if game.assets[b].kind == BaseAsset.Kind.GENERATOR else 1, b]
+		return ka < kb)
+	return found
+
+
+## Our generator's id, or 0.
+func _own_generator() -> int:
+	var made := game.generator(team)
+	return made.entity_id if made != null else 0
+
+
+## Sends a repair bot to each destroyed asset of ours, two while the generator
+## is down on a big enough team, and keeps each on its asset until it works
+## again, moving it on to the next one. A bot with no repair pack is dropped
+## while there's no power, as it can't get one until it respawns.
+func _check_repairs() -> void:
+	var jobs := repair_jobs()
+	var everything := repair_jobs(true)
+	var ids := repairers.keys()
+	ids.sort()
+	for id: int in ids:
+		var entry: Dictionary = repairers[id]
+		var brain := director.brain_of(id)
+		var lock: Dictionary = order_locks.get(id, {})
+		var ordered: bool = not lock.is_empty() and lock.order == Orders.Kind.REPAIR_BASE
+		var list := everything if ordered else jobs
+		var stuck := brain != null and not brain.soldier.dead and brain.soldier.loadout.pack != Pack.REPAIR and not game.powered(team)
+		var late := game.tick - int(entry.since) > int(REPAIR_TIME * 60.0)
+		if brain == null or (not ordered and (list.is_empty() or late or stuck)):
+			repairers.erase(id)
+			_decide("%s's repair is over" % (brain.soldier.display_name if brain != null else str(id)))
+			continue
+		if not list.has(entry.asset):
+			if list.is_empty():
+				entry.asset = _own_generator()
+			else:
+				entry.asset = list[0]
+				entry.since = game.tick
+	if jobs.is_empty():
+		return
+	var own := game.generator(team)
+	var want := 2 if own != null and own.destroyed and brains().size() >= 6 else 1
+	while repairers.size() < want:
+		var pick := _repair_pick(jobs[0])
+		if pick == null:
+			break
+		var id := pick.soldier.entity_id
+		repairers[id] = { "asset": jobs[0], "since": game.tick, "from": pick.role }
+		_decide("%s to repair our %s" % [pick.soldier.display_name, BaseAsset.NAMES[game.asset(jobs[0]).kind].to_lower()])
+
+
+## The bot best placed to repair an asset of ours, or null: by metres to go,
+## a living one carrying a repair pack from where it is, a dead one at home in
+## a calm role from its spawn once it respawns in the repair loadout, or a
+## living one at home going by a station for it while the base has power.
+## Carriers, chasers, escorts and bots already on a job or an order are left
+## out, except that ordered lets in bots already ordered to repair.
+func _repair_pick(asset_id: int, ordered := false) -> BotBrain:
+	var at := game.asset(asset_id).global_position
+	var powered := game.powered(team)
+	var pads := director.station_pads(team)
+	var best: BotBrain = null
+	var best_cost := INF
+	for brain in brains():
+		var id := brain.soldier.entity_id
+		var s := brain.soldier
+		if raiders.has(id) or repairers.has(id) or game.carried_flag(id) != null or URGENT_ROLES.has(brain.role):
+			continue
+		if order_locks.has(id) and not (ordered and order_locks[id].order == Orders.Kind.REPAIR_BASE):
+			continue
+		var cost := INF
+		if not s.dead and s.loadout.pack == Pack.REPAIR:
+			cost = s.at().distance_to(at)
+		elif brain.role in [BotBrain.Role.DEFENCE, BotBrain.Role.LIGHT_DEFENCE, BotBrain.Role.MIDFIELD, BotBrain.Role.REPAIR]:
+			if s.dead:
+				cost = _spawn_distance(at) + RESPAWN_COST
+			elif powered and not pads.is_empty():
+				var pad := pads[0]
+				for each in pads:
+					if each.distance_to(s.at()) < pad.distance_to(s.at()):
+						pad = each
+				cost = s.at().distance_to(pad) + pad.distance_to(at) + STATION_COST
+		if cost < best_cost:
+			best_cost = cost
+			best = brain
+	return best
+
+
+## Metres from our nearest spawn point to a spot.
+func _spawn_distance(at: Vector3) -> float:
+	var best := INF
+	for spawn: Transform3D in game.spawns.get(team, []):
+		best = minf(best, spawn.origin.distance_to(at))
+	return best if best < INF else 0.0
+
+
+## True while a raid on the enemy base makes sense: a team big enough, our
+## flag home, theirs not carried, not behind late on, and their base with
+## power.
+func _raid_allowed() -> bool:
+	var own: Flag = game.flags.get(team)
+	var theirs: Flag = game.flags.get(1 - team)
+	if own == null or own.mode != Flag.Mode.HOME or (theirs != null and theirs.mode == Flag.Mode.CARRIED):
+		return false
+	if brains().size() < RAID_TEAM or not game.powered(1 - team):
+		return false
+	var late := game.settings.time_limit > 0.0 and game.time_left < game.settings.time_limit * LATE
+	return not (late and game.scores[team] < game.scores[1 - team])
+
+
+## Their working turret that guards the whole base, which offence takes out
+## before going for the flag, or 0 when it's down or they have no power.
+func _flag_turret() -> int:
+	var enemy := 1 - team
+	if not game.powered(enemy):
+		return 0
+	var ids := game.assets.keys()
+	ids.sort()
+	for id: int in ids:
+		var machine := game.assets[id]
+		if machine.team == enemy and machine.kind == BaseAsset.Kind.TURRET and not machine.destroyed and machine.guard_points.is_empty():
+			return id
+	return 0
+
+
+## What a raid goes for: their generator, shot at through its room's
+## openings, else their working turret nearest their flag, else their
+## sensor, or 0.
+func _raid_target() -> int:
+	var enemy := 1 - team
+	var made := game.generator(enemy)
+	if made != null and not made.destroyed:
+		return made.entity_id
+	var stand: Vector3 = game.stands.get(enemy, Vector3.ZERO)
+	var best := 0
+	var best_d := INF
+	var ids := game.assets.keys()
+	ids.sort()
+	for id: int in ids:
+		var machine := game.assets[id]
+		if machine.team != enemy or machine.destroyed or machine.kind == BaseAsset.Kind.GENERATOR:
+			continue
+		# Turrets before the sensor.
+		var d := machine.global_position.distance_to(stand) + (1000.0 if machine.kind == BaseAsset.Kind.SENSOR else 0.0)
+		if d < best_d:
+			best_d = d
+			best = id
+	return best
+
+
+## Starts a raid on the enemy base now and then, with the offence bots best
+## placed that aren't on their way in yet, and ends it when its target is
+## destroyed with nothing left to go for, its time is up or it stops making
+## sense. A raid by order ends only with its target or its time.
+func _check_raid() -> void:
+	for id: int in raiders.keys():
+		if director.brain_of(id) == null:
+			raiders.erase(id)
+	if not raiders.is_empty():
+		var ordered := false
+		for id: int in raiders:
+			if order_locks.get(id, {}).get("order", -1) == Orders.Kind.ATTACK_GENERATOR:
+				ordered = true
+		var target := game.asset(raid_target)
+		if target == null or target.destroyed:
+			var was_generator := target != null and target.kind == BaseAsset.Kind.GENERATOR
+			raid_target = 0 if was_generator else _raid_target()
+			if raid_target != 0:
+				_decide("raid moves on to their %s" % BaseAsset.NAMES[game.asset(raid_target).kind].to_lower())
+		# Once going, a raid keeps on while they have power, as the way there
+		# is long.
+		if raid_target == 0 or game.tick >= raid_until or (not ordered and not game.powered(1 - team)):
+			_end_raid()
+		return
+	if not raids or game.tick < next_raid or not _raid_allowed():
+		return
+	var target := _raid_target()
+	if target == 0:
+		return
+	var at := game.asset(target).global_position
+	var picks: Array[BotBrain] = []
+	for brain in brains():
+		var id := brain.soldier.entity_id
+		if brain.role != BotBrain.Role.OFFENCE or brain.attacking or order_locks.has(id) or repairers.has(id) or game.carried_flag(id) != null:
+			continue
+		picks.append(brain)
+	if picks.size() < 2:
+		return
+	picks.sort_custom(func(a: BotBrain, b: BotBrain) -> bool:
+		var da := a.soldier.at().distance_to(at) + (500.0 if a.soldier.dead else 0.0)
+		var db := b.soldier.at().distance_to(at) + (500.0 if b.soldier.dead else 0.0)
+		return da < db or (da == db and a.soldier.entity_id < b.soldier.entity_id))
+	raid_target = target
+	raid_until = game.tick + int(RAID_TIME * 60.0)
+	for k in mini(RAID_SIZE, picks.size() - 1):
+		raiders[picks[k].soldier.entity_id] = true
+	var name_ := BaseAsset.NAMES[game.asset(target).kind].to_lower()
+	_decide("raid on their %s" % name_)
+	say(picks[0].soldier.entity_id, BotLines.Line.RAID, name_)
+
+
+## Ends the raid and any order for one, and waits RAID_GAP for the next.
+func _end_raid() -> void:
+	if not raiders.is_empty():
+		_decide("raid over")
+	raiders.clear()
+	raid_target = 0
+	raid_until = -1
+	next_raid = game.tick + int(RAID_GAP * 60.0)
+	for id: int in order_locks.keys():
+		if order_locks[id].order == Orders.Kind.ATTACK_GENERATOR:
+			order_locks.erase(id)
+
+
+## Our generator went down: the bot nearest it says so.
+func _on_power_lost(of_team: int) -> void:
+	if of_team != team:
+		return
+	var made := game.generator(team)
+	var speaker := _nearest_bot(made.global_position if made != null else game.stands.get(team, Vector3.ZERO))
+	if speaker != null:
+		say(speaker.soldier.entity_id, BotLines.Line.GENERATOR_DOWN)
+
+
+## Our generator works again: the bot that fixed it says so, or the nearest.
+func _on_asset_repaired(asset_id: int, soldier_id: int) -> void:
+	var machine := game.asset(asset_id)
+	if machine == null or machine.team != team or machine.kind != BaseAsset.Kind.GENERATOR:
+		return
+	var speaker := director.brain_of(soldier_id)
+	if speaker == null or speaker.soldier.team != team:
+		speaker = _nearest_bot(machine.global_position)
+	if speaker != null:
+		say(speaker.soldier.entity_id, BotLines.Line.GENERATOR_BACK)
 
 
 ## Sends the count bots nearest a spot, leaving out those already in a role

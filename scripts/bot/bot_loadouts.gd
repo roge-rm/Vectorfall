@@ -36,8 +36,11 @@ static func choices(role: int, personality: int) -> Array[int]:
 			if personality == P.AGGRESSIVE:
 				return [Kit.RUNNER_BLASTER, Kit.RUNNER_GRENADES]
 			return [Kit.RUNNER_BLASTER, Kit.RUNNER_GRENADES, Kit.MEDIUM_SHIELD]
-		R.ESCORT, R.GENERATOR:
+		R.ESCORT:
 			return [Kit.MEDIUM_SHIELD, Kit.MEDIUM_AMMO]
+		R.GENERATOR:
+			# Heavies, for the mortar and grenades on a still target.
+			return [Kit.HEAVY_SHIELD]
 		R.MIDFIELD:
 			if personality == P.SNIPER:
 				return [Kit.SNIPER]

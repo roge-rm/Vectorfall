@@ -6,8 +6,9 @@ extends Node3D
 ## pool of VOICES players: when they're all busy a new sound takes the one
 ## that started longest ago, or is dropped if it matters less. Your own jet,
 ## skis, footsteps and landings, repair hum, pack switches, hit markers and
-## flag jingles play flat. The
-## jets of the JET_VOICES nearest other soldiers loop in 3D.
+## flag and base power jingles play flat. The
+## jets of the JET_VOICES nearest other soldiers loop in 3D, and so does each
+## working generator's hum, heard only close by.
 
 const VOICES := 10
 const JET_VOICES := 3
@@ -18,7 +19,7 @@ const STEP_TIME := 0.33
 ## Each weapon's firing sound and its hit or blast sound, by slot. The
 ## chaingun's hits make no sound.
 const FIRE_SOUNDS: Array[String] = ["disc_fire", "chaingun", "grenade_fire", "mortar_fire", "plasma_fire", "sniper_fire", "blaster_fire", "throw", "throw"]
-const HIT_SOUNDS: Array[String] = ["disc_blast", "", "grenade_blast", "mortar_blast", "plasma_hit", "blaster_hit", "blaster_hit", "hand_grenade_blast", "mine_blast"]
+const HIT_SOUNDS: Array[String] = ["disc_blast", "", "grenade_blast", "mortar_blast", "plasma_hit", "blaster_hit", "blaster_hit", "hand_grenade_blast", "mine_blast", "plasma_hit"]
 ## Seconds between one soldier's chaingun sounds, so a burst doesn't take
 ## every voice.
 const CHAINGUN_GAP := 0.06
@@ -38,6 +39,8 @@ var _jet: AudioStreamPlayer
 var _ski: AudioStreamPlayer
 var _repair: AudioStreamPlayer
 var _jets: Array[AudioStreamPlayer3D] = []
+## Each generator's hum, by its asset.
+var _hums: Dictionary[Object, AudioStreamPlayer3D] = {}
 var _step_left := 0.0
 var _was_grounded := true
 var _fall_speed := 0.0
@@ -104,6 +107,40 @@ func watch(match_node: Match, who: Soldier) -> void:
 	game.flag_dropped.connect(_on_flag.bind("dropped"))
 	game.flag_returned.connect(_on_flag.bind("returned"))
 	game.flag_captured.connect(_on_flag.bind("captured"))
+	game.power_lost.connect(_on_power.bind("power_down"))
+	game.power_back.connect(_on_power.bind("power_up"))
+	game.turret_fired.connect(_on_turret_fired)
+	game.asset_destroyed.connect(_on_asset_destroyed)
+	for id: int in game.assets:
+		var made := game.assets[id]
+		if made.kind != BaseAsset.Kind.GENERATOR:
+			continue
+		var hum := AudioStreamPlayer3D.new()
+		hum.bus = Sound.EFFECTS_BUS
+		hum.stream = SoundBank.get_stream("generator_hum")
+		hum.max_distance = 22.0
+		hum.unit_size = 3.0
+		hum.volume_db = -14.0
+		add_child(hum)
+		hum.global_position = made.centre()
+		_hums[made] = hum
+
+
+func _on_power(_team: int, sound_name: String) -> void:
+	if soldier != null:
+		play_flat(sound_name, -4.0)
+
+
+func _on_turret_fired(asset_id: int) -> void:
+	var turret := game.asset(asset_id)
+	if turret != null:
+		play_at("turret_fire", turret.pivot(), -4.0, 1)
+
+
+func _on_asset_destroyed(asset_id: int, _attacker_id: int) -> void:
+	var made := game.asset(asset_id)
+	if made != null:
+		play_at("asset_destroyed", made.centre(), 0.0, 3)
 
 
 func _on_mine(_mine_id: int, at: Vector3, sound_name: String, volume_db: float) -> void:
@@ -238,6 +275,7 @@ func _process(delta: float) -> void:
 		return
 	_own_sounds(delta)
 	_other_jets()
+	_generator_hums()
 
 
 func _own_sounds(delta: float) -> void:
@@ -290,3 +328,14 @@ func _other_jets() -> void:
 				jet.play()
 		elif jet.playing:
 			jet.stop()
+
+
+## Each generator hums while it's working and you're near enough to hear it.
+func _generator_hums() -> void:
+	for made: Variant in _hums:
+		var hum: AudioStreamPlayer3D = _hums[made]
+		var on := is_instance_valid(made) and not (made as BaseAsset).destroyed and (made as BaseAsset).global_position.distance_to(soldier.global_position) < hum.max_distance
+		if on and not hum.playing:
+			hum.play()
+		elif not on and hum.playing:
+			hum.stop()

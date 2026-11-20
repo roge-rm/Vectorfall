@@ -94,6 +94,21 @@ var commanders := {}
 ## stations change, for bots to read in work().
 var _pads := {}
 var _pads_made := -1
+## Teams whose force fields are on this tick, as bits (1 << team), set before
+## the bots work.
+var fields_on := 0
+## Per team, the enemy soldiers its sensors see, copied from Match.sensed
+## before the bots work.
+var sensed: Array[PackedInt32Array] = [PackedInt32Array(), PackedInt32Array()]
+## The base assets as of this tick's bot phase, by id, each { id, team, kind,
+## foot, centre, radius, health, max, destroyed, target (the soldier a
+## turret aims at), stand (where to stand to repair it), raid (where to go
+## to shoot it) }, and whether each team has power. Made on the main thread
+## before the bots work, for bots to read in work().
+var base_assets := {}
+var power: Array[bool] = [true, true]
+## Per asset id, its stand and raid spots, found once.
+var _asset_spots := {}
 var _lanes: Lanes
 ## The last tick the commanders were given, so they run once a tick.
 var _commanded_tick := -1
@@ -118,6 +133,7 @@ func _init(match_node: Match, route_graph: RouteGraph) -> void:
 	game.flag_taken.connect(_on_flag_taken)
 	game.flag_returned.connect(_on_flag_returned)
 	game.flag_captured.connect(_on_flag_captured)
+	game.asset_damaged.connect(_on_asset_damaged)
 
 
 ## Adds a bot soldier to the match at a spawn point. skill is 0 for a
@@ -203,6 +219,13 @@ func run_bots(delta: float) -> void:
 		game.flags[team].take_snapshot()
 	if _pads_made != game.stations.size():
 		_make_pads()
+	fields_on = 0
+	for id: int in game.fields:
+		if game.fields[id].on:
+			fields_on |= 1 << game.fields[id].team
+	sensed[0] = game.sensed[0]
+	sensed[1] = game.sensed[1]
+	_snapshot_assets()
 	if Prof.on:
 		Prof.add("bots.snapshot", Time.get_ticks_usec() - prof_t)
 		var commander_t := Time.get_ticks_usec()
@@ -273,6 +296,102 @@ func run_bots(delta: float) -> void:
 		Prof.add("bots.serial_after", Time.get_ticks_usec() - prof_t)
 
 
+## Copies each base asset's state and each team's power into base_assets
+## and power.
+func _snapshot_assets() -> void:
+	power[0] = game.powered(0)
+	power[1] = game.powered(1)
+	if game.assets.is_empty() and base_assets.is_empty():
+		return
+	base_assets = {}
+	var ids := game.assets.keys()
+	ids.sort()
+	for id: int in ids:
+		var machine := game.assets[id]
+		if not _asset_spots.has(id):
+			_asset_spots[id] = _spots_for(machine)
+		var spots: Array = _asset_spots[id]
+		base_assets[id] = {
+			"id": id,
+			"team": machine.team,
+			"kind": machine.kind,
+			"foot": machine.global_position,
+			"centre": machine.centre(),
+			"radius": machine.radius(),
+			"health": machine.health,
+			"max": machine.max_health(),
+			"destroyed": machine.destroyed,
+			"target": machine.target_id,
+			"stand": spots[0],
+			"raid": spots[1],
+			"perches": spots[2],
+			"lobs": spots[3],
+		}
+
+
+## Where to stand to repair an asset, a metre off its body towards the
+## nearest route point, and where to go to shoot it: its room's GENERATOR
+## point for a generator, the asset's foot for the rest. Then for a generator
+## under openings with force fields, a perch on the deck beside each opening
+## and the room's floor below it to shoot at from there, whose blast reaches
+## the generator. The line from a perch's eye to its floor point passes
+## through the opening, and the perch is out of the blast's reach.
+func _spots_for(machine: BaseAsset) -> Array:
+	var foot := machine.global_position
+	var raid := foot
+	var stand := foot + Vector3(machine.radius() + 1.0, 0.0, 0.0)
+	var near := graph.nearest(foot + Vector3.UP) if graph.points.size() > 0 else -1
+	if machine.kind == BaseAsset.Kind.GENERATOR:
+		var rooms := graph.interest_points(RouteGraph.GENERATOR, machine.team)
+		if not rooms.is_empty():
+			near = rooms[0]
+			raid = graph.points[near]
+	if near >= 0:
+		var to := graph.points[near] - foot
+		to.y = 0.0
+		if to.length() > 0.1:
+			stand = foot + to.normalized() * minf(machine.radius() + 1.0, to.length())
+	var perches: Array[Vector3] = []
+	var lobs: Array[Vector3] = []
+	if machine.kind == BaseAsset.Kind.GENERATOR:
+		var ids := game.fields.keys()
+		ids.sort()
+		for id: int in ids:
+			var field := game.fields[id]
+			if field.team != machine.team:
+				continue
+			var across := foot - field.position
+			across.y = 0.0
+			if across.length() < 0.5:
+				continue
+			var top := field.position.y + field.size.y * 0.5
+			var lob := field.position + across * LOB_SHARE
+			lob.y = foot.y + 0.1
+			lobs.append(lob)
+			var perch := field.position - across.normalized() * (field.size.z * 0.5 + PERCH_OUT)
+			perch.y = top
+			perches.append(perch)
+	return [stand, raid, perches, lobs]
+
+
+## On a generator raid, the floor point shot at is this share of the way
+## from an opening's middle to the generator, and the perch is this many
+## metres out past the opening's edge.
+const LOB_SHARE := 0.42
+const PERCH_OUT := 1.25
+
+
+## An asset as of this tick's bot phase, or empty if there's none by that id.
+func asset_info(id: int) -> Dictionary:
+	return base_assets.get(id, {})
+
+
+## The teams whose force fields a team's bots can't pass now, as bits: the
+## other team's, while it's on.
+func shut_for(team: int) -> int:
+	return fields_on & ~(1 << team)
+
+
 func _make_pads() -> void:
 	_pads_made = game.stations.size()
 	_pads = { 0: [] as Array[Vector3], 1: [] as Array[Vector3] }
@@ -340,8 +459,8 @@ func brain_of(id: int) -> BotBrain:
 
 ## Plans a route over the graph all in one go, as begin_plan() and
 ## run_plan() do over ticks.
-func plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}) -> Array[int]:
-	var search := begin_plan(start, goal, velocity, energy, avoid)
+func plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}, shut := 0) -> Array[int]:
+	var search := begin_plan(start, goal, velocity, energy, avoid, SEARCH_FIRST, shut)
 	while not run_plan(search, -1):
 		pass
 	var path: Array[int] = []
@@ -354,7 +473,7 @@ func plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}) 
 ## kept and shared between bots; a route got from the store is the same one
 ## planning again would give. Routes avoiding links aren't kept. The search
 ## comes back done, or for run_plan() to carry on each tick.
-func begin_plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}, first := SEARCH_FIRST) -> RoutePlanner.Search:
+func begin_plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}, first := SEARCH_FIRST, shut := 0) -> RoutePlanner.Search:
 	var speed := Vector2(velocity.x, velocity.z).length()
 	var speed_step := int(speed / 5.0)
 	var energy_step := int(energy / 20.0)
@@ -368,7 +487,7 @@ func begin_plan(start: int, goal: int, velocity: Vector3, energy: float, avoid :
 	var rounded_energy := energy_step * 20.0 + 10.0
 	var key := []
 	if avoid.is_empty():
-		key = [start, goal, speed_step, energy_step, heading_step]
+		key = [start, goal, speed_step, energy_step, heading_step, shut]
 		if _plans.has(key):
 			if Prof.on:
 				Prof.count("astar_cached")
@@ -381,7 +500,7 @@ func begin_plan(start: int, goal: int, velocity: Vector3, energy: float, avoid :
 	if Prof.on:
 		Prof.count("astar_avoid" if not avoid.is_empty() else "astar_new")
 	var t := Time.get_ticks_usec() if Prof.on else 0
-	var search := planner.begin(graph, start, goal, rounded_speed, rounded_energy, avoid, heading)
+	var search := planner.begin(graph, start, goal, rounded_speed, rounded_energy, avoid, heading, shut)
 	if Prof.on:
 		Prof.add("bot.replan.begin", Time.get_ticks_usec() - t)
 	search.key = key
@@ -471,11 +590,29 @@ func _on_fired(soldier_id: int, weapon: int) -> void:
 
 func _on_damaged(victim_id: int, attacker_id: int, _amount: float, _from: Vector3) -> void:
 	var victim := brain_of(victim_id)
+	if victim == null:
+		return
 	var attacker := game.soldier(attacker_id)
-	if victim != null and attacker != null and attacker.team != victim.soldier.team:
+	if attacker != null and attacker.team != victim.soldier.team:
 		# Being hit tells you roughly where from, like a player's hit marker.
 		victim.combat.hurt(attacker_id, game.tick)
 		victim.perception.hear(attacker_id, attacker.at(), attacker.vel(), game.tick)
+	var machine := game.asset(attacker_id)
+	if machine != null and machine.team != victim.soldier.team:
+		# A turret shooting at it, which it may shoot back at.
+		victim.combat.hurt(attacker_id, game.tick)
+
+
+## An enemy shooting one of a team's assets is heard by that team's bots
+## within HOME_RANGE of it.
+func _on_asset_damaged(asset_id: int, attacker_id: int, _amount: float, _from: Vector3) -> void:
+	var machine := game.asset(asset_id)
+	var attacker := game.soldier(attacker_id)
+	if machine == null or attacker == null or attacker.team == machine.team:
+		return
+	for brain in brains:
+		if brain.soldier.team == machine.team and not brain.soldier.dead and brain.soldier.global_position.distance_to(machine.global_position) < TeamCommander.HOME_RANGE:
+			brain.perception.hear(attacker_id, attacker.at(), attacker.vel(), game.tick)
 
 
 func _on_hit(attacker_id: int, _victim_id: int, weapon: int) -> void:

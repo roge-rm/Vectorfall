@@ -19,13 +19,15 @@ extends CommandSource
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
 ## goal_target.
-enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP }
-const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair"]
-## OFFENCE goes for the enemy flag and carries it, DEFENCE holds by the flag,
+enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX }
+const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base"]
+## OFFENCE takes out the enemy flag turret (role_target) while it works,
+## then goes for the enemy flag and carries it, DEFENCE holds by the flag,
 ## LIGHT_DEFENCE watches the way enemies come in and chases carriers, ESCORT
 ## goes with a carrier or a person heading for the flag, CHASE goes after the
-## enemy carrier of our flag. REPAIR, SNIPER and GENERATOR are for later
-## milestones and play midfield for now.
+## enemy carrier of our flag. GENERATOR raids the enemy base asset in
+## role_target, and REPAIR fixes our own one in role_target, both picked by
+## the commander. SNIPER is for a later milestone and plays midfield for now.
 enum Role { OFFENCE, DEFENCE, MIDFIELD, ESCORT, LIGHT_DEFENCE, CHASE, REPAIR, SNIPER, GENERATOR }
 const ROLE_NAMES: Array[String] = ["offence", "defence", "midfield", "escort", "light defence", "chase", "repair", "sniper", "generator"]
 ## Variety within a team. AGGRESSIVE closes in on enemies and chases them
@@ -206,6 +208,15 @@ var _search_allow := 0
 var _search_new := false
 ## Searches work() finished, for run_bots() to keep in the route store.
 var found: Array[RoutePlanner.Search] = []
+## On a raid, how close to a turret or sensor counts as there, with a clear
+## line to it, in metres, and how far up or down.
+const RAID_RANGE := 40.0
+const RAID_HEIGHT := 20.0
+## How close to the spot by an asset counts as there to repair it.
+const FIX_RANGE := 1.5
+## Metres up or down from a route point into or out of a generator room
+## within which it counts as reached.
+const ROOM_HEIGHT := 1.5
 ## Ready to go for the flag, as it was before work() this tick, read by the
 ## team's other offence bots.
 var ready_seen := false
@@ -321,6 +332,7 @@ func before_work() -> void:
 		return
 	if _thinks_now():
 		perception.look(soldier, game, director)
+		combat.look_at_asset(self)
 
 
 ## True if it carries a search on this tick, after before_work().
@@ -555,7 +567,8 @@ func _think_ctf() -> void:
 	# A goal on a route graph point is reached by the route, which goes round
 	# rocks; a straight line might not.
 	var on_graph := goal_point >= 0 and director.graph.points[goal_point].distance_to(goal_target) < 3.0
-	var want_direct := (close or route_done) and not on_graph and game.tick >= no_direct_until
+	# A raid keeps to the route, which goes round the asset and through ways in.
+	var want_direct := (close or route_done) and not on_graph and game.tick >= no_direct_until and goal != Goal.RAID
 	if want_direct and not direct:
 		direct = true
 		direct_start = pos
@@ -670,24 +683,37 @@ func _role_goal() -> Array:
 			return [Goal.ESCORT, _escort_spot(carrier)]
 	if low:
 		return [Goal.RETREAT, _defence_spot(role_slot + 1)]
+	if role == Role.GENERATOR:
+		var target_info := director.asset_info(role_target)
+		if not target_info.is_empty() and not target_info.destroyed and target_info.team != team:
+			return [Goal.RAID, _raid_spot(target_info)]
+	if role == Role.REPAIR:
+		var fix := _fix_goal()
+		if not fix.is_empty():
+			return fix
 	if role == Role.OFFENCE and theirs != null and theirs.mode != Flag.Mode.CARRIED:
 		var at := theirs.at()
 		if theirs.mode == Flag.Mode.HOME:
 			at = game.stands[1 - team] + Vector3.DOWN * 0.5
 			if not _ready_to_attack():
 				return [Goal.RALLY, _midfield_spot()]
+			# Their flag turret first, while it's up and powered.
+			var turret := director.asset_info(role_target)
+			if not turret.is_empty() and not turret.destroyed and turret.team != team and director.power[turret.team]:
+				return [Goal.RAID, turret.raid]
 		return [Goal.TAKE_FLAG, at]
 	if role == Role.DEFENCE or role == Role.LIGHT_DEFENCE:
 		# Anyone coming for the flag gets met: what this bot knows close in,
 		# and what the team knows further out for light defence.
 		var stand := game.stands[team]
 		var guard := GUARD_RANGE * (PRESS_GUARD if personality == Personality.AGGRESSIVE else 1.0)
+		var room := _generator_room(team)
 		var ids := perception.contacts.keys()
 		ids.sort()
 		for id: int in ids:
 			if perception.knows(id):
 				var guess := perception.guess_position(id, game.tick)
-				if guess.distance_to(stand) < guard:
+				if guess.distance_to(stand) < guard or (room != Vector3.INF and guess.distance_to(room) < guard):
 					return [Goal.CHASE, guess]
 		if role == Role.LIGHT_DEFENCE and boss != null:
 			var threats := boss.threats(WATCH_RANGE)
@@ -702,6 +728,45 @@ func _role_goal() -> Array:
 		if guess.distance_to(pos) < PRESS_RANGE:
 			return [Goal.CHASE, guess]
 	return [Goal.MIDFIELD, _midfield_spot()]
+
+
+## Where a repair bot goes, as [Goal, position], or empty with nothing to
+## fix: the spot by its asset with a repair pack on; without one, a station
+## while the base has power, or else the spot anyway to guard it until it
+## respawns in its role's loadout.
+func _fix_goal() -> Array:
+	var info := director.asset_info(role_target)
+	if info.is_empty() or info.team != soldier.team:
+		return []
+	if soldier.loadout.pack != Pack.REPAIR and director.power[soldier.team]:
+		var pos := soldier.at()
+		var best := Vector3.INF
+		for pad in director.station_pads(soldier.team):
+			if pad.distance_to(pos) < best.distance_to(pos):
+				best = pad
+		if best != Vector3.INF:
+			return [Goal.STATION, best]
+	return [Goal.FIX, info.stand]
+
+
+## Where to go to shoot an asset on a raid: the nearest perch above a
+## generator's room while out of it, else its raid spot.
+func _raid_spot(info: Dictionary) -> Vector3:
+	var pos := soldier.at()
+	var perches: Array = info.get("perches", [])
+	if perches.is_empty() or BotCombat.in_room(pos, info):
+		return info.raid
+	var best: Vector3 = perches[0]
+	for at: Vector3 in perches:
+		if at.distance_to(pos) < best.distance_to(pos):
+			best = at
+	return best
+
+
+## The GENERATOR point in a team's generator room, or Vector3.INF.
+func _generator_room(team: int) -> Vector3:
+	var rooms := director.graph.interest_points(RouteGraph.GENERATOR, team)
+	return director.graph.points[rooms[0]] if not rooms.is_empty() else Vector3.INF
 
 
 ## Health below which the bot backs off, by its personality.
@@ -820,6 +885,13 @@ func _hold_range() -> float:
 			return 1.0
 		Goal.HELP:
 			return BotGear.MATE_HOLD
+		Goal.FIX:
+			return FIX_RANGE
+		Goal.RAID:
+			var info := director.asset_info(role_target)
+			if not info.is_empty() and info.kind != BaseAsset.Kind.GENERATOR:
+				return RAID_RANGE
+			return ARRIVE_RANGE * 0.5
 	return -1.0
 
 
@@ -848,6 +920,18 @@ func _check_goal() -> void:
 		return
 	var to := goal_target - soldier.at()
 	var near := Vector2(to.x, to.z).length() < reach and absf(to.y) < ARRIVE_HEIGHT
+	if goal == Goal.RAID and reach == RAID_RANGE:
+		# Stops short of a turret or sensor while it can shoot it.
+		var flat := Vector2(to.x, to.z).length()
+		at_goal = combat.asset_seen == role_target and absf(to.y) < RAID_HEIGHT and flat < reach * (1.25 if at_goal else 1.0)
+		return
+	if goal == Goal.RAID and combat.asset_seen == role_target:
+		# Stops wherever it can shoot down through an opening.
+		var info := director.asset_info(role_target)
+		var from := soldier.at()
+		if not info.is_empty() and BotCombat.lobbing(from, info) and from.distance_to(BotCombat.asset_aim(from, info)) < BotCombat.LOB_REACH:
+			at_goal = true
+			return
 	if near and not at_goal:
 		stats.routes += 1
 		stats.route_seconds.append((game.tick - goal_started) / 60.0)
@@ -972,7 +1056,7 @@ func _replan() -> void:
 	# In the bot phase the search takes its first points after work(), from
 	# the tick's shared pool; outside it, at once.
 	var first := 0 if Soldier.use_snapshot else BotDirector.SEARCH_FIRST
-	_search = director.begin_plan(start, goal_point, soldier.vel(), soldier.energy, avoid_links, first)
+	_search = director.begin_plan(start, goal_point, soldier.vel(), soldier.energy, avoid_links, first, director.shut_for(soldier.team))
 	if not Soldier.use_snapshot:
 		director.owe_points(_search.expanded)
 	_search_tick = game.tick
@@ -1044,6 +1128,11 @@ func advance() -> void:
 	while path_index < path.size() - 1:
 		var p := graph.points[path[path_index]]
 		var q := graph.points[path[path_index + 1]]
+		# Into or out of a generator room, a point counts only at its own
+		# height, as the room is right under the deck.
+		var room := graph.room_of(path[path_index]) >= 0 or (path_index > 0 and graph.room_of(path[path_index - 1]) >= 0)
+		if room and absf(pos.y - p.y) > ROOM_HEIGHT:
+			break
 		var to_p := Vector2(p.x - pos.x, p.z - pos.z)
 		var reach := maxf(4.0, speed * 0.3)
 		var passed := false
@@ -1090,6 +1179,9 @@ func aim_point(lookahead: float) -> Vector3:
 			return at.lerp(next, left / step)
 		left -= step
 		at = next
+		# Nor past the way into or out of a generator room, right under the deck.
+		if graph.room_of(path[k]) >= 0 or (k + 1 < path.size() and graph.room_of(path[k + 1]) >= 0):
+			return at
 		k += 1
 		if k >= path.size():
 			return at

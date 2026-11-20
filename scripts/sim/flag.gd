@@ -28,7 +28,7 @@ var _beam_material: StandardMaterial3D
 
 func _init() -> void:
 	collision_layer = 0
-	collision_mask = Match.WORLD_LAYER
+	collision_mask = Match.WORLD_LAYER | Match.ASSET_LAYER
 	mass = 2.0
 	continuous_cd = true
 	linear_damp = 0.15
@@ -49,6 +49,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	name = "Flag%d" % entity_id
+	_set_mask()
 	var colour := Palette.team(team)
 	# Pole, cloth in the full team colour with a pale band across it, and a
 	# ball on top, as one mesh. The band keeps it clear of its own base.
@@ -158,6 +159,12 @@ func drop(velocity: Vector3, spin: Vector3, time: float) -> void:
 	angular_velocity = spin
 
 
+## It collides with the world, base assets and the other team's force
+## fields, like its own team's soldiers.
+func _set_mask() -> void:
+	collision_mask = Match.WORLD_LAYER | Match.ASSET_LAYER | Match.enemy_fields(team)
+
+
 func get_state() -> Dictionary:
 	return {
 		"kind": "flag",
@@ -182,6 +189,7 @@ func set_state(state: Dictionary) -> void:
 	carrier_id = state.carrier
 	return_in = state.return_in
 	home = state.home
+	_set_mask()
 	var where := Transform3D(Basis(state.rotation as Quaternion), state.position)
 	if mode == Mode.DROPPED:
 		freeze = false

@@ -118,6 +118,7 @@ func build_route_graph() -> RouteGraph:
 				graph.add_interest(RouteGraph.HIGH_GROUND, -1, graph.add_point(Vector3(x, surface_at(x, z), z)))
 	graph.auto_link(46.0, surface_at, blocked_at)
 	link_tower_tops(graph)
+	link_generator_rooms(graph)
 	return graph
 
 
@@ -142,6 +143,11 @@ func _build_ground() -> void:
 			colours.append(Color(normal.y, patch * 0.5 + 0.5, 0.0))
 	for j in nz:
 		for i in nx:
+			# No ground in a cell that reaches into a generator room. The
+			# hole stays under the deck, as the room is more than a cell from
+			# its edges.
+			if under_room(-LENGTH * 0.5 + (i + 0.5) * CELL, -WIDTH * 0.5 + (j + 0.5) * CELL, CELL * 0.5):
+				continue
 			var a := j * (nx + 1) + i
 			var b := a + 1
 			var c := a + nx + 1

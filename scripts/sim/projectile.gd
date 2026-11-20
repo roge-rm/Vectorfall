@@ -6,7 +6,7 @@ extends RefCounted
 
 var id := 0
 var weapon := 0
-## Entity id of the soldier who fired it.
+## Entity id of the soldier or turret that fired it.
 var shooter := 0
 var team := 0
 var position := Vector3.ZERO

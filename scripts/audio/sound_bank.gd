@@ -10,7 +10,7 @@ extends RefCounted
 const RATE := 22050
 const VOICE_RATE := 16000
 ## Every effect name get() knows.
-const NAMES: Array[String] = ["disc_fire", "disc_blast", "chaingun", "grenade_fire", "grenade_blast", "mortar_fire", "mortar_blast", "plasma_fire", "plasma_hit", "sniper_fire", "blaster_fire", "blaster_hit", "throw", "hand_grenade_blast", "mine_place", "mine_arm", "mine_blast", "pack_on", "pack_off", "repair", "shield_hit", "hit", "kill", "jet", "ski", "step", "land", "flag_grab", "flag_alarm", "flag_dropped", "flag_returned", "flag_captured", "flag_lost", "click", "back"]
+const NAMES: Array[String] = ["disc_fire", "disc_blast", "chaingun", "grenade_fire", "grenade_blast", "mortar_fire", "mortar_blast", "plasma_fire", "plasma_hit", "sniper_fire", "blaster_fire", "blaster_hit", "throw", "hand_grenade_blast", "mine_place", "mine_arm", "mine_blast", "pack_on", "pack_off", "repair", "shield_hit", "hit", "kill", "jet", "ski", "step", "land", "flag_grab", "flag_alarm", "flag_dropped", "flag_returned", "flag_captured", "flag_lost", "click", "back", "generator_hum", "power_down", "power_up", "turret_fire", "asset_destroyed"]
 ## Vowel formants in Hz (first, second) for the robot voices.
 const VOWELS: Array[Vector2] = [Vector2(780, 1250), Vector2(520, 1850), Vector2(320, 2250), Vector2(520, 900), Vector2(350, 760)]
 ## Robot voice pitch in Hz per team: team 0 low and buzzy, team 1 higher and hollow.
@@ -72,6 +72,12 @@ static func build() -> void:
 	_streams["pack_off"] = _wav(_ticks([990.0, 660.0], 0.05, 0.4))
 	_streams["repair"] = _wav(_loop(_repair(rng)), true)
 	_streams["shield_hit"] = _wav(_zap(rng, 0.2, 2600.0, 1500.0, 0.25))
+	# Base power, made last so everything before keeps its noise.
+	_streams["generator_hum"] = _wav(_loop(_hum(rng)), true)
+	_streams["power_down"] = _wav(_sweep(rng, 1.1, 420.0, 45.0, 0.7))
+	_streams["power_up"] = _wav(_sweep(rng, 0.8, 70.0, 440.0, 0.6))
+	_streams["turret_fire"] = _wav(_zap(rng, 0.22, 1300.0, 260.0, 0.2))
+	_streams["asset_destroyed"] = _wav(_blast(rng, 1.8, 0.5, 1.0))
 	build_ms = (Time.get_ticks_usec() - started) / 1000.0
 
 
@@ -282,6 +288,33 @@ static func _repair(rng: RandomNumberGenerator) -> PackedFloat32Array:
 		var wobble := 0.75 + 0.25 * sin(t * TAU * 9.0)
 		out[i] = (sin(t * TAU * 330.0) + 0.5 * sin(t * TAU * 495.0)) * wobble + low * 0.6
 	return _normalise(out, 0.45)
+
+
+## A low mains hum with a soft buzz over it, for a working generator.
+static func _hum(rng: RandomNumberGenerator) -> PackedFloat32Array:
+	var out := _buffer(1.1)
+	var low := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		low += 0.1 * (rng.randf_range(-1.0, 1.0) - low)
+		var throb := 0.85 + 0.15 * sin(t * TAU * 4.0)
+		out[i] = (sin(t * TAU * 60.0) + 0.6 * sin(t * TAU * 120.0) + 0.25 * signf(sin(t * TAU * 180.0))) * throb + low * 0.5
+	return _normalise(out, 0.6)
+
+
+## A tone sliding from one pitch to another with a little grit, fading in
+## and out: down for power going, up for it coming back.
+static func _sweep(rng: RandomNumberGenerator, length: float, from: float, to: float, peak: float) -> PackedFloat32Array:
+	var out := _buffer(length)
+	var phase := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		var share := t / length
+		phase += lerpf(from, to, share * share * (3.0 - 2.0 * share)) / RATE
+		var wave := sin(phase * TAU) + 0.35 * signf(sin(phase * TAU * 2.0))
+		var shape := minf(1.0, t * 60.0) * minf(1.0, (length - t) * 6.0)
+		out[i] = (wave + rng.randf_range(-1.0, 1.0) * 0.1) * shape
+	return _normalise(out, peak)
 
 
 ## Crossfades the last 0.1 s into the start, so the loop has no click.

@@ -5,10 +5,16 @@ extends Node3D
 ## only change in step(), once per physics tick, from their commands. The HUD
 ## and camera only read it, and hear about hits and kills from its signals.
 
-## Physics layers. The world is on 1, living soldiers on 2. Dead soldiers
-## leave layer 2, so shots and other soldiers pass through them.
+## Physics layers. The world is on 1, living soldiers on 2 and base assets
+## on 3 (bit 4). Dead soldiers leave layer 2, so shots and other soldiers pass
+## through them. Sight lines only check the world, so assets don't block them.
+## Team 0's force fields are on layer 4 (bit 8) and team 1's on 5 (bit 16), see
+## field_layer(): soldiers and dropped flags collide with the other team's.
+## Shots, blasts, mines and line checks pass through every field.
 const WORLD_LAYER := 1
 const SOLDIER_LAYER := 2
+const ASSET_LAYER := 4
+const FIELD_LAYER := 8
 ## Seconds from death to respawning.
 const RESPAWN_DELAY := 4.0
 ## Mines: most out per soldier, seconds to arm, how close an enemy sets one
@@ -50,6 +56,16 @@ signal match_over(winner: int)
 ## put a loadout on a soldier or restocked it.
 signal station_entered(station_id: int, soldier_id: int)
 signal station_used(station_id: int, soldier_id: int)
+## A base asset took damage, was destroyed, or came back after a repair.
+## attacker_id is 0 if it isn't known.
+signal asset_damaged(asset_id: int, attacker_id: int, amount: float, from: Vector3)
+signal asset_destroyed(asset_id: int, attacker_id: int)
+signal asset_repaired(asset_id: int, soldier_id: int)
+## A team's generator went down or came back.
+signal power_lost(team: int)
+## A turret fired a shot, added to projectiles before this.
+signal turret_fired(asset_id: int)
+signal power_back(team: int)
 ## A soldier gave its team's bots an order (Orders.Kind) in its command this
 ## tick, sent before it moves.
 signal ordered(soldier_id: int, order: int, arg: int)
@@ -76,6 +92,15 @@ var flags: Dictionary[int, Flag] = {}
 var stands: Dictionary[int, Vector3] = {}
 ## Inventory stations by id.
 var stations: Dictionary[int, InventoryStation] = {}
+## Base assets (generators, turrets and sensors) by id.
+var assets: Dictionary[int, BaseAsset] = {}
+## Each team's generator (the lowest id if it has more than one), by team.
+var generators: Dictionary[int, BaseAsset] = {}
+## Force fields over the ways into the generator rooms, by id.
+var fields: Dictionary[int, ForceField] = {}
+## Per team, the ids of living enemy soldiers its working sensors see, in id
+## order, made at the end of each tick from where everyone is.
+var sensed: Array[PackedInt32Array] = [PackedInt32Array(), PackedInt32Array()]
 var scores: Array[int] = [0, 0]
 var time_left := 0.0
 var over := false
@@ -120,9 +145,12 @@ func step(delta: float) -> void:
 			ordered.emit(id, command.order, command.order_arg)
 		entities[id].simulate(command, delta)
 	_step_stations(delta, ids)
+	_step_turrets(delta)
 	_step_projectiles(delta)
 	_step_mines(delta)
 	_step_flags(delta)
+	_step_fields()
+	_step_sensors()
 
 
 ## step() with each part timed for Prof. Does the same in the same order.
@@ -151,6 +179,9 @@ func _profiled_step(delta: float) -> void:
 		Prof.add("soldier_sim", Time.get_ticks_usec() - t)
 	_step_stations(delta, ids)
 	t = Time.get_ticks_usec()
+	_step_turrets(delta)
+	Prof.add("turrets", Time.get_ticks_usec() - t)
+	t = Time.get_ticks_usec()
 	_step_projectiles(delta)
 	Prof.add("projectiles", Time.get_ticks_usec() - t)
 	Prof.count("projectiles_live", projectiles.size())
@@ -158,6 +189,8 @@ func _profiled_step(delta: float) -> void:
 	t = Time.get_ticks_usec()
 	_step_flags(delta)
 	Prof.add("flags", Time.get_ticks_usec() - t)
+	_step_fields()
+	_step_sensors()
 	Prof.add("tick", Time.get_ticks_usec() - t0)
 
 
@@ -240,17 +273,246 @@ func add_station(team: int, at: Vector3) -> InventoryStation:
 	return station
 
 
-## The station a soldier is standing on, or null.
+## The working station a soldier is standing on, or null. Stations are off
+## while their team has no power.
 func station_under(who: Soldier) -> InventoryStation:
 	for id: int in stations:
-		if stations[id].holds(who):
+		if stations[id].holds(who) and powered(stations[id].team):
 			return stations[id]
 	return null
 
 
+## Puts a base asset of a kind (BaseAsset.Kind) for a team with its foot at a
+## point, facing a yaw in radians.
+func add_asset(team: int, kind: BaseAsset.Kind, at: Vector3, facing := 0.0) -> BaseAsset:
+	var made := BaseAsset.make(kind, team)
+	made.entity_id = next_id
+	next_id += 1
+	made.position = at
+	made.facing = facing
+	add_child(made)
+	assets[made.entity_id] = made
+	if kind == BaseAsset.Kind.GENERATOR and not generators.has(team):
+		generators[team] = made
+	return made
+
+
+## The physics layer bit a team's force fields are on.
+static func field_layer(team: int) -> int:
+	return FIELD_LAYER << team
+
+
+## The layers that block a team's soldiers and shots besides the world: the
+## other team's force fields. None for -1, a team not known.
+static func enemy_fields(team: int) -> int:
+	return field_layer(1 - team) if team == 0 or team == 1 else 0
+
+
+## Puts a force field for a team with its box's middle at a point, on while
+## the team has power.
+func add_field(team: int, at: Vector3, size: Vector3) -> ForceField:
+	var made := ForceField.new()
+	made.entity_id = next_id
+	next_id += 1
+	made.team = team
+	made.position = at
+	made.size = size
+	made.on = powered(team)
+	add_child(made)
+	fields[made.entity_id] = made
+	return made
+
+
+## Each force field on while its team has power and off without. A change
+## takes effect in the next tick's physics.
+func _step_fields() -> void:
+	for id: int in fields:
+		var field := fields[id]
+		var want := powered(field.team)
+		if field.on != want:
+			field.set_on(want)
+			if not want:
+				_wake_flags_on(field)
+
+
+
+## Wakes dropped flags resting on a field that just went off so they fall.
+func _wake_flags_on(field: ForceField) -> void:
+	for team: int in flags:
+		var each := flags[team]
+		if each.mode == Flag.Mode.DROPPED and field.touches(each.global_position, 3.0):
+			each.sleeping = false
+
+
+func asset(id: int) -> BaseAsset:
+	return assets.get(id)
+
+
+## The team's generator, or null if it has none.
+func generator(team: int) -> BaseAsset:
+	return generators.get(team)
+
+
+## True while the team's generator isn't destroyed, or if it has none.
+func powered(team: int) -> bool:
+	var made := generator(team)
+	return made == null or not made.destroyed
+
+
+## Takes health off an asset, none from its own team, and destroys it at 0.
+## team is the attacker's team, used when the attacker is gone.
+func damage_asset(target: BaseAsset, amount: float, attacker_id: int, team: int, from: Vector3) -> void:
+	if target.destroyed or amount <= 0.0:
+		return
+	var attacker := soldier(attacker_id)
+	if attacker != null:
+		team = attacker.team
+	if team == target.team:
+		return
+	target.health = maxf(target.health - amount, 0.0)
+	asset_damaged.emit(target.entity_id, attacker_id, amount, from)
+	if target.health <= 0.0:
+		target.destroyed = true
+		asset_destroyed.emit(target.entity_id, attacker_id)
+		if target.kind == BaseAsset.Kind.GENERATOR:
+			power_lost.emit(target.team)
+
+
+## The team of a soldier or asset by its entity id, or -1.
+func team_of(id: int) -> int:
+	var who := soldier(id)
+	if who != null:
+		return who.team
+	var machine := asset(id)
+	return machine.team if machine != null else -1
+
+
+## Each working turret with power turns towards the nearest enemy it can see
+## within range, leading it, and fires once its aim is close. It looks round
+## every LOOK_TICKS ticks, each turret on its own tick, with up to LOOK_RAYS
+## rays, and keeps its target between looks while it's alive and in range.
+func _step_turrets(delta: float) -> void:
+	if assets.is_empty():
+		return
+	var w := Weapon.all[Weapon.TURRET]
+	var ids := assets.keys()
+	ids.sort()
+	for id: int in ids:
+		var turret := assets[id]
+		if turret.kind != BaseAsset.Kind.TURRET:
+			continue
+		if turret.destroyed or not powered(turret.team):
+			turret.target_id = 0
+			continue
+		turret.cooldown = maxf(turret.cooldown - delta, 0.0)
+		var pivot := turret.pivot()
+		if (tick + id) % BaseAsset.LOOK_TICKS == 0:
+			turret.target_id = _turret_target(turret, pivot)
+		var target := soldier(turret.target_id)
+		if target != null and (target.dead or target.centre().distance_to(pivot) > BaseAsset.TURRET_RANGE or not turret.guards(target.centre())):
+			target = null
+		if target == null:
+			turret.target_id = 0
+			turret.turn_towards(turret.facing, 0.0, BaseAsset.TURN_RATE * delta)
+			continue
+		var fall := target.tuning.gravity if not target.grounded and not target.jetting else 0.0
+		var to := BotCombat.lead(pivot, Vector3.ZERO, target.centre(), target.velocity, fall, w) - pivot
+		var want_yaw := atan2(-to.x, -to.z)
+		var want_pitch := clampf(atan2(to.y, Vector2(to.x, to.z).length()), BaseAsset.PITCH_MIN, BaseAsset.PITCH_MAX)
+		turret.turn_towards(want_yaw, want_pitch, BaseAsset.TURN_RATE * delta)
+		var error := BaseAsset.direction(turret.aim_yaw, turret.aim_pitch).angle_to(BaseAsset.direction(want_yaw, want_pitch))
+		if turret.cooldown <= 0.0 and error < BaseAsset.FIRE_CONE:
+			_turret_fire(turret, pivot, w)
+
+
+## The nearest living enemy it guards (BaseAsset.guards()) within a turret's range with a clear line from its
+## swivel point, trying the nearest LOOK_RAYS, or 0. Walls and ground block
+## the line.
+func _turret_target(turret: BaseAsset, pivot: Vector3) -> int:
+	var near: Array = []
+	var ids := entities.keys()
+	ids.sort()
+	for id: int in ids:
+		var other := soldier(id)
+		if other == null or other.dead or other.team == turret.team or not turret.guards(other.centre()):
+			continue
+		var distance := other.centre().distance_to(pivot)
+		if distance <= BaseAsset.TURRET_RANGE:
+			near.append([distance, id])
+	near.sort_custom(func(x: Array, y: Array) -> bool: return x[0] < y[0] or (x[0] == y[0] and x[1] < y[1]))
+	var blocks := WORLD_LAYER
+	for k in mini(near.size(), BaseAsset.LOOK_RAYS):
+		var id: int = near[k][1]
+		if Prof.on:
+			Prof.count("ray_by_turret")
+		if world_ray(pivot, soldier(id).centre(), blocks).is_empty():
+			return id
+	return 0
+
+
+## A turret's shot along its aim from its swivel point, with the turret's id
+## as the shooter and its team.
+func _turret_fire(turret: BaseAsset, pivot: Vector3, w: Weapon) -> void:
+	var dir := BaseAsset.direction(turret.aim_yaw, turret.aim_pitch)
+	var shot := Projectile.new()
+	shot.id = next_id
+	next_id += 1
+	shot.weapon = w.slot
+	shot.shooter = turret.entity_id
+	shot.team = turret.team
+	shot.position = pivot
+	shot.velocity = dir * w.speed
+	shot.damage = w.damage
+	shot.muzzle_offset = dir * BaseAsset.BARREL
+	projectiles.append(shot)
+	turret.cooldown = w.fire_interval
+	turret_fired.emit(turret.entity_id)
+
+
+## Fills sensed: each team's working sensors with power see living enemies
+## within SENSOR_RANGE of their top, except ones with a jammer on.
+func _step_sensors() -> void:
+	sensed[0] = PackedInt32Array()
+	sensed[1] = PackedInt32Array()
+	if assets.is_empty():
+		return
+	var tops: Array = [[], []]
+	var asset_ids := assets.keys()
+	asset_ids.sort()
+	for id: int in asset_ids:
+		var sensor := assets[id]
+		if sensor.kind == BaseAsset.Kind.SENSOR and not sensor.destroyed and (sensor.team == 0 or sensor.team == 1) and powered(sensor.team):
+			tops[sensor.team].append(sensor.global_position + Vector3.UP * sensor.height())
+	if tops[0].is_empty() and tops[1].is_empty():
+		return
+	var ids := entities.keys()
+	ids.sort()
+	for id: int in ids:
+		var other := soldier(id)
+		if other == null or other.dead or other.jamming() or (other.team != 0 and other.team != 1):
+			continue
+		var team := 1 - other.team
+		for top: Vector3 in tops[team]:
+			if top.distance_to(other.centre()) <= BaseAsset.SENSOR_RANGE:
+				sensed[team].append(id)
+				break
+
+
+## Puts health back on an asset. A destroyed one works again once it's full.
+func repair_asset(target: BaseAsset, amount: float, by: int) -> void:
+	target.health = minf(target.health + amount, target.max_health())
+	if target.destroyed and target.health >= target.max_health():
+		target.destroyed = false
+		asset_repaired.emit(target.entity_id, by)
+		if target.kind == BaseAsset.Kind.GENERATOR:
+			power_back.emit(target.team)
+
+
 ## Each station counts down its cooldowns, then puts the wanted loadout on
 ## each soldier that just stepped on (once its cooldown is over) and on each
-## one on the pad whose wanted loadout differs from what it wears.
+## one on the pad whose wanted loadout differs from what it wears. A station
+## without power does nothing and forgets who's on it, so stepping on counts
+## again once power is back.
 func _step_stations(delta: float, ids: Array) -> void:
 	if stations.is_empty():
 		return
@@ -264,6 +526,9 @@ func _step_stations(delta: float, ids: Array) -> void:
 			station.cooldowns[id] -= delta
 			if station.cooldowns[id] <= 0.0:
 				station.cooldowns.erase(id)
+		if not powered(station.team):
+			station.on.clear()
+			continue
 		var now: Array[int] = []
 		for id: int in ids:
 			var who := soldier(id)
@@ -477,11 +742,15 @@ func _step_projectiles(delta: float) -> void:
 		var owner_body := soldier(shot.shooter)
 		if owner_body != null:
 			exclude.append(owner_body.get_rid())
+		elif assets.has(shot.shooter):
+			exclude.append(assets[shot.shooter].get_rid())
 		if Prof.on:
 			Prof.count("ray_by_projectile")
-		# A thrown mine passes through soldiers and sticks to the world.
+		# A thrown mine passes through soldiers and sticks to the world or
+		# an asset.
 		var is_mine := shot.weapon == Weapon.MINE
-		var hit := world_ray(shot.position, to, WORLD_LAYER if is_mine else WORLD_LAYER | SOLDIER_LAYER, exclude)
+		var mask := WORLD_LAYER | ASSET_LAYER
+		var hit := world_ray(shot.position, to, mask if is_mine else mask | SOLDIER_LAYER, exclude)
 		shot.age += delta
 		if is_mine:
 			if not hit.is_empty():
@@ -491,8 +760,10 @@ func _step_projectiles(delta: float) -> void:
 				kept.append(shot)
 		elif not hit.is_empty():
 			var victim := hit.collider as Soldier
+			var machine := hit.collider as BaseAsset
 			var normal: Vector3 = hit.normal
-			if victim == null and shot.bounces_left != 0:
+			# Grenades bounce off the world and go off on a soldier or asset.
+			if victim == null and machine == null and shot.bounces_left != 0:
 				# The rest of the tick's move is dropped, which is under 2 cm at
 				# grenade speeds after a bounce.
 				shot.position = hit.position + normal * 0.05
@@ -504,7 +775,7 @@ func _step_projectiles(delta: float) -> void:
 				else:
 					kept.append(shot)
 			else:
-				_impact(shot, hit.position + normal * 0.05, normal, victim)
+				_impact(shot, hit.position + normal * 0.05, normal, victim, machine)
 		elif weapon.fuse > 0.0 and shot.age >= weapon.fuse:
 			_impact(shot, to, Vector3.UP, null)
 		elif shot.age >= weapon.lifetime:
@@ -515,7 +786,7 @@ func _step_projectiles(delta: float) -> void:
 	projectiles = kept
 
 
-func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier) -> void:
+func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier, machine: BaseAsset = null) -> void:
 	var weapon := Weapon.all[shot.weapon]
 	shot.position = at
 	impacted.emit(weapon.slot, at, normal)
@@ -531,17 +802,27 @@ func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier) ->
 		var attacker := soldier(shot.shooter)
 		if attacker != null:
 			from = attacker.global_position
+		elif assets.has(shot.shooter):
+			from = assets[shot.shooter].pivot()
 		damage(direct, shot.damage, shot.shooter, weapon.slot, from)
+	var direct_asset := machine if machine != null and shot.damage > 0.0 else null
+	if direct_asset != null:
+		damage_asset(direct_asset, shot.damage, shot.shooter, shot.team, at)
 	if weapon.splash_radius > 0.0:
-		explode(at, weapon.slot, shot.shooter, direct)
+		explode(at, weapon.slot, shot.shooter, direct, -1, direct_asset, shot.team)
 
 
 ## A blast from a weapon at a point: splash damage and a push on every living
-## soldier in range that the blast can see, less for those further away.
-func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = null, attacker_team := -1) -> void:
+## soldier in range that the blast can see, less for those further away, and
+## splash damage on every enemy asset in range it can see. asset_team is the
+## attacker's team for assets when the attacker is gone, if attacker_team
+## isn't given.
+func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = null, attacker_team := -1, skip_asset: BaseAsset = null, asset_team := -1) -> void:
 	var weapon := Weapon.all[weapon_slot]
 	# With the attacker gone, its team still takes no damage, as in damage().
 	var orphan_team := attacker_team if soldier(attacker_id) == null else -1
+	# Walls and ground block it. Force fields don't.
+	var blocks := WORLD_LAYER
 	var ids := entities.keys()
 	ids.sort()
 	for id: int in ids:
@@ -554,7 +835,7 @@ func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = nu
 		# Walls and ground between the blast and the soldier block it.
 		if Prof.on:
 			Prof.count("ray_by_blast")
-		if not line_clear(at, target.centre()):
+		if not world_ray(at, target.centre(), blocks).is_empty():
 			continue
 		var away := target.centre() - at
 		away = away.normalized() if away.length() > 0.01 else Vector3.UP
@@ -562,6 +843,18 @@ func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = nu
 		if target.team == orphan_team:
 			continue
 		damage(target, weapon.splash_damage_at(distance), attacker_id, weapon_slot, at)
+	if not assets.is_empty():
+		var team := asset_team if attacker_team < 0 else attacker_team
+		var asset_ids := assets.keys()
+		asset_ids.sort()
+		for id: int in asset_ids:
+			var target := assets[id]
+			if target == skip_asset or target.destroyed:
+				continue
+			var distance := target.distance_to_body(at)
+			if distance > weapon.splash_radius or not world_ray(at, target.centre(), blocks).is_empty():
+				continue
+			damage_asset(target, weapon.splash_damage_at(distance), attacker_id, team, at)
 	_set_off_mines_near(at)
 
 
@@ -632,7 +925,7 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 	var attacker := soldier(attacker_id)
 	if attacker_id == victim.entity_id:
 		amount *= Weapon.all[weapon_slot].self_damage_share
-	elif attacker != null and attacker.team == victim.team:
+	elif team_of(attacker_id) == victim.team:
 		return
 	if victim.shielded():
 		var per_point := victim.pack().energy_per_point
@@ -656,8 +949,9 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 
 
 ## The nearest hurt living teammate a soldier is looking towards, within
-## reach metres of its eye and not behind a wall, or null.
-func repair_target(healer: Soldier, reach: float) -> Soldier:
+## reach metres of its eye and not behind a wall, else the nearest damaged or
+## destroyed asset of its team like that, or null.
+func repair_target(healer: Soldier, reach: float) -> Node3D:
 	var eye := healer.eye_transform()
 	var ahead := -eye.basis.z
 	var best: Soldier = null
@@ -679,7 +973,26 @@ func repair_target(healer: Soldier, reach: float) -> Soldier:
 			continue
 		best = other
 		best_distance = distance
-	return best
+	if best != null:
+		return best
+	var best_asset: BaseAsset = null
+	best_distance = reach
+	var asset_ids := assets.keys()
+	asset_ids.sort()
+	for id: int in asset_ids:
+		var machine := assets[id]
+		if machine.team != healer.team or machine.health >= machine.max_health():
+			continue
+		var distance := machine.distance_to_body(eye.origin)
+		if distance > best_distance:
+			continue
+		if distance > 0.3 and ahead.angle_to(machine.centre() - eye.origin) > REPAIR_CONE:
+			continue
+		if not line_clear(eye.origin, machine.centre()):
+			continue
+		best_asset = machine
+		best_distance = distance
+	return best_asset
 
 
 ## Puts a dead soldier back at one of its team's spawn points, picked with the
@@ -715,6 +1028,12 @@ func get_state() -> Dictionary:
 	var station_states := {}
 	for id: int in stations:
 		station_states[id] = stations[id].get_state()
+	var asset_states := {}
+	for id: int in assets:
+		asset_states[id] = assets[id].get_state()
+	var field_states := {}
+	for id: int in fields:
+		field_states[id] = fields[id].get_state()
 	return {
 		"scores": scores.duplicate(),
 		"time_left": time_left,
@@ -723,6 +1042,8 @@ func get_state() -> Dictionary:
 		"stands": stands.duplicate(),
 		"flags": flag_states,
 		"stations": station_states,
+		"assets": asset_states,
+		"fields": field_states,
 		"tick": tick,
 		"seed": seed_value,
 		"rng_state": rng.state,
@@ -776,6 +1097,34 @@ func set_state(state: Dictionary) -> void:
 			add_child(made)
 			stations[id] = made
 		stations[id].set_state(station_states[id])
+	var asset_states: Dictionary = state.get("assets", {})
+	for id: int in asset_states:
+		if not assets.has(id):
+			var made := BaseAsset.make(asset_states[id].asset, asset_states[id].team)
+			made.entity_id = id
+			made.position = asset_states[id].position
+			made.facing = asset_states[id].facing
+			add_child(made)
+			assets[id] = made
+		assets[id].set_state(asset_states[id])
+	generators.clear()
+	var generator_ids := assets.keys()
+	generator_ids.sort()
+	for id: int in generator_ids:
+		if assets[id].kind == BaseAsset.Kind.GENERATOR and not generators.has(assets[id].team):
+			generators[assets[id].team] = assets[id]
+	var field_states: Dictionary = state.get("fields", {})
+	for id: int in field_states:
+		if not fields.has(id):
+			var made := ForceField.new()
+			made.entity_id = id
+			made.team = field_states[id].team
+			made.position = field_states[id].position
+			made.size = field_states[id].size
+			made.on = field_states[id].on
+			add_child(made)
+			fields[id] = made
+		fields[id].set_state(field_states[id])
 	var source_states: Dictionary = state.get("sources", {})
 	for id: int in source_states:
 		if sources.has(id):
@@ -786,3 +1135,5 @@ func set_state(state: Dictionary) -> void:
 	mines.clear()
 	for mine_state: Dictionary in state.get("mines", []):
 		mines.append(Mine.from_state(mine_state))
+	if is_inside_tree():
+		_step_sensors()

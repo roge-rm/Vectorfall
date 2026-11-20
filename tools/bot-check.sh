@@ -3,8 +3,10 @@
 # Ochre Fold and fails if the bots stop moving (any match with 60 s or more
 # stuck) or, over all the matches together, stop attacking, defending or
 # scoring: fewer than MIN_GRABS grabs, MIN_RETURNS returns or MIN_CAPTURES
-# captures. Reports go to build/bot-reports/ as usual, with Godot's output
-# for a match that fails or ends with no result.
+# captures. It reports generators destroyed and repaired and turrets
+# destroyed too. Reports go to
+# build/bot-reports/ as usual, with Godot's output for a match that fails or
+# ends with no result.
 #
 #   tools/bot-check.sh
 set -uo pipefail
@@ -19,6 +21,9 @@ status=0
 grabs=0
 returns=0
 captures=0
+generators=0
+fixed=0
+turrets=0
 for seed in $SEEDS; do
 	out=$(tools/bot-match.sh --bots 8 --seed "$seed" --minutes "$MINUTES" --check)
 	code=$?
@@ -36,6 +41,9 @@ for seed in $SEEDS; do
 	captures=$((captures + $(echo "$line" | sed -n 's/.*: \([0-9]*\) captures.*/\1/p')))
 	grabs=$((grabs + $(echo "$line" | sed -n 's/.* \([0-9]*\) grabs.*/\1/p')))
 	returns=$((returns + $(echo "$line" | sed -n 's/.* \([0-9]*\) returns.*/\1/p')))
+	generators=$((generators + $(echo "$line" | sed -n 's/.* \([0-9]*\) generators destroyed, \([0-9]*\) repaired.*/\1/p')))
+	fixed=$((fixed + $(echo "$line" | sed -n 's/.* \([0-9]*\) generators destroyed, \([0-9]*\) repaired.*/\2/p')))
+	turrets=$((turrets + $(echo "$line" | sed -n 's/.* \([0-9]*\) turrets destroyed.*/\1/p')))
 done
 for want in "grabs $grabs $MIN_GRABS" "returns $returns $MIN_RETURNS" "captures $captures $MIN_CAPTURES"; do
 	set -- $want
@@ -44,5 +52,5 @@ for want in "grabs $grabs $MIN_GRABS" "returns $returns $MIN_RETURNS" "captures 
 		status=1
 	fi
 done
-echo "Bot check: $captures captures, $grabs grabs, $returns returns over seeds $SEEDS, $([ $status -eq 0 ] && echo passed || echo failed)"
+echo "Bot check: $captures captures, $grabs grabs, $returns returns, $generators generators destroyed, $fixed repaired, $turrets turrets destroyed over seeds $SEEDS, $([ $status -eq 0 ] && echo passed || echo failed)"
 exit $status

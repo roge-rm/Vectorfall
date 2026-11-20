@@ -15,6 +15,27 @@ const RAMP_RUN := 13.69
 const RAMP_SLOPE := 0.2126
 ## Grid cell size for looking up obstacles, in metres.
 const OBSTACLE_CELL := 10.0
+## The generator room under the back of each base's deck. Places in it are
+## given relative to the base's middle as (along, side), with along towards
+## the other base. Its floor is ROOM_DEPTH below the deck top, under a 1 m
+## ceiling, and it reaches ROOM_HALF to each side. The ground under it is cut
+## or lowered, so a map's ground cells must be no wider than 4 m for the
+## room's footprint grown by a cell to stay under the deck.
+const ROOM_DEPTH := 4.0
+const ROOM_BACK := -7.5
+const ROOM_FRONT := 0.5
+const ROOM_HALF := 7.5
+## The two ways into the room, 3 m square holes in the deck at its back
+## corners, each closed by a force field: the middle of the one on the +side
+## side, and their size.
+const OPENING_AT := Vector2(-6.0, 6.0)
+const OPENING := 3.0
+## The room turret only fires at enemies within this many metres of one of
+## its base's openings across the ground, so it guards the way in and leaves
+## the flag to the other turret.
+const ROOM_GUARD := 6.0
+## A force field's box: it fills its opening, as deep as the ceiling.
+const FIELD_SIZE := Vector3(3.0, 1.0, 3.0)
 ## The map main.gd loads when nothing else is asked for.
 const DEFAULT := "ochre_fold"
 const NAMES: Array[String] = ["ochre_fold", "test"]
@@ -120,11 +141,103 @@ func stand_top(team: int) -> Vector3:
 
 
 ## Where a team's two inventory stations stand: on the deck between the flag
-## stand and the tower, one each side, clear of the route points on the deck
-## and the tower's foot. Maps with other bases override it.
+## stand and the tower, one each side, clear of the route points on the deck,
+## the turret by the stand and the ways into the generator room. Maps with
+## other bases override it.
 func station_points(team: int) -> Array[Vector3]:
-	var x := base_x(team) - front(team) * 4.0
-	return [Vector3(x, deck_height(), -5.0), Vector3(x, deck_height(), 5.0)]
+	var x := base_x(team) - front(team) * 2.5
+	return [Vector3(x, deck_height(), -5.5), Vector3(x, deck_height(), 5.5)]
+
+
+## The top of the generator room's floor.
+func room_floor() -> float:
+	return deck_height() - ROOM_DEPTH
+
+
+## A place in a team's base, given as (along, side) from its middle, at a
+## height.
+func base_place(team: int, along: float, side: float, y: float) -> Vector3:
+	return Vector3(base_x(team) + front(team) * along, y, side)
+
+
+## Where a team's generator stands: on the floor of its room, in the middle
+## of its back half.
+func generator_point(team: int) -> Vector3:
+	return base_place(team, -4.5, 0.0, room_floor())
+
+
+## The middles of a team's generator room openings, on the deck.
+func opening_points(team: int) -> Array[Vector3]:
+	var y := deck_height()
+	return [base_place(team, OPENING_AT.x, -OPENING_AT.y, y), base_place(team, OPENING_AT.x, OPENING_AT.y, y)]
+
+
+## The middle of each of a team's two force fields, filling the openings
+## into its generator room.
+func field_points(team: int) -> Array[Vector3]:
+	var y := deck_height() - FIELD_SIZE.y * 0.5
+	return [base_place(team, OPENING_AT.x, -OPENING_AT.y, y), base_place(team, OPENING_AT.x, OPENING_AT.y, y)]
+
+
+## True over either base's generator room, its footprint grown by margin
+## metres each way.
+func under_room(x: float, z: float, margin := 0.0) -> bool:
+	if absf(z) > ROOM_HALF + margin:
+		return false
+	for team in 2:
+		var along := (x - base_x(team)) * front(team)
+		if along >= ROOM_BACK - margin and along <= ROOM_FRONT + margin:
+			return true
+	return false
+
+
+## True over one of the openings into a generator room.
+func in_opening(x: float, z: float) -> bool:
+	var half := OPENING * 0.5
+	if absf(absf(z) - OPENING_AT.y) > half:
+		return false
+	for team in 2:
+		var along := (x - base_x(team)) * front(team)
+		if absf(along - OPENING_AT.x) <= half:
+			return true
+	return false
+
+
+## Where a team's two turrets stand on the deck: one by the flag stand, one
+## at a back corner near the ways into the generator room, both clear of the
+## route points and the stations. The corner one only guards the openings
+## (ROOM_GUARD).
+func turret_points(team: int) -> Array[Vector3]:
+	var x := base_x(team)
+	var ahead := front(team)
+	return [Vector3(x, deck_height(), -4.5), Vector3(x - ahead * 9.5, deck_height(), -9.5)]
+
+
+## Where a team's sensor stands: on the deck on top of its tower, on the side
+## away from the route point there.
+func sensor_point(team: int) -> Vector3:
+	var back := base_x(team) - front(team) * (BASE_SIZE * 0.5 - 4.0)
+	return Vector3(back, base_ground + 17.0, -3.0)
+
+
+## The yaw a team's base assets face: towards the other base.
+func asset_facing(team: int) -> float:
+	return -PI * 0.5 if team == 0 else PI * 0.5
+
+
+## Puts a team's generator, turrets, sensor and force fields in a match.
+func add_base_power(game: Match, team: int) -> void:
+	var facing := asset_facing(team)
+	game.add_asset(team, BaseAsset.Kind.GENERATOR, generator_point(team), facing)
+	var turrets := turret_points(team)
+	for k in turrets.size():
+		var turret := game.add_asset(team, BaseAsset.Kind.TURRET, turrets[k], facing)
+		if k == 1:
+			turret.guard_points = opening_points(team)
+			turret.guard_radius = ROOM_GUARD
+	game.add_asset(team, BaseAsset.Kind.SENSOR, sensor_point(team), facing)
+	for at in field_points(team):
+		game.add_field(team, at, FIELD_SIZE)
 
 
 ## The spot a carrier touches to score.
@@ -146,7 +259,7 @@ func surface_at(x: float, z: float) -> float:
 	for team in 2:
 		var dx := x - base_x(team)
 		if absf(dx) <= BASE_SIZE * 0.5 and absf(z) <= BASE_SIZE * 0.5:
-			return deck
+			return room_floor() if in_opening(x, z) else deck
 		var along := dx * front(team) - BASE_SIZE * 0.5
 		if along > 0.0 and along < RAMP_RUN and absf(z) <= 5.0:
 			h = maxf(h, deck - along * RAMP_SLOPE)
@@ -191,9 +304,10 @@ func _sort_obstacles() -> void:
 
 
 ## The route graph points every base has: the flag stand, the spawns, the deck
-## corners to defend, the ramp and the sides as ways in, and the tower top,
-## jetted up to from beside it. Call it before auto_link(), and
-## link_tower_tops() after.
+## corners to defend, the ramp and the sides as ways in, a point on the deck
+## beside each opening into the generator room, and the tower top, jetted up
+## to from beside it. Call it before auto_link(), and link_tower_tops() and
+## link_generator_rooms() after.
 func add_base_points(graph: RouteGraph) -> void:
 	var deck := deck_height()
 	for team in 2:
@@ -204,8 +318,11 @@ func add_base_points(graph: RouteGraph) -> void:
 			var spawn_x := x - ahead * spawn_back
 			var spawn_z: float = side * spawn_side
 			graph.add_interest(RouteGraph.SPAWN, team, graph.add_point(Vector3(spawn_x, surface_at(spawn_x, spawn_z), spawn_z)))
-		for corner in [Vector2(7.0, 7.0), Vector2(7.0, -7.0), Vector2(-7.0, 7.0), Vector2(-7.0, -7.0)]:
-			graph.add_interest(RouteGraph.DEFENCE, team, graph.add_point(Vector3(x + corner.x, deck, corner.y)))
+		# The back corners sit behind the openings into the generator room.
+		for corner in [Vector2(7.0, 7.0), Vector2(7.0, -7.0), Vector2(-10.0, 6.5), Vector2(-10.0, -6.5)]:
+			graph.add_interest(RouteGraph.DEFENCE, team, graph.add_point(base_place(team, corner.x, corner.y, deck)))
+		for side in [-1.0, 1.0]:
+			graph.add_point(_beside_opening(team, side))
 		# The ramp up the front of the deck is the way in without a jet.
 		var ramp_top := graph.add_point(Vector3(x + ahead * 10.5, deck, 0.0))
 		var foot_x := x + ahead * 27.0
@@ -218,22 +335,49 @@ func add_base_points(graph: RouteGraph) -> void:
 
 
 ## The deck on top of each tower, jetted up to from beside it and dropped off
-## back to the same spot.
+## back to the same spot, which is joined to the back corner on that side.
 func link_tower_tops(graph: RouteGraph) -> void:
 	var deck := deck_height()
 	for team in 2:
-		var ahead := front(team)
-		var back := base_x(team) - ahead * (BASE_SIZE * 0.5 - 4.0)
+		var back := base_x(team) - front(team) * (BASE_SIZE * 0.5 - 4.0)
 		var top := graph.add_point(Vector3(back, base_ground + 17.0, 3.75))
-		var foot := graph.add_point(Vector3(back, deck, 8.0))
+		var foot := graph.add_point(base_place(team, -9.5, 9.5, deck))
 		graph.add_interest(RouteGraph.HIGH_GROUND, team, top)
 		graph.add_interest(RouteGraph.DEFENCE, team, top)
 		graph.add_link(foot, top, RouteGraph.Kind.JET, true)
 		graph.add_link(top, foot, RouteGraph.Kind.RUN)
-		var near := graph.nearest(Vector3(back + ahead * 3.0, deck, 7.0))
+		var near := graph.nearest(base_place(team, -10.0, 6.5, deck))
 		if near != foot:
 			graph.add_link(foot, near, RouteGraph.Kind.RUN)
 			graph.add_link(near, foot, RouteGraph.Kind.RUN)
+
+
+## The point on the deck beside an opening into a team's generator room, on
+## its outer side, side -1 or 1.
+func _beside_opening(team: int, side: float) -> Vector3:
+	return base_place(team, OPENING_AT.x, side * (OPENING_AT.y + OPENING * 0.5 + 1.25), deck_height())
+
+
+## Points in each generator room: one under each opening and one in front of
+## the generator, the room's GENERATOR point. You drop in from the point beside
+## each opening and jet back out to it; those links are the room team's field
+## links, which enemy bots don't take while its field is on. Call it after
+## auto_link(), since the deck above the room would fool it.
+func link_generator_rooms(graph: RouteGraph) -> void:
+	var floor_y := room_floor()
+	for team in 2:
+		var middle := graph.add_point(base_place(team, -1.5, 0.0, floor_y))
+		graph.add_interest(RouteGraph.GENERATOR, team, middle)
+		graph.add_interest(RouteGraph.DEFENCE, team, middle)
+		graph.set_room(middle, team)
+		for side in [-1.0, 1.0]:
+			var below := graph.add_point(base_place(team, OPENING_AT.x, side * OPENING_AT.y, floor_y))
+			graph.set_room(below, team)
+			var above := graph.nearest(_beside_opening(team, side))
+			graph.add_link(above, below, RouteGraph.Kind.RUN).field = team
+			graph.add_link(below, above, RouteGraph.Kind.JET, true).field = team
+			graph.add_link(below, middle, RouteGraph.Kind.RUN)
+			graph.add_link(middle, below, RouteGraph.Kind.RUN)
 
 
 ## True on a base's deck or close round it, where the lattice of route points
@@ -251,10 +395,7 @@ func _build_base(team: int) -> void:
 	base.name = "Base%d" % team
 	add_child(base)
 	var ground := base_ground
-	# The platform, a raised deck with a ramp up its front, reaching
-	# deck_depth below the ground so a slope under it never shows a gap.
-	var tall := 2.0 + deck_depth
-	_box(base, Vector3(BASE_SIZE, tall, BASE_SIZE), Transform3D(Basis.IDENTITY, Vector3(x, ground + 2.0 - tall * 0.5, 0.0)), Cel.material(palette.structure))
+	_build_deck(base, team)
 	var ahead := front(team)
 	# Its top meets the deck's edge, with no lip to catch on.
 	var tilt := deg_to_rad(12.0)
@@ -272,6 +413,181 @@ func _build_base(team: int) -> void:
 	for side in [-1.0, 1.0]:
 		_box(base, Vector3(3.0, 4.0, 3.0), Transform3D(Basis.IDENTITY, Vector3(x, ground + 4.0, side * (BASE_SIZE * 0.5 - 2.0))), team_wall)
 		obstacles.append(Vector3(x, side * (BASE_SIZE * 0.5 - 2.0), 2.2))
+
+
+## The platform, a raised deck reaching deck_depth below the ground, or below
+## the room's floor if that's deeper, so a slope under it never shows a gap.
+## Under its back half is the generator room, closed by the deck all round,
+## with a floor of its own and two openings in its ceiling. Each piece is a
+## box given as along and side ranges from the base's middle.
+func _build_deck(base: Node3D, team: int) -> void:
+	var deck := deck_height()
+	var floor_y := room_floor()
+	var ceiling := deck - 1.0
+	var bottom := minf(base_ground - deck_depth, floor_y - 1.0)
+	var half := BASE_SIZE * 0.5
+	var hole_back := OPENING_AT.x - OPENING * 0.5
+	var hole_front := OPENING_AT.x + OPENING * 0.5
+	var hole_in := OPENING_AT.y - OPENING * 0.5
+	var structure := Cel.material(palette.structure)
+	# The top slab: in front of the openings, behind them, and between and
+	# beside them.
+	var top_pieces := [
+		Rect2(hole_front, -half, half - hole_front, BASE_SIZE),
+		Rect2(-half, -half, hole_back + half, BASE_SIZE),
+		Rect2(hole_back, -hole_in, OPENING, hole_in * 2.0),
+		Rect2(hole_back, -half, OPENING, half - ROOM_HALF),
+		Rect2(hole_back, ROOM_HALF, OPENING, half - ROOM_HALF),
+	]
+	_deck_top(base, team, top_pieces, ceiling, deck, structure)
+	# The walls round the room, down from the top slab.
+	var wall_pieces := [
+		Rect2(ROOM_FRONT, -half, half - ROOM_FRONT, BASE_SIZE),
+		Rect2(-half, -half, ROOM_BACK + half, BASE_SIZE),
+		Rect2(ROOM_BACK, -half, ROOM_FRONT - ROOM_BACK, half - ROOM_HALF),
+		Rect2(ROOM_BACK, ROOM_HALF, ROOM_FRONT - ROOM_BACK, half - ROOM_HALF),
+	]
+	for piece: Rect2 in wall_pieces:
+		_deck_box(base, team, piece, bottom, ceiling, structure)
+	var room := Rect2(ROOM_BACK, -ROOM_HALF, ROOM_FRONT - ROOM_BACK, ROOM_HALF * 2.0)
+	_deck_box(base, team, room, floor_y - 1.0, floor_y, Cel.material(palette.structure.darkened(0.4)))
+	_dress_room(base, team)
+
+
+## Trim in the generator room as one ink mesh with no collision: a dark
+## skirting and a team coloured stripe round the walls, ribs up them, pipes
+## under the ceiling, beams across it clear of the openings, lamps and a
+## team coloured plate under the generator. Built with along as x and side
+## as z, then turned to face the base's way.
+func _dress_room(base: Node3D, team: int) -> void:
+	var dark := Color(0.17, 0.16, 0.2, 0.0)
+	var rib := palette.structure.darkened(0.15)
+	rib.a = 0.0
+	var lamp := Color(1.0, 0.95, 0.7, 0.0)
+	var stripe := Color(1.0, 1.0, 1.0, 1.0)
+	var floor_y := room_floor()
+	var high := ROOM_DEPTH - 1.0
+	var length := ROOM_FRONT - ROOM_BACK
+	var middle := (ROOM_FRONT + ROOM_BACK) * 0.5
+	var parts := []
+	# Skirting and stripe on the front and back walls, then the side walls.
+	for end: float in [ROOM_BACK, ROOM_FRONT]:
+		var inward := 1.0 if end == ROOM_BACK else -1.0
+		parts.append([Cel.box(Vector3(0.1, 0.3, ROOM_HALF * 2.0)), Transform3D(Basis.IDENTITY, Vector3(end + inward * 0.05, floor_y + 0.15, 0.0)), dark])
+		parts.append([Cel.box(Vector3(0.06, 0.14, ROOM_HALF * 2.0)), Transform3D(Basis.IDENTITY, Vector3(end + inward * 0.03, floor_y + 1.5, 0.0)), stripe])
+		for k in 5:
+			var side := -6.0 + k * 3.0
+			parts.append([Cel.box(Vector3(0.18, high, 0.35)), Transform3D(Basis.IDENTITY, Vector3(end + inward * 0.09, floor_y + high * 0.5, side)), rib])
+	for edge: float in [-ROOM_HALF, ROOM_HALF]:
+		var inward := 1.0 if edge < 0.0 else -1.0
+		parts.append([Cel.box(Vector3(length, 0.3, 0.1)), Transform3D(Basis.IDENTITY, Vector3(middle, floor_y + 0.15, edge + inward * 0.05)), dark])
+		parts.append([Cel.box(Vector3(length, 0.14, 0.06)), Transform3D(Basis.IDENTITY, Vector3(middle, floor_y + 1.5, edge + inward * 0.03)), stripe])
+		for along: float in [-1.5, -3.5]:
+			parts.append([Cel.box(Vector3(0.35, high, 0.18)), Transform3D(Basis.IDENTITY, Vector3(along, floor_y + high * 0.5, edge + inward * 0.09)), rib])
+			parts.append([Cel.box(Vector3(0.22, 0.12, 0.06)), Transform3D(Basis.IDENTITY, Vector3(along + 1.0, floor_y + 2.2, edge + inward * 0.03)), lamp])
+		# Two pipes along the side wall under the ceiling.
+		for k in 2:
+			var pipe := Transform3D(Basis(Vector3.FORWARD, PI * 0.5), Vector3(middle, floor_y + high - 0.25 - k * 0.28, edge + inward * (0.3 + k * 0.05)))
+			parts.append([Cel.cylinder(0.09, 0.09, length, 6), pipe, dark])
+	# Beams across the ceiling in front of the openings.
+	for along: float in [-1.5, -3.75]:
+		parts.append([Cel.box(Vector3(0.4, 0.3, ROOM_HALF * 2.0)), Transform3D(Basis.IDENTITY, Vector3(along, floor_y + high - 0.15, 0.0)), rib])
+	# Lamps on the back wall either side of the generator.
+	for side: float in [-3.0, 3.0]:
+		parts.append([Cel.box(Vector3(0.06, 0.12, 0.3)), Transform3D(Basis.IDENTITY, Vector3(ROOM_BACK + 0.03, floor_y + 2.2, side)), lamp])
+	# The plate the generator stands on, with a dark rim.
+	var under := Vector2(-4.5, 0.0)
+	parts.append([Cel.box(Vector3(3.6, 0.04, 3.6)), Transform3D(Basis.IDENTITY, Vector3(under.x, floor_y + 0.02, under.y)), dark])
+	parts.append([Cel.box(Vector3(3.2, 0.06, 3.2)), Transform3D(Basis.IDENTITY, Vector3(under.x, floor_y + 0.03, under.y)), stripe])
+	var view := MeshInstance3D.new()
+	view.name = "RoomTrim"
+	view.mesh = Cel.merged(parts)
+	view.material_override = Cel.material(Color.WHITE, 1.0, true, true)
+	view.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	view.position = Vector3(base_x(team), 0.0, 0.0)
+	view.rotation.y = 0.0 if front(team) > 0.0 else PI
+	base.add_child(view)
+	Cel.set_team(view, Palette.team(team).darkened(0.2))
+
+
+## A box in a team's base from along and side ranges (a Rect2 of along by
+## side, from the base's middle) and a bottom and top height.
+func _deck_box(base: Node3D, team: int, piece: Rect2, y0: float, y1: float, material: Material) -> void:
+	var middle := piece.get_center()
+	var at := base_place(team, middle.x, middle.y, (y0 + y1) * 0.5)
+	_box(base, Vector3(piece.size.x, y1 - y0, piece.size.y), Transform3D(Basis.IDENTITY, at), material)
+
+
+## The deck's top slab from along and side pieces that tile it round the
+## openings, as one body with a box shape per piece and one mesh with no
+## faces between the pieces, so their joins draw no ink lines.
+func _deck_top(base: Node3D, team: int, pieces: Array, y0: float, y1: float, material: Material) -> void:
+	var body := StaticBody3D.new()
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var edges: Array[Rect2] = []
+	for piece: Rect2 in pieces:
+		var shape := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		var middle := piece.get_center()
+		box.size = Vector3(piece.size.x, y1 - y0, piece.size.y)
+		shape.shape = box
+		shape.position = base_place(team, middle.x, middle.y, (y0 + y1) * 0.5)
+		body.add_child(shape)
+		for y: float in [y0, y1]:
+			var corners: Array[Vector3] = [
+				base_place(team, piece.position.x, piece.position.y, y),
+				base_place(team, piece.end.x, piece.position.y, y),
+				base_place(team, piece.end.x, piece.end.y, y),
+				base_place(team, piece.position.x, piece.end.y, y),
+			]
+			Cel._quad(tool, corners, Vector3.UP if y == y1 else Vector3.DOWN)
+		edges.append(piece)
+	# Side faces only where a piece's edge has no piece beyond it: each edge
+	# is cut where other pieces' corners fall on it, and each bit is kept if
+	# its middle, nudged outwards, is in no piece.
+	for piece: Rect2 in edges:
+		var sides := [
+			[Vector2(piece.position.x, piece.position.y), Vector2(piece.end.x, piece.position.y), Vector2(0.0, -1.0)],
+			[Vector2(piece.end.x, piece.position.y), Vector2(piece.end.x, piece.end.y), Vector2(1.0, 0.0)],
+			[Vector2(piece.end.x, piece.end.y), Vector2(piece.position.x, piece.end.y), Vector2(0.0, 1.0)],
+			[Vector2(piece.position.x, piece.end.y), Vector2(piece.position.x, piece.position.y), Vector2(-1.0, 0.0)],
+		]
+		for side: Array in sides:
+			var a: Vector2 = side[0]
+			var b: Vector2 = side[1]
+			var out: Vector2 = side[2]
+			var cuts: Array[float] = [0.0, 1.0]
+			for other: Rect2 in edges:
+				for corner: Vector2 in [other.position, other.end, Vector2(other.position.x, other.end.y), Vector2(other.end.x, other.position.y)]:
+					var t := (corner - a).dot(b - a) / (b - a).length_squared()
+					if t > 0.001 and t < 0.999 and (a.lerp(b, t) - corner).length() < 0.001:
+						cuts.append(t)
+			cuts.sort()
+			for k in cuts.size() - 1:
+				var p := a.lerp(b, cuts[k])
+				var q := a.lerp(b, cuts[k + 1])
+				if p.distance_to(q) < 0.001:
+					continue
+				var probe := (p + q) * 0.5 + out * 0.01
+				var covered := false
+				for other: Rect2 in edges:
+					covered = covered or other.has_point(probe)
+				if covered:
+					continue
+				var normal := base_place(team, out.x, out.y, 0.0) - base_place(team, 0.0, 0.0, 0.0)
+				var corners: Array[Vector3] = [
+					base_place(team, p.x, p.y, y0),
+					base_place(team, q.x, q.y, y0),
+					base_place(team, q.x, q.y, y1),
+					base_place(team, p.x, p.y, y1),
+				]
+				Cel._quad(tool, corners, normal.normalized())
+	var view := MeshInstance3D.new()
+	view.mesh = Cel.hull_mesh(tool.commit())
+	view.material_override = material
+	body.add_child(view)
+	base.add_child(body)
 
 
 ## A round pad in the team's colour with a ring of light around it, for the

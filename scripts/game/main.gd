@@ -52,6 +52,7 @@ func _ready() -> void:
 	for team in 2:
 		for at in map.station_points(team):
 			game.add_station(team, at)
+		map.add_base_power(game, team)
 	add_child(game)
 	game.match_over.connect(_on_match_over)
 	input = LocalInput.new()

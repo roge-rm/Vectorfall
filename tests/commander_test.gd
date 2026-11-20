@@ -7,8 +7,11 @@ extends SceneTree
 ## fewer bots defend while a person sits at home and that one warns and covers
 ## it, that bots go after the
 ## carrier of our flag and split up to cut it off, that roles get their
-## loadouts and a bot whose role changes near a station goes and changes, and
-## that the commander's state saves and loads whole.
+## loadouts and a bot whose role changes near a station goes and changes,
+## that it sends a raid on the enemy base and a repair bot to our generator
+## when it's down, that the orders to attack the generator and repair the
+## base send bots to do it, and that the commander's state saves and loads
+## whole.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/commander_test.gd
 
 const R := BotBrain.Role
@@ -58,6 +61,10 @@ func _run() -> void:
 	_loadout_table()
 	await _roles_wear_loadouts()
 	await _changes_at_station()
+	await _sends_raid()
+	await _raid_through_opening()
+	await _repairs_generator()
+	await _base_orders()
 	await _state_round_trip()
 	checks.finish(self)
 
@@ -100,7 +107,7 @@ func _read_person() -> void:
 
 ## A match on Ochre Fold with bots on each team, and a stand-in for the
 ## person on team 0 if person_at is set.
-func _match(team0: int, team1: int, match_seed := 3) -> Dictionary:
+func _match(team0: int, team1: int, match_seed := 3, base_power := false) -> Dictionary:
 	var holder := Node3D.new()
 	root.add_child(holder)
 	var game := Match.new(match_seed)
@@ -108,6 +115,10 @@ func _match(team0: int, team1: int, match_seed := 3) -> Dictionary:
 	for team in 2:
 		game.spawns[team] = map.spawn_points(team)
 		game.add_flag(team, map.stand_point(team), map.flag_rest(team))
+		if base_power:
+			for at in map.station_points(team):
+				game.add_station(team, at)
+			map.add_base_power(game, team)
 	holder.add_child(game)
 	var director := BotDirector.new(game, map.route_graph)
 	for k in team0:
@@ -364,6 +375,136 @@ func _changes_at_station() -> void:
 		if brain.soldier.loadout.armour == SoldierBody.Armour.HEAVY:
 			break
 	checks.check(went and brain.soldier.loadout.equals(brain.wanted_loadout()), "a bot moved to defence by its base goes to a station and changes to %s" % BotLoadouts.describe(brain.soldier.loadout, false))
+	await _done(setup)
+
+
+## A raid goes for their generator with two offence bots, who head for the
+## perches beside its room's openings; with it destroyed, for their turrets.
+func _sends_raid() -> void:
+	var setup := _match(8, 8, 3, true)
+	var game: Match = setup.game
+	var director: BotDirector = setup.director
+	var boss := director.commander(0)
+	await ticks(60)
+	var flag_turret := boss._flag_turret()
+	var aimed := 0
+	for brain in director.brains:
+		if brain.soldier.team == 0 and brain.role == R.OFFENCE and brain.role_target == flag_turret:
+			aimed += 1
+	checks.check(flag_turret != 0 and game.asset(flag_turret).guard_points.is_empty() and aimed == _role_count(director, 0, [R.OFFENCE]) and aimed > 0, "offence goes for their flag turret first (%d bots)" % aimed)
+	boss.next_raid = game.tick
+	boss.think(true)
+	var target := game.asset(boss.raid_target)
+	var raiding := _role_count(director, 0, [R.GENERATOR])
+	checks.check(boss.raiders.size() == 2 and raiding == 2 and target != null and target == game.generator(1), "a raid goes for their generator (%d raiders, target %s)" % [raiding, BaseAsset.NAMES[target.kind] if target != null else "none"])
+	await ticks(60)
+	var info := director.asset_info(boss.raid_target)
+	var perched := 0
+	for brain in director.brains:
+		if brain.role == R.GENERATOR and brain.role_target == boss.raid_target and brain.goal == BotBrain.Goal.RAID:
+			for at: Vector3 in info.perches:
+				if brain.goal_target.distance_to(at) < 0.5:
+					perched += 1
+	checks.check(info.perches.size() == 2 and info.lobs.size() == 2 and perched == 2, "and the raiders head for a perch beside an opening (%d)" % perched)
+	boss._end_raid()
+	game.damage_asset(game.generator(1), 1000.0, 0, 0, Vector3.ZERO)
+	target = game.asset(boss._raid_target())
+	checks.check(target != null and target.kind == BaseAsset.Kind.TURRET, "with it destroyed, a raid would go for a turret")
+	await _done(setup)
+
+
+## Ordered to attack the generator, two heavies near their base destroy it
+## from the deck, shooting down through its room's openings with the fields
+## on.
+func _raid_through_opening() -> void:
+	var setup := _match(3, 0, 3, true)
+	var game: Match = setup.game
+	var director: BotDirector = setup.director
+	var boss := director.commander(0)
+	await ticks(2)
+	var near := map.stand_point(1) + Vector3(map.front(1) * 10.0, 0.5, 0.0)
+	var person := _add_stand_in(setup, 0, map.spawn_point(0, 6).origin + Vector3.UP)
+	boss._on_ordered(person.soldier.entity_id, Orders.Kind.ATTACK_GENERATOR, 0)
+	var generator := game.generator(1)
+	for brain in director.brains:
+		if boss.raiders.has(brain.soldier.entity_id):
+			brain.soldier.set_loadout(BotLoadouts.loadout(BotLoadouts.Kit.HEAVY_SHIELD))
+			brain.soldier.tuning.health_max = 100000.0
+			brain.soldier.health = 100000.0
+			var state := brain.soldier.get_state()
+			state.position = near
+			state.velocity = Vector3.ZERO
+			brain.soldier.set_state(state)
+	var seconds := -1.0
+	for i in 60 * 90:
+		await physics_frame
+		if generator.destroyed:
+			seconds = i / 60.0
+			break
+	var on := game.fields.values().filter(func(f: ForceField) -> bool: return f.team == 1).size()
+	checks.check(boss.raiders.size() == 2 and generator.destroyed, "two heavies ordered on a raid destroy their generator through its openings in %.1f s (%d fields)" % [seconds, on])
+	await _done(setup)
+
+
+## Our generator destroyed, the bot carrying a repair pack goes and repairs
+## it, and power comes back.
+func _repairs_generator() -> void:
+	var setup := _match(3, 0, 3, true)
+	var game: Match = setup.game
+	var director: BotDirector = setup.director
+	var boss := director.commander(0)
+	var fixer: BotBrain = director.brains[1]
+	fixer.soldier.set_loadout(BotLoadouts.loadout(BotLoadouts.Kit.MEDIUM_REPAIR))
+	await ticks(2)
+	var own := game.generator(0)
+	game.damage_asset(own, 10000.0, 0, 1, own.centre())
+	boss.think(true)
+	checks.check(boss.repairers.has(fixer.soldier.entity_id) and fixer.role == R.REPAIR and fixer.role_target == own.entity_id, "with our generator down, the bot with a repair pack is sent to repair it")
+	var seconds := -1.0
+	for i in 60 * 150:
+		await physics_frame
+		if not own.destroyed:
+			seconds = i / 60.0
+			break
+	checks.check(not own.destroyed and game.powered(0), "and it repairs it and power comes back in %.1f s" % seconds)
+	await ticks(60)
+	checks.check(boss.repairers.is_empty(), "and its repair is over")
+	checks.check(_said(boss, BotLines.Line.GENERATOR_DOWN) and _said(boss, BotLines.Line.GENERATOR_BACK), "a bot says our generator's down, and back up")
+	await _done(setup)
+
+
+func _said(boss: TeamCommander, line: int) -> bool:
+	for said: Dictionary in boss.chat:
+		if said.line == line:
+			return true
+	return false
+
+
+## "Attack the generator" sends two bots on a raid and "Repair the base" one
+## to our base assets, each answering.
+func _base_orders() -> void:
+	var setup := _match(6, 6, 3, true)
+	var game: Match = setup.game
+	var director: BotDirector = setup.director
+	var boss := director.commander(0)
+	await ticks(30)
+	var person := _add_stand_in(setup, 0, map.spawn_point(0, 7).origin + Vector3.UP)
+	boss._on_ordered(person.soldier.entity_id, Orders.Kind.ATTACK_GENERATOR, 0)
+	var raiders := 0
+	for brain in director.brains:
+		if brain.soldier.team == 0 and brain.role == R.GENERATOR and boss.raiders.has(brain.soldier.entity_id) and boss.order_locks.has(brain.soldier.entity_id):
+			raiders += 1
+	var target := game.asset(boss.raid_target)
+	checks.check(raiders == 2 and target != null and target.team == 1 and _said(boss, BotLines.Line.ATTACK_YES), "attack the generator sends two bots on a raid on their base (%d)" % raiders)
+	boss._on_ordered(person.soldier.entity_id, Orders.Kind.REPAIR_BASE, 0)
+	var fixers := 0
+	for brain in director.brains:
+		if brain.soldier.team == 0 and brain.role == R.REPAIR and boss.repairers.has(brain.soldier.entity_id):
+			fixers += 1
+	checks.check(fixers == 1 and _said(boss, BotLines.Line.REPAIR_YES), "repair the base sends a bot to repair it (%d)" % fixers)
+	boss.think(true)
+	var kept := _role_count(director, 0, [R.GENERATOR, R.REPAIR])
+	checks.check(kept == 3, "and they keep those roles when the commander thinks again (%d)" % kept)
 	await _done(setup)
 
 

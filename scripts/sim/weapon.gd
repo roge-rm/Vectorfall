@@ -17,6 +17,8 @@ const BLASTER := 6
 ## like any other weapon.
 const HAND_GRENADE := 7
 const MINE := 8
+## A base turret's plasma shot, fired by Match for a BaseAsset, never carried.
+const TURRET := 9
 ## Slots below this are guns a loadout can carry.
 const GUNS := 7
 
@@ -251,6 +253,24 @@ static func make_all() -> Array[Weapon]:
 	mine.lifetime = 10.0
 	mine.armours = []
 	list.append(mine)
+
+	# Plasma's look and sound with the turret's own numbers. Its short name
+	# reads in the kill feed as "Turret plasma Lime 3".
+	var turret := Weapon.new()
+	turret.slot = TURRET
+	turret.name = "Turret"
+	turret.short_name = "PLASMA"
+	turret.damage = 25.0
+	turret.splash_damage = 10.0
+	turret.splash_radius = 2.5
+	turret.splash_edge_share = 0.3
+	turret.splash_impulse = 250.0
+	turret.self_damage_share = 0.0
+	turret.speed = 55.0
+	turret.lifetime = 1.6
+	turret.fire_interval = 0.8
+	turret.armours = []
+	list.append(turret)
 	return list
 
 

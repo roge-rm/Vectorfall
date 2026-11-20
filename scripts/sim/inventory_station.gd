@@ -27,9 +27,22 @@ var on: Array[int] = []
 var cooldowns: Dictionary[int, float] = {}
 
 
+## Whether the look shows it powered, for the look only.
+var _shown_powered := true
+
+
 func _ready() -> void:
 	name = "Station%d" % entity_id
 	StationLook.build(self, team)
+
+
+## Its look goes dark while its team has no power.
+func _process(_delta: float) -> void:
+	var game := get_parent() as Match
+	var powered := game == null or game.powered(team)
+	if powered != _shown_powered:
+		_shown_powered = powered
+		StationLook.set_powered(self, team, powered)
 
 
 ## True if a soldier counts as on the pad: alive, on this team and with its

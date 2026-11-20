@@ -5,7 +5,8 @@ extends SceneTree
 ## one behind the bot is heard when it fires, and a seen enemy is remembered
 ## for a while once it's out of sight and then forgotten. One with a sensor
 ## jammer on isn't seen past 20 m. The ray cast budget
-## is shared by every bot each tick.
+## is shared by every bot each tick. An enemy the team's sensor sees is known
+## to the bot, unless it's jamming.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/perception_test.gd
 
 var checks := TestWorld.Checks.new()
@@ -96,4 +97,18 @@ func _run() -> void:
 	crowd.update(me, game, director)
 	checks.check(looked <= BotDirector.RAYS_PER_TICK, "one tick's ray budget checks %d enemies" % looked)
 	checks.check(crowd.contacts.size() > looked, "and the rest are checked on the next look (%d)" % crowd.contacts.size())
+
+	# Our sensor sees the enemy behind the hill, and the bot knows of it
+	# without seeing it, unless it's jamming.
+	game.add_asset(0, BaseAsset.Kind.SENSOR, Vector3(-30.0, map.height_at(-30.0, 30.0), 30.0))
+	await ticks(2)
+	var told := BotPerception.new()
+	told.listen(me, game, director)
+	checks.check(told.knows(hidden.entity_id) and not told.can_see(hidden.entity_id), "an enemy our sensor sees is known to the bot")
+	hidden.set_loadout(Loadout.make(SoldierBody.Armour.LIGHT, [Weapon.DISC], Pack.JAMMER))
+	hidden.pack_on = true
+	await ticks(2)
+	var not_told := BotPerception.new()
+	not_told.listen(me, game, director)
+	checks.check(not not_told.knows(hidden.entity_id), "but not one with a jammer on")
 	checks.finish(self)

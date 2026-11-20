@@ -42,6 +42,9 @@ var origin := Vector2.ZERO
 var heights := PackedFloat32Array()
 ## Per height, the ground shader's patch value (0 to 1).
 var patches := PackedFloat32Array()
+## Heights the coarser levels of detail draw, or empty for heights. Ground
+## that's only lowered out of sight, under a deck, can keep its shape here.
+var shown_heights := PackedFloat32Array()
 ## Per height, the smoothed up direction.
 var normals := PackedVector3Array()
 ## Per chunk (row by row along x), its MeshInstance3D per level.
@@ -67,8 +70,9 @@ var _small_max := PackedFloat32Array()
 
 
 ## Builds the drawn chunks from a heightfield. height_values and
-## patch_values have (cell_count + 1)² entries.
-func _init(cell_count := 0, cell_size := 4.0, corner := Vector2.ZERO, height_values := PackedFloat32Array(), patch_values := PackedFloat32Array()) -> void:
+## patch_values have (cell_count + 1)² entries, and so does shown_values if
+## given, the heights for the coarser levels of detail.
+func _init(cell_count := 0, cell_size := 4.0, corner := Vector2.ZERO, height_values := PackedFloat32Array(), patch_values := PackedFloat32Array(), shown_values := PackedFloat32Array()) -> void:
 	name = "Terrain"
 	if cell_count == 0:
 		return
@@ -77,6 +81,7 @@ func _init(cell_count := 0, cell_size := 4.0, corner := Vector2.ZERO, height_val
 	origin = corner
 	heights = height_values
 	patches = patch_values
+	shown_heights = shown_values
 	material = Cel.ground_material()
 	_build_normals()
 	_build_block_max()
@@ -366,14 +371,17 @@ func _point(i: int, j: int) -> Vector3:
 
 
 func _build_normals() -> void:
+	# From the shown heights, so ground lowered out of sight doesn't tilt
+	# the shading round it.
+	var source := heights if shown_heights.is_empty() else shown_heights
 	var row := cells + 1
 	normals.resize(row * row)
 	for j in row:
 		for i in row:
-			var l := heights[j * row + maxi(i - 1, 0)]
-			var r := heights[j * row + mini(i + 1, cells)]
-			var u := heights[maxi(j - 1, 0) * row + i]
-			var d := heights[mini(j + 1, cells) * row + i]
+			var l := source[j * row + maxi(i - 1, 0)]
+			var r := source[j * row + mini(i + 1, cells)]
+			var u := source[maxi(j - 1, 0) * row + i]
+			var d := source[mini(j + 1, cells) * row + i]
 			normals[j * row + i] = Vector3(l - r, 2.0 * cell, u - d).normalized()
 
 
@@ -445,10 +453,11 @@ func _chunk_mesh(i0: int, j0: int, i1: int, j1: int, step: int, depth: float, ce
 	var vertex_normals := PackedVector3Array()
 	var colours := PackedColorArray()
 	var indices := PackedInt32Array()
+	var source := heights if step == 1 or shown_heights.is_empty() else shown_heights
 	for j: int in zs:
 		for i: int in xs:
 			var k := j * row + i
-			vertices.append(Vector3(origin.x + i * cell, heights[k], origin.y + j * cell) - centre)
+			vertices.append(Vector3(origin.x + i * cell, source[k], origin.y + j * cell) - centre)
 			vertex_normals.append(normals[k])
 			# The ground shader picks its colour from these per pixel.
 			colours.append(Color(normals[k].y, patches[k], 0.0))

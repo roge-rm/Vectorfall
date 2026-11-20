@@ -22,6 +22,8 @@ const SNIPER := "sniper"
 const FLAG_APPROACH := "flag_approach"
 const VEHICLE_PAD := "vehicle_pad"
 const DEPLOY := "deploy"
+## The spot in a team's generator room to stand at to reach its generator.
+const GENERATOR := "generator"
 
 ## Energy a jet climb costs per metre of height, from standing. The jet lifts
 ## you at about 8 m/s on average and drains 40 a second.
@@ -64,6 +66,9 @@ class Link:
 	## Metres of height on stretches too steep to run up, which need speed or
 	## the jet.
 	var steep := 0.0
+	## The team whose force field this link goes through, or -1. Only that
+	## team can take it while the field is on.
+	var field := -1
 
 
 var points := PackedVector3Array()
@@ -72,6 +77,9 @@ var links: Array[Link] = []
 var out_links: Array[Array] = []
 ## Each is { kind, team, point }.
 var interest: Array[Dictionary] = []
+## Points inside a generator room, to the team whose room it is. Its field
+## links are the only ways in and out.
+var rooms: Dictionary[int, int] = {}
 ## interest_points() answers by "kind:team", kept while interest has
 ## _interest_seen entries.
 var _interest_found := {}
@@ -95,6 +103,8 @@ var slot_climb := PackedFloat64Array()
 var slot_steep := PackedFloat64Array()
 var slot_energy := PackedFloat64Array()
 var slot_must_jet := PackedByteArray()
+## Per slot, the team whose field the link goes through, or -1.
+var slot_field := PackedInt32Array()
 ## Strongly connected component of each point: you can get from any point
 ## to any other in the same one.
 var component := PackedInt32Array()
@@ -127,6 +137,16 @@ func add_link(from: int, to: int, kind: Kind, must_jet := false, steep := 0.0) -
 	links.append(link)
 	out_links[from].append(link)
 	return link
+
+
+## Marks a point as inside a team's generator room.
+func set_room(point: int, team: int) -> void:
+	rooms[point] = team
+
+
+## The team whose generator room a point is in, or -1.
+func room_of(point: int) -> int:
+	return rooms.get(point, -1)
 
 
 func add_interest(kind: String, team: int, point: int) -> void:
@@ -162,12 +182,15 @@ func link_between(from: int, to: int) -> Link:
 
 
 ## The point closest to a position, weighting height double so a point on a
-## deck above isn't taken for one on the ground below.
+## deck above isn't taken for one on the ground below. Points in a generator
+## room are left out for a position above its ceiling.
 func nearest(at: Vector3) -> int:
 	var best := -1
 	var best_d := INF
 	for k in points.size():
 		var d := points[k] - at
+		if d.y < -3.0 and rooms.has(k):
+			continue
 		d.y *= 2.0
 		var dd := d.length_squared()
 		if dd < best_d:
@@ -189,6 +212,8 @@ func start_point(at: Vector3, velocity: Vector3) -> int:
 		var d := points[k] - at
 		var flat := Vector2(d.x, d.z)
 		if flat.length() > 6.0 and flat.normalized().dot(heading) < 0.5:
+			continue
+		if d.y < -3.0 and rooms.has(k):
 			continue
 		d.y *= 2.0
 		var dd := d.length_squared()
@@ -229,6 +254,7 @@ func packed() -> void:
 	slot_steep.resize(links.size())
 	slot_energy.resize(links.size())
 	slot_must_jet.resize(links.size())
+	slot_field.resize(links.size())
 	var s := 0
 	for k in n:
 		out_first[k] = s
@@ -243,6 +269,7 @@ func packed() -> void:
 			slot_steep[s] = link.steep
 			slot_energy[s] = link.energy
 			slot_must_jet[s] = 1 if link.must_jet else 0
+			slot_field[s] = link.field
 			s += 1
 	out_first[n] = s
 	_find_components()
@@ -570,8 +597,8 @@ static func _profile(a: Vector3, b: Vector3, surface: Callable, blocked: Callabl
 func to_dict() -> Dictionary:
 	var link_data := []
 	for link in links:
-		link_data.append([link.from, link.to, KIND_NAMES[link.kind], link.must_jet, link.steep])
-	return { "points": Array(points), "links": link_data, "interest": interest.duplicate(true) }
+		link_data.append([link.from, link.to, KIND_NAMES[link.kind], link.must_jet, link.steep, link.field])
+	return { "points": Array(points), "links": link_data, "interest": interest.duplicate(true), "rooms": rooms.duplicate() }
 
 
 static func from_dict(data: Dictionary) -> RouteGraph:
@@ -579,7 +606,12 @@ static func from_dict(data: Dictionary) -> RouteGraph:
 	for p: Vector3 in data.points:
 		graph.add_point(p)
 	for entry: Array in data.links:
-		graph.add_link(entry[0], entry[1], KIND_NAMES.find(entry[2]) as Kind, entry[3], entry[4])
+		var link := graph.add_link(entry[0], entry[1], KIND_NAMES.find(entry[2]) as Kind, entry[3], entry[4])
+		if entry.size() > 5:
+			link.field = entry[5]
 	for entry: Dictionary in data.interest:
 		graph.add_interest(entry.kind, entry.team, entry.point)
+	var room_data: Dictionary = data.get("rooms", {})
+	for point: int in room_data:
+		graph.set_room(point, room_data[point])
 	return graph
