@@ -7,7 +7,7 @@ extends Node
 ##   --bots N      bots per team, 8 at most (8)
 ##   --seed N      the match seed (1)
 ##   --minutes N   simulated minutes (5)
-##   --map NAME    ochre_fold or test (ochre_fold)
+##   --map NAME    any match map (ochre_fold)
 ##   --skill0 N    team 0's skill level, 0 beginner to 4 expert (2, normal)
 ##   --skill1 N    team 1's (2)
 ##   --plain       every bot the default personality
@@ -20,6 +20,7 @@ extends Node
 ##                 a table of them at the end
 ##   --check       print a CHECK line for tools/bot-check.sh, and exit with an
 ##                 error if the bots stopped moving: 60 s or more stuck
+##   --track       report every bot's position and goal every 5 s
 ## The capture limit is off, so the match runs the whole time. The report has
 ## each team's roles every 10 s and its commander's decisions.
 
@@ -36,6 +37,7 @@ var skills: Array[int] = [BotDirector.NORMAL, BotDirector.NORMAL]
 var plain := false
 var no_base := false
 var profile := false
+var track := false
 ## Map build parts timed with --profile, name to microseconds, and counts.
 var build_parts := {}
 var build_counts := {}
@@ -46,6 +48,10 @@ var flag_events: Array[Dictionary] = []
 var destroyed := { "generator": 0, "turret": 0, "sensor": 0 }
 var repaired := { "generator": 0, "turret": 0, "sensor": 0 }
 var asset_events: Array[Dictionary] = []
+var vehicle_boardings: Array[Dictionary] = []
+var vehicle_ticks := {}
+var tracked_positions: Array[Dictionary] = []
+var _ridden_hulls := {}
 
 
 func _ready() -> void:
@@ -55,6 +61,7 @@ func _ready() -> void:
 	no_base = args.has("--no-base")
 	TeamCommander.raids = not args.has("--no-raids")
 	profile = args.has("--profile")
+	track = args.has("--track")
 	Prof.on = profile
 	BotDirector.threads = not args.has("--serial-bots")
 	for k in args.size() - 1:
@@ -115,13 +122,18 @@ func _ready() -> void:
 
 
 func _on_killed(victim_id: int, killer_id: int, weapon: int) -> void:
-	if not flag_events.is_empty() and flag_events[-1].event == "dropped" and flag_events[-1].soldier == victim_id:
-		var killer := game.soldier(killer_id)
-		var role := ""
-		var brain := director.brain_of(killer_id)
-		if brain != null:
-			role = BotBrain.ROLE_NAMES[brain.role] + " " + BotBrain.GOAL_NAMES[brain.goal]
-		flag_events[-1]["killed_by"] = [killer_id, role, Weapon.all[weapon].short_name, snappedf(killer.global_position.distance_to(game.soldier(victim_id).global_position), 0.1) if killer != null else 0.0]
+	if flag_events.is_empty():
+		return
+	var drop := flag_events[-1]
+	if drop.event != "dropped" or drop.soldier != victim_id or drop.tick != game.tick:
+		return
+	var killer := game.soldier(killer_id)
+	var role := ""
+	var brain := director.brain_of(killer_id)
+	if brain != null:
+		role = BotBrain.ROLE_NAMES[brain.role] + " " + BotBrain.GOAL_NAMES[brain.goal]
+	var distance := killer.global_position.distance_to(game.soldier(victim_id).global_position) if killer != null else 0.0
+	drop["killed_by"] = [killer_id, role, Weapon.all[weapon].short_name, snappedf(distance, 0.1)]
 
 
 func _on_flag_event(team: int, soldier_id: int, event: String) -> void:
@@ -130,15 +142,43 @@ func _on_flag_event(team: int, soldier_id: int, event: String) -> void:
 	if s != null:
 		at = s.global_position
 	flag_events.append({
+		"tick": game.tick,
 		"seconds": snappedf(game.tick / 60.0, 0.1),
 		"event": event,
 		"flag_team": team,
+		"carried_flag_team": 1 - team if event == "captured" else team,
 		"soldier": soldier_id,
 		"health": snappedf(s.health, 1.0) if s != null else 0.0,
 		"position": [snappedf(at.x, 0.1), snappedf(at.y, 0.1), snappedf(at.z, 0.1)],
 		"speed": snappedf(s.velocity.length(), 0.1) if s != null else 0.0,
 		"near": _near_counts(s) if s != null else [0, 0],
 	})
+
+
+func _track_bots() -> void:
+	var sample := track and game.tick % 300 == 0
+	var positions: Array[Dictionary] = []
+	for brain in director.brains:
+		var who := brain.soldier
+		var hull: Vehicle = game.fleet.hulls.get(who.vehicle_id)
+		if hull != null:
+			var kind := Vehicle.NAMES[hull.kind]
+			vehicle_ticks[kind] = int(vehicle_ticks.get(kind, 0)) + 1
+			if _ridden_hulls.get(who.entity_id, 0) != hull.entity_id:
+				vehicle_boardings.append({
+					"seconds": snappedf(game.tick / 60.0, 0.1), "soldier": who.entity_id,
+					"team": who.team, "vehicle": kind, "seat": who.vehicle_seat,
+				})
+		_ridden_hulls[who.entity_id] = who.vehicle_id
+		if sample:
+			var at := who.position.snapped(Vector3(0.1, 0.1, 0.1))
+			positions.append({
+				"soldier": who.entity_id, "team": who.team, "alive": not who.dead,
+				"position": [at.x, at.y, at.z], "role": BotBrain.ROLE_NAMES[brain.role],
+				"goal": BotBrain.GOAL_NAMES[brain.goal],
+			})
+	if sample:
+		tracked_positions.append({ "seconds": game.tick / 60.0, "bots": positions })
 
 
 func _on_asset_event(asset_id: int, soldier_id: int, event: String) -> void:
@@ -170,8 +210,11 @@ func _run() -> void:
 	var ticks := int(minutes * 60.0 * 60.0)
 	var started := Time.get_ticks_usec()
 	var last := -1
+	_track_bots()
 	while game.tick < ticks:
 		await get_tree().physics_frame
+		if game.tick > 0:
+			_track_bots()
 		if profile:
 			# physics_frame comes before the nodes' physics ticks and the physics
 			# step, so the time since the last one is a whole frame.
@@ -267,12 +310,19 @@ func _report(ticks: int, wall: float) -> Dictionary:
 	# How long each grab lasted, to the drop or the capture.
 	var lives := []
 	var taken := {}
+	var first_grab: Variant = null
+	var carrier_deaths: Array[Dictionary] = []
 	for event: Dictionary in flag_events:
+		var flag_team: int = event.carried_flag_team
 		if event.event == "taken":
-			taken[event.flag_team] = event.seconds
-		elif (event.event == "dropped" or event.event == "captured") and taken.has(event.flag_team):
-			lives.append(snappedf(event.seconds - taken[event.flag_team], 0.1))
-			taken.erase(event.flag_team)
+			if first_grab == null:
+				first_grab = event.seconds
+			taken[flag_team] = event.seconds
+		elif (event.event == "dropped" or event.event == "captured") and taken.has(flag_team):
+			lives.append(snappedf(event.seconds - taken[flag_team], 0.1))
+			taken.erase(flag_team)
+		if event.event == "dropped" and event.has("killed_by"):
+			carrier_deaths.append(event)
 	var life_sum := 0.0
 	for life: float in lives:
 		life_sum += life
@@ -289,8 +339,12 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		for key in ["kills", "deaths", "captures", "grabs", "returns", "disc_shots", "disc_hits"]:
 			t[key] += bot[key]
 	var commanders := {}
+	var generator_raids: Array[Dictionary] = []
 	for team: int in director.commanders:
 		var boss: TeamCommander = director.commanders[team]
+		for decision: Dictionary in boss.decisions:
+			if decision.text == "raid on their generator":
+				generator_raids.append({ "team": team, "seconds": decision.seconds })
 		var lines := {}
 		for said: Dictionary in boss.chat:
 			lines[said.text] = int(lines.get(said.text, 0)) + 1
@@ -303,6 +357,9 @@ func _report(ticks: int, wall: float) -> Dictionary:
 			"carry_lanes": boss.carry_lanes,
 			"lane_names": boss.lanes.names if boss.lanes != null else [],
 		}
+	var vehicle_seconds := {}
+	for kind: String in vehicle_ticks:
+		vehicle_seconds[kind] = snappedf(vehicle_ticks[kind] / 60.0, 0.1)
 	return {
 		"map": GameMap.chosen_name(),
 		"seed": seed_value,
@@ -312,7 +369,13 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		"wall_seconds": snappedf(wall, 0.01),
 		"speed_up": snappedf(seconds / maxf(wall, 0.001), 0.01),
 		"scores": game.scores.duplicate(),
+		"first_grab_seconds": first_grab,
 		"flag_events": flag_events,
+		"carrier_deaths": carrier_deaths,
+		"generator_raids": generator_raids,
+		"vehicle_boardings": vehicle_boardings,
+		"vehicle_rider_seconds": vehicle_seconds,
+		"tracked_positions": tracked_positions,
 		"assets_destroyed": destroyed,
 		"assets_repaired": repaired,
 		"asset_events": asset_events,

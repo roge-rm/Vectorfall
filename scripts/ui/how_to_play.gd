@@ -5,6 +5,7 @@ extends Control
 ## starting on the one in use, then the flag rules and skiing.
 
 signal closed
+signal practice_pressed
 
 enum Scheme { TOUCH, KEYBOARD, GAMEPAD }
 
@@ -24,7 +25,7 @@ var _tabs: Array[MenuKit.CoverButton] = []
 var _controls: Label
 
 
-func _init() -> void:
+func _init(allow_practice := false) -> void:
 	name = "HowToPlay"
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	theme = MenuKit.theme()
@@ -51,7 +52,10 @@ func _init() -> void:
 	_paragraph(text, FONTS)
 	var licence := _paragraph(text, _licence_text())
 	licence.add_theme_font_size_override("font_size", MenuKit.pxi(10))
-	MenuKit.button_row(box).add_child(MenuKit.button("Back", close, MenuKit.BUTTON_SIZE, true))
+	var buttons := MenuKit.button_row(box)
+	buttons.add_child(MenuKit.button("Back", close, MenuKit.BUTTON_SIZE, true))
+	if allow_practice:
+		buttons.add_child(MenuKit.button("Ski practice", practice_pressed.emit, MenuKit.BUTTON_SIZE, false, true))
 	show_scheme(scheme)
 
 

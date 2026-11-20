@@ -182,7 +182,13 @@ func _match() -> void:
 	Input.parse_input_event(drag)
 	await process_frame
 	var was_held := touch.buttons & PlayerCommand.FIRE != 0 and touch.stick.length() > 0.5
-	main.pause()
+	var pause_at := touch.pause_rect().get_center()
+	await _touch_at(touch, 2, pause_at, true)
+	var waited_for_release := not paused
+	await _touch_at(touch, 2, pause_at, false)
+	await process_frame
+	checks.check(waited_for_release and paused and main.pause_menu.visible,
+		"a touch opens the pause menu after release")
 	for press in held:
 		var lift := press.duplicate() as InputEventScreenTouch
 		lift.pressed = false

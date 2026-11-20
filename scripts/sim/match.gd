@@ -37,7 +37,11 @@ signal fired(soldier_id: int, weapon: int)
 signal damaged(victim_id: int, attacker_id: int, amount: float, from: Vector3)
 ## A soldier's weapon hurt an enemy, for stats.
 signal hit(attacker_id: int, victim_id: int, weapon: int)
+## A slow projectile struck an enemy who was already airborne.
+signal air_hit(attacker_id: int, victim_id: int)
 signal killed(victim_id: int, killer_id: int, weapon: int)
+## An enemy killed a carrier and made them drop the flag.
+signal carrier_stopped(carrier_id: int, killer_id: int)
 ## A projectile hit something or blew up. normal is the surface's.
 signal impacted(weapon: int, position: Vector3, normal: Vector3)
 signal respawned(soldier_id: int)
@@ -680,6 +684,16 @@ func _touching(who: Soldier, point: Vector3, reach: float) -> bool:
 	return not who.dead and who.vehicle_id == 0 and who.distance_to_body(point) <= reach
 
 
+func _at_capture_stand(who: Soldier) -> bool:
+	return stands.has(who.team) and _touching(who, stands[who.team], settings.stand_touch_range)
+
+
+## A carrier at its stand is waiting for its own flag before it can score.
+func awaiting_flag_return(who: Soldier) -> bool:
+	var own: Flag = flags.get(who.team)
+	return not over and own != null and own.mode != Flag.Mode.HOME and _at_capture_stand(who) and carried_flag(who.entity_id) != null
+
+
 func _step_flags(delta: float) -> void:
 	if over or flags.is_empty():
 		return
@@ -723,7 +737,7 @@ func _step_flags(delta: float) -> void:
 		var own: Flag = flags.get(carrier.team)
 		if own == null or own.mode != Flag.Mode.HOME:
 			continue
-		if _touching(carrier, stands[carrier.team], settings.stand_touch_range):
+		if _at_capture_stand(carrier):
 			_capture(flag, carrier)
 			if over:
 				return
@@ -910,17 +924,22 @@ func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier, ma
 	# soldier it hits.
 	var direct := victim if victim != null and shot.damage > 0.0 else null
 	if direct != null:
+		var attacker := soldier(shot.shooter)
+		# Read the stance before the hit can lift the target off the ground.
+		var slow_shot := weapon.slot == Weapon.DISC or weapon.slot == Weapon.PLASMA or weapon.slot == Weapon.BLASTER
+		var airborne := slow_shot and attacker != null and attacker.team != direct.team and not direct.dead and not direct.grounded and direct.vehicle_id == 0
 		var push := shot.velocity.normalized() * weapon.hit_impulse
 		if weapon.splash_radius > 0.0:
 			push = (direct.centre() - at).normalized() * weapon.splash_impulse
 		direct.push(push)
 		var from := at
-		var attacker := soldier(shot.shooter)
 		if attacker != null:
 			from = attacker.global_position
 		elif assets.has(shot.shooter):
 			from = assets[shot.shooter].pivot()
 		damage(direct, shot.damage, shot.shooter, weapon.slot, from)
+		if airborne:
+			air_hit.emit(shot.shooter, direct.entity_id)
 	var direct_asset := machine if machine != null and shot.damage > 0.0 else null
 	if direct_asset != null:
 		damage_asset(direct_asset, shot.damage, shot.shooter, shot.team, at)
@@ -1083,6 +1102,8 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 		if held != null:
 			_drop_flag(held, victim)
 		killed.emit(victim.entity_id, attacker_id, weapon_slot)
+		if held != null and team_of(attacker_id) == held.team:
+			carrier_stopped.emit(victim.entity_id, attacker_id)
 
 
 ## The nearest hurt living teammate a soldier is looking towards, within

@@ -45,9 +45,10 @@ static var aim_assist := 1
 static var auto_ski := false
 ## Lets you hand out your bots' roles from the order menu.
 static var commander_mode := false
-## Volumes from 0 to 1, for sound effects and the bots' voices.
+## Volumes from 0 to 1.
 static var sound_volume := 0.8
 static var voice_volume := 0.8
+static var music_volume := 0.4
 ## Saved loadouts (Loadout.to_dict()), and the index of the last one used,
 ## which you start a match in.
 static var loadouts: Array[Dictionary] = default_loadouts()
@@ -115,6 +116,7 @@ static func reset() -> void:
 	commander_mode = false
 	sound_volume = 0.8
 	voice_volume = 0.8
+	music_volume = 0.4
 	loadouts = default_loadouts()
 	loadout_slot = 0
 
@@ -156,6 +158,8 @@ static func value(setting: String) -> Variant:
 			return sound_volume
 		"voice_volume":
 			return voice_volume
+		"music_volume":
+			return music_volume
 	return null
 
 
@@ -195,6 +199,8 @@ static func set_value(setting: String, to: Variant) -> void:
 			sound_volume = to
 		"voice_volume":
 			voice_volume = to
+		"music_volume":
+			music_volume = to
 
 
 static func load_file() -> void:
@@ -217,6 +223,7 @@ static func load_file() -> void:
 		commander_mode = file.get_value("bots", "commander", commander_mode)
 		sound_volume = clampf(file.get_value("sound", "effects", sound_volume), 0.0, 1.0)
 		voice_volume = clampf(file.get_value("sound", "voices", voice_volume), 0.0, 1.0)
+		music_volume = clampf(file.get_value("sound", "music", music_volume), 0.0, 1.0)
 		for k in LOADOUT_SLOTS:
 			var saved: Variant = file.get_value("loadouts", "slot_%d" % (k + 1), loadouts[k])
 			if saved is Dictionary:
@@ -245,6 +252,7 @@ static func save_file() -> void:
 	file.set_value("bots", "commander", commander_mode)
 	file.set_value("sound", "effects", sound_volume)
 	file.set_value("sound", "voices", voice_volume)
+	file.set_value("sound", "music", music_volume)
 	for k in LOADOUT_SLOTS:
 		file.set_value("loadouts", "slot_%d" % (k + 1), loadouts[k])
 	file.set_value("loadouts", "last", loadout_slot)
@@ -262,7 +270,7 @@ static func apply() -> void:
 		tree.root.scaling_3d_scale = render_scale
 		# MSAA with a scaled 3D buffer leaks memory every frame on Android GLES3.
 		tree.root.msaa_3d = Viewport.MSAA_2X if render_scale >= 1.0 else Viewport.MSAA_DISABLED
-	Sound.set_volumes(sound_volume, voice_volume)
+	Sound.set_volumes(sound_volume, voice_volume, music_volume)
 
 
 static func set_outlines(on: bool) -> void:

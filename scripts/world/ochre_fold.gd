@@ -133,6 +133,19 @@ static func palette_for_map() -> Palette:
 	made.title = "Ochre Fold"
 	made.low_height = -16.0
 	made.high_height = 80.0
+	made.ambient = Color(0.69, 0.54, 0.8)
+	made.ambient_energy = 0.53
+	made.shade_dark = 0.41
+	made.shade_colour.a = 0.48
+	made.figure_line_scale = 0.8
+	made.fog_colour = Color(0.95, 0.64, 0.5)
+	made.rock = Color(0.22, 0.56, 0.57)
+	made.rock_alt = Color(0.15, 0.48, 0.53)
+	made.strata = 6.0
+	made.strata_fade_distance = 230.0
+	made.patch_amount = 0.07
+	made.patch_size = 9.0
+	made.variation_size = 34.0
 	return made
 
 

@@ -561,6 +561,11 @@ func _ctf() -> bool:
 	return not game.flags.is_empty()
 
 
+## One offence bot stays on foot to attempt the flag while the rest can attack the base.
+func is_flag_runner() -> bool:
+	return role == Role.OFFENCE and role_slot == 0 and _ctf()
+
+
 ## Picks a goal from the role and the flags, and plans to it when it changes
 ## or moves.
 func _think_ctf() -> void:

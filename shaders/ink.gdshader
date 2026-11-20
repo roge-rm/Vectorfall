@@ -46,6 +46,7 @@ uniform float variation_size = 30.0;
 // 0 for none.
 uniform vec4 rock_alt : source_color = vec4(0.5, 0.5, 0.5, 1.0);
 uniform float strata = 0.0;
+uniform float strata_fade_distance = 0.0;
 
 uniform float lit_edge = 0.72;
 uniform float mid_edge = 0.3;
@@ -155,8 +156,16 @@ void fragment() {
 		}
 		if (up < 0.72) {
 			base = rock.rgb;
-			if (strata > 0.0 && fract(world_position.y / strata + wobble * 0.04) > 0.5) {
-				base = rock_alt.rgb;
+			if (strata > 0.0) {
+				float phase = fract(world_position.y / strata + wobble * 0.04);
+				float band = step(0.5, phase);
+				if (strata_fade_distance > 0.0) {
+					float limit = strata_fade_distance * strata_fade_distance;
+					float fade = smoothstep(limit * 0.06, limit, dot(VERTEX, VERTEX));
+					float ridge = 1.0 - abs(phase * 2.0 - 1.0);
+					band = mix(smoothstep(0.25, 0.8, ridge), 0.5, fade);
+				}
+				base = mix(rock.rgb, rock_alt.rgb, band);
 			}
 		} else if (up < 0.84) {
 			base = dirt.rgb;

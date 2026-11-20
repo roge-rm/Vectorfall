@@ -10,6 +10,7 @@ extends RefCounted
 const PLINTH := Color(0.86, 0.84, 0.94, 0.0)
 const TRIM := Color(0.15, 0.14, 0.18, 0.0)
 const TEAM_PART := Color(1.0, 1.0, 1.0, 1.0)
+const PAD_FACE := Color(0.71, 0.70, 0.78, 0.56)
 ## Height of the diamond's middle over the pad.
 const MARKER_HEIGHT := 2.4
 const RING_OFF := Color(0.2, 0.19, 0.23)
@@ -22,12 +23,12 @@ static func build(parent: Node3D, team: int) -> void:
 	var parts := []
 	# The plinth, a little wider than the pad so the whole pad reads as one.
 	parts.append([Cel.bevel_cylinder(r + 0.2, top - 0.04, 0.04, 12), Transform3D(Basis.IDENTITY, Vector3.UP * (top - 0.04) * 0.5), PLINTH])
-	parts.append([Cel.bevel_cylinder(r - 0.15, 0.06, 0.015, 12), Transform3D(Basis.IDENTITY, Vector3.UP * (top - 0.03)), TEAM_PART])
+	parts.append([Cel.bevel_cylinder(r - 0.15, 0.06, 0.015, 12), Transform3D(Basis.IDENTITY, Vector3.UP * (top - 0.03)), PAD_FACE])
 	# Six trim blocks round the rim, like the stand's ring but solid.
 	for k in 6:
 		var angle := TAU * k / 6.0
 		var at := Vector3(sin(angle), 0.0, cos(angle)) * (r + 0.05)
-		parts.append([Cel.bevel_box(Vector3(0.36, top + 0.06, 0.2), 0.03), Transform3D(Basis(Vector3.UP, angle), at + Vector3.UP * (top + 0.06) * 0.5), TRIM])
+		parts.append([Cel.bevel_box(Vector3(0.45, top + 0.03, 0.19), 0.04), Transform3D(Basis(Vector3.UP, angle), at + Vector3.UP * (top + 0.03) * 0.5), TRIM if k % 2 else TEAM_PART])
 	# A four sided diamond over the pad, point down, with a dark band round
 	# its middle.
 	var marker := Vector3.UP * (top + MARKER_HEIGHT)
@@ -37,7 +38,7 @@ static func build(parent: Node3D, team: int) -> void:
 	var view := MeshInstance3D.new()
 	view.name = "Look"
 	view.mesh = Cel.merged(parts)
-	view.material_override = Cel.material(Color.WHITE, 1.0, true, true)
+	view.material_override = Cel.material(Color.WHITE, 1.0, true, true, false, true)
 	parent.add_child(view)
 	Cel.set_team(view, colour)
 	var ring := MeshInstance3D.new()

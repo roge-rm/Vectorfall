@@ -660,6 +660,11 @@ func _assign(force: bool) -> void:
 			return next[a] < next[b]
 		if next[a] == BotBrain.Role.CHASE:
 			return _better(a, b, BotBrain.Role.CHASE)
+		if next[a] == BotBrain.Role.OFFENCE:
+			var a_on_foot := not a.soldier.dead and a.soldier.vehicle_id == 0
+			var b_on_foot := not b.soldier.dead and b.soldier.vehicle_id == 0
+			if a_on_foot != b_on_foot:
+				return a_on_foot
 		return a.soldier.entity_id < b.soldier.entity_id)
 	for brain: BotBrain in ordered:
 		var role: int = next[brain]
@@ -676,7 +681,7 @@ func _assign(force: bool) -> void:
 			brain.role_target = repairers[id].asset if repairers.has(id) else _own_generator()
 		elif role == BotBrain.Role.GENERATOR:
 			brain.role_target = raid_target
-		elif role == BotBrain.Role.OFFENCE:
+		elif role == BotBrain.Role.OFFENCE and not brain.is_flag_runner():
 			brain.role_target = _flag_turret()
 		var lock: Dictionary = order_locks.get(id, {})
 		if not lock.is_empty() and lock.role == role and lock.target != 0:

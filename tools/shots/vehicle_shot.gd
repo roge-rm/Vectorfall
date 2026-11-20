@@ -1,6 +1,7 @@
 extends Node
 
 ## Captures the airfield and vehicles in flight on Ochre Fold.
+## Set VECTORFALL_SHOT_DIR to change the output folder.
 
 const FOLDER := "/srv/downloads/temp/debug/vectorfall/m12"
 
@@ -123,7 +124,10 @@ func _ticks(count: int) -> void:
 
 func _save(file: String) -> void:
 	await RenderingServer.frame_post_draw
-	DirAccess.make_dir_recursive_absolute(FOLDER)
-	var saved := get_viewport().get_texture().get_image().save_png(FOLDER.path_join(file))
+	var folder := OS.get_environment("VECTORFALL_SHOT_DIR")
+	if folder.is_empty():
+		folder = FOLDER
+	DirAccess.make_dir_recursive_absolute(folder)
+	var saved := get_viewport().get_texture().get_image().save_png(folder.path_join(file))
 	assert(saved == OK)
 	print("Saved ", file)

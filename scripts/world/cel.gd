@@ -161,7 +161,7 @@ static func set_palette(palette: Palette) -> void:
 	_shared["sun_direction"] = direction
 	_palette_hatching = palette.hatching
 	_shared["shadow_style"] = 1 if _hatching_setting and _palette_hatching else 0
-	for key: String in ["grass", "grass_dark", "dirt", "rock", "low", "low_height", "high", "high_height", "patch_colour", "patch_amount", "patch_size", "patch_alt", "patch_alt_amount", "variation_colour", "variation", "variation_size", "rock_alt", "strata"]:
+	for key: String in ["grass", "grass_dark", "dirt", "rock", "low", "low_height", "high", "high_height", "patch_colour", "patch_amount", "patch_size", "patch_alt", "patch_alt_amount", "variation_colour", "variation", "variation_size", "rock_alt", "strata", "strata_fade_distance"]:
 		_ground_shared[key] = palette.get(key)
 	_share_all()
 	for line: ShaderMaterial in [outline(), near_outline(), figure_outline(), effect_outline()]:
@@ -169,7 +169,8 @@ static func set_palette(palette: Palette) -> void:
 			_widths[line] = line.get_shader_parameter("width") if line.get_shader_parameter("width") != null else 0.0055
 		line.set_shader_parameter("colour", palette.ink)
 		line.set_shader_parameter("sun_direction", direction)
-		line.set_shader_parameter("width", _widths[line] * palette.line_width)
+		var scale := palette.figure_line_scale if line == figure_outline() else 1.0
+		line.set_shader_parameter("width", _widths[line] * palette.line_width * scale)
 		# The near and effect lines never wobble.
 		if line != near_outline() and line != effect_outline():
 			line.set_shader_parameter("brush", palette.line_brush)
@@ -372,6 +373,48 @@ static func bevel_box(size: Vector3, bevel := 0.02) -> ArrayMesh:
 	return _meshes[key]
 
 
+## A hull along z, with bevelled cross sections given as half width, half
+## height, z and sideways offset. Sections run from the nose to the tail.
+static func loft(sections: Array[Vector4], corner_share := 0.45) -> ArrayMesh:
+	var key := "loft/%s/%s" % [sections, corner_share]
+	if _meshes.has(key):
+		return _meshes[key]
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var previous := PackedVector3Array()
+	for section in sections:
+		var w := section.x
+		var h := section.y
+		var cut := minf(w, h) * corner_share
+		var ring := PackedVector3Array([
+			Vector3(-w + cut, h, 0), Vector3(w - cut, h, 0),
+			Vector3(w, h - cut, 0), Vector3(w, -h + cut, 0),
+			Vector3(w - cut, -h, 0), Vector3(-w + cut, -h, 0),
+			Vector3(-w, -h + cut, 0), Vector3(-w, h - cut, 0),
+		])
+		for k in ring.size():
+			ring[k] += Vector3(section.w, 0, section.z)
+		if previous.is_empty():
+			for k in range(1, ring.size() - 1):
+				_triangle(tool, ring[0], ring[k], ring[k + 1], Vector3.FORWARD)
+		else:
+			for k in ring.size():
+				var next := (k + 1) % ring.size()
+				var a := previous[k]
+				var b := previous[next]
+				var c := ring[next]
+				var d := ring[k]
+				var normal := (d - a).cross(b - a).normalized()
+				_quad(tool, [a, b, c, d], normal)
+		previous = ring
+	for k in range(1, previous.size() - 1):
+		_triangle(tool, previous[0], previous[k], previous[k + 1], Vector3.BACK)
+	tool.index()
+	var result := tool.commit()
+	_meshes[key] = result
+	return result
+
+
 ## A round shape turned from a profile of (radius, height) points from the
 ## bottom up, smooth around and with a hard edge at each profile point, and
 ## flat caps where the profile ends off the axis. Shared by profile.
@@ -503,7 +546,7 @@ static func near_outline() -> ShaderMaterial:
 		_near_outline = ShaderMaterial.new()
 		_near_outline.shader = OUTLINE
 		_near_outline.set_shader_parameter("min_distance", 0.0)
-		_near_outline.set_shader_parameter("width", 0.006)
+		_near_outline.set_shader_parameter("width", 0.0052)
 		_near_outline.set_shader_parameter("brush", 0.0)
 		_near_outline.set_shader_parameter("shadow_weight", 0.0)
 	return _near_outline

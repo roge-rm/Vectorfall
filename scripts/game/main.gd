@@ -93,7 +93,7 @@ func _ready() -> void:
 	camera.make_current()
 	audio = GameAudio.new()
 	add_child(audio)
-	audio.watch(game, player)
+	audio.watch(game, player, map)
 
 	var layer := CanvasLayer.new()
 	add_child(layer)

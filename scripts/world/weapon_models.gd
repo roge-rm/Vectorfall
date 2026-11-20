@@ -10,7 +10,7 @@ extends RefCounted
 
 const BODY := Color(0.8, 0.8, 0.84)
 const DARK := Color(0.3, 0.3, 0.36)
-const DEEP := Color(0.14, 0.13, 0.17)
+const DEEP := Color(0.21, 0.19, 0.25)
 const PALE := Color(0.98, 0.96, 0.9)
 const DISC_GLOW := Color(0.7, 1.0, 1.0)
 const LENS := Color(1.0, 0.86, 0.4)
@@ -111,6 +111,18 @@ static func _block(size: Vector3, bevel := 0.008) -> Mesh:
 	return Cel.box(size) if _far else Cel.bevel_box(size, bevel)
 
 
+## Long plates taper into the muzzle and stock. The far receiver stays a box.
+static func _receiver(size: Vector3, nose: Vector2, heel: Vector2) -> Mesh:
+	if _far:
+		return Cel.box(size)
+	var h := size * 0.5
+	return Cel.loft([
+		Vector4(h.x * nose.x, h.y * nose.y, -h.z, 0),
+		Vector4(h.x, h.y, -h.z * 0.36, 0),
+		Vector4(h.x * heel.x, h.y * heel.y, h.z, 0),
+	], 0.7)
+
+
 ## A short cylinder along z with bevelled rims.
 static func _ring(radius: float, length: float, bevel := 0.006, sides := 12) -> Mesh:
 	return Cel.cylinder(radius, radius, length, 6) if _far else Cel.bevel_cylinder(radius, length, bevel, sides)
@@ -149,7 +161,7 @@ static func _disc_launcher(parts: Array) -> void:
 	var pale := Color(PALE, 0.0)
 	var glow := Color(DISC_GLOW, 0.0)
 	var turn_x := Basis(Vector3.RIGHT, PI * 0.5)
-	_add(parts, _block(Vector3(0.12, 0.12, 0.36), 0.014), _at(0.0, 0.03, -0.07), body)
+	_add(parts, _receiver(Vector3(0.12, 0.12, 0.36), Vector2(0.84, 0.7), Vector2(0.68, 0.90)), _at(0.0, 0.03, -0.07), body)
 	_add(parts, _block(Vector3(0.13, 0.035, 0.26), 0.01), _at(0.0, 0.105, -0.1), team)
 	_add(parts, _block(Vector3(0.11, 0.03, 0.1), 0.01), _at(0.0, 0.09, 0.06, Basis(Vector3.RIGHT, -0.45)), team)
 	for side: float in [1.0, -1.0]:
@@ -204,7 +216,7 @@ static func _chaingun(parts: Array) -> void:
 	var team := _team()
 	var pale := Color(PALE, 0.0)
 	var turn_x := Basis(Vector3.RIGHT, PI * 0.5)
-	_add(parts, _block(Vector3(0.14, 0.14, 0.3), 0.016), _at(0.0, 0.02, -0.04), body)
+	_add(parts, _receiver(Vector3(0.14, 0.14, 0.3), Vector2(0.85, 0.87), Vector2(0.80, 0.94)), _at(0.0, 0.02, -0.04), body)
 	_add(parts, _block(Vector3(0.15, 0.04, 0.22), 0.01), _at(0.0, 0.1, -0.06), team)
 	_add(parts, _block(Vector3(0.1, 0.03, 0.08), 0.008), _at(0.0, 0.1, 0.09, Basis(Vector3.RIGHT, -0.4)), team)
 	for side: float in [1.0, -1.0]:
@@ -262,7 +274,7 @@ static func _grenade_launcher(parts: Array) -> void:
 	var team := _team()
 	var pale := Color(PALE, 0.0)
 	var turn_x := Basis(Vector3.RIGHT, PI * 0.5)
-	_add(parts, _block(Vector3(0.11, 0.12, 0.3), 0.014), _at(0.0, 0.03, -0.02), body)
+	_add(parts, _receiver(Vector3(0.11, 0.12, 0.3), Vector2(0.9, 0.82), Vector2(0.67, 0.82)), _at(0.0, 0.03, -0.02), body)
 	_add(parts, _block(Vector3(0.12, 0.03, 0.22), 0.01), _at(0.0, 0.105, -0.04), team)
 	_add(parts, _block(Vector3(0.1, 0.03, 0.08), 0.008), _at(0.0, 0.09, 0.1, Basis(Vector3.RIGHT, -0.4)), team)
 	for side: float in [1.0, -1.0]:
@@ -311,7 +323,7 @@ static func _mortar(parts: Array) -> void:
 	var turn_x := Basis(Vector3.RIGHT, PI * 0.5)
 	var tube_y := 0.1
 	# The breech block and its cover.
-	_add(parts, _block(Vector3(0.14, 0.13, 0.28), 0.016), _at(0.0, 0.0, -0.02), body)
+	_add(parts, _receiver(Vector3(0.14, 0.13, 0.28), Vector2(0.73, 0.84), Vector2(0.91, 0.80)), _at(0.0, 0.0, -0.02), body)
 	_add(parts, _block(Vector3(0.012, 0.07, 0.18), 0.004), _at(0.071, 0.0, -0.03), team)
 	_add(parts, _block(Vector3(0.012, 0.07, 0.18), 0.004), _at(-0.071, 0.0, -0.03), team)
 	_seams(parts, 0.07, [0.045, -0.045], -0.02, 0.24)
@@ -358,7 +370,7 @@ static func _plasma_gun(parts: Array) -> void:
 	var pale := Color(PALE, 0.0)
 	var glow := Color(PLASMA_GLOW, 0.0)
 	var turn_x := Basis(Vector3.RIGHT, PI * 0.5)
-	_add(parts, _block(Vector3(0.12, 0.12, 0.22), 0.02), _at(0.0, 0.03, 0.0), body)
+	_add(parts, _receiver(Vector3(0.12, 0.12, 0.22), Vector2(0.75, 0.72), Vector2(0.78, 0.94)), _at(0.0, 0.03, 0.0), body)
 	_add(parts, _block(Vector3(0.13, 0.035, 0.18), 0.012), _at(0.0, 0.105, 0.0), team)
 	_add(parts, _block(Vector3(0.1, 0.03, 0.07), 0.008), _at(0.0, 0.09, 0.1, Basis(Vector3.RIGHT, -0.45)), team)
 	_add(parts, Cel.box(Vector3(0.124, 0.016, 0.16)), _at(0.0, -0.01, 0.0), pale, 1)
@@ -403,7 +415,7 @@ static func _sniper_rifle(parts: Array) -> void:
 	var pale := Color(PALE, 0.0)
 	var glow := Color(SNIPER_GLOW, 0.0)
 	var turn_x := Basis(Vector3.RIGHT, PI * 0.5)
-	_add(parts, _block(Vector3(0.08, 0.1, 0.34), 0.012), _at(0.0, 0.03, -0.05), body)
+	_add(parts, _receiver(Vector3(0.08, 0.1, 0.34), Vector2(0.62, 0.69), Vector2(0.82, 0.86)), _at(0.0, 0.03, -0.05), body)
 	_add(parts, _block(Vector3(0.09, 0.03, 0.26), 0.008), _at(0.0, 0.09, -0.06), team)
 	_add(parts, Cel.box(Vector3(0.084, 0.014, 0.3)), _at(0.0, -0.005, -0.05), pale, 1)
 	_seams(parts, 0.041, [0.055], -0.05, 0.3)
@@ -454,7 +466,7 @@ static func _blaster(parts: Array) -> void:
 	var pale := Color(PALE, 0.0)
 	var glow := Color(BLASTER_GLOW, 0.0)
 	var turn_x := Basis(Vector3.RIGHT, PI * 0.5)
-	_add(parts, _block(Vector3(0.09, 0.1, 0.22), 0.014), _at(0.0, 0.03, -0.06), body)
+	_add(parts, _receiver(Vector3(0.09, 0.1, 0.22), Vector2(0.67, 0.85), Vector2(0.89, 0.71)), _at(0.0, 0.03, -0.06), body)
 	_add(parts, _block(Vector3(0.1, 0.03, 0.17), 0.008), _at(0.0, 0.095, -0.04), team)
 	_add(parts, _block(Vector3(0.09, 0.03, 0.07), 0.008), _at(0.0, 0.075, -0.15, Basis(Vector3.RIGHT, 0.5)), team)
 	_add(parts, Cel.box(Vector3(0.094, 0.014, 0.18)), _at(0.0, -0.005, -0.06), pale, 1)

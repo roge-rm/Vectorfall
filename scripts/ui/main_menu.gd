@@ -6,6 +6,7 @@ extends Node
 ## cover picture. The sounds are made a couple of frames after it shows.
 
 const MATCH_SCENE := "res://scenes/main.tscn"
+const PRACTICE_SCENE := "res://scenes/ski_practice.tscn"
 
 var ui: Control
 var home: CoverPage
@@ -55,9 +56,10 @@ func _ready() -> void:
 	settings_screen.visible = false
 	settings_screen.closed.connect(show_home)
 	ui.add_child(settings_screen)
-	how_to = HowToPlay.new()
+	how_to = HowToPlay.new(true)
 	how_to.visible = false
 	how_to.closed.connect(show_home)
+	how_to.practice_pressed.connect(start_practice)
 	ui.add_child(how_to)
 	_loading = MenuKit.heading("Loading", 48)
 	_loading.set_anchors_preset(Control.PRESET_CENTER)
@@ -107,6 +109,13 @@ func show_settings() -> void:
 func show_how_to() -> void:
 	_hide_all()
 	how_to.open(device)
+
+
+func start_practice() -> void:
+	if _starting:
+		return
+	_starting = true
+	get_tree().change_scene_to_file(PRACTICE_SCENE)
 
 
 ## Starts a match with these choices, after a frame showing Loading.

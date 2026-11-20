@@ -136,6 +136,13 @@ func watch(game: Match) -> void:
 	_game = game
 	game.impacted.connect(_on_impacted)
 	game.fired.connect(_on_fired)
+	game.shield_hit.connect(_on_shield_hit)
+
+
+func _on_shield_hit(victim_id: int, _amount: float, _from: Vector3) -> void:
+	var victim := _game.soldier(victim_id)
+	if victim != null:
+		victim.body.flash_shield()
 
 
 func _on_fired(_soldier_id: int, weapon_slot: int) -> void:

@@ -16,7 +16,7 @@ var how_to: HowToPlay
 var device := 0
 
 
-func _init() -> void:
+func _init(restart_title := "Restart") -> void:
 	name = "PauseMenu"
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -34,7 +34,7 @@ func _init() -> void:
 	box.add_child(MenuKit.button("Resume", resume, 22, false, true))
 	box.add_child(MenuKit.button("Settings", _show_settings, 22))
 	box.add_child(MenuKit.button("How to play", _show_how_to, 22))
-	box.add_child(MenuKit.button("Restart", restart_pressed.emit, 22))
+	box.add_child(MenuKit.button(restart_title, restart_pressed.emit, 22))
 	box.add_child(MenuKit.button("Quit to menu", quit_pressed.emit, 22, true))
 	settings = SettingsScreen.new()
 	settings.visible = false

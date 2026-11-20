@@ -7,7 +7,10 @@ extends Control
 signal start_pressed(setup: MatchSetup)
 signal closed
 
-const MAP_TITLES: Array[String] = ["Ochre Fold", "Test map"]
+const MAP_TITLES: Array[String] = [
+	"Ochre Fold", "Test map", "Saltwake Flats", "Nightline Foundry", "Copper Steps",
+	"Caldera Relay", "Gannet Reach", "White Signal", "Glass Ravine", "Greenfall Terraces", "Beacon Wreck",
+]
 
 var setup: MatchSetup
 var _rows: VBoxContainer

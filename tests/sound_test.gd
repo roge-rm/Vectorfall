@@ -25,6 +25,17 @@ func _run() -> void:
 			seconds += stream.get_length()
 	checks.check(made == SoundBank.NAMES.size(), "every effect is made (%d of %d, %.1f s)" % [made, SoundBank.NAMES.size(), seconds])
 	checks.check(SoundBank.get_stream("jet").loop_mode == AudioStreamWAV.LOOP_FORWARD and SoundBank.get_stream("ski").loop_mode == AudioStreamWAV.LOOP_FORWARD, "the jet and ski sounds loop")
+	var engines := {}
+	for engine in SoundBank.ENGINE_NAMES:
+		var stream := SoundBank.get_stream(engine)
+		if stream != null and stream.loop_mode == AudioStreamWAV.LOOP_FORWARD:
+			engines[hash(stream.data)] = true
+	checks.check(engines.size() == Vehicle.NAMES.size(), "each vehicle has its own looping engine")
+	for material in ["rock", "metal", "salt"]:
+		var ski := SoundBank.get_stream("ski_" + material)
+		var step := SoundBank.get_stream("step_" + material)
+		var land := SoundBank.get_stream("land_" + material)
+		checks.check(ski.loop_mode == AudioStreamWAV.LOOP_FORWARD and step.data != land.data, "%s has a ski loop and distinct contact sounds" % material)
 	var voices := 0
 	var differ := true
 	for line in BotLines.TEXT.size():
@@ -56,5 +67,56 @@ func _run() -> void:
 	BotVoice.play(BotLines.Line.FLAG_TAKEN, 3, 1)
 	var voice := Sound.voice_player()
 	checks.check(voice != null and voice.stream == SoundBank.voice(BotLines.Line.FLAG_TAKEN, 1) and voice.bus == Sound.VOICES_BUS, "BotVoice plays the line in the team's voice on the Voices bus")
-	audio.free()
+	voice.stop()
+	voice.stream = null
+	audio.queue_free()
+	await _check_music()
 	checks.finish(self)
+
+
+func _check_music() -> void:
+	var tracks := 0
+	for k in MusicRotation.TRACKS.size():
+		var stream := load(MusicRotation.track_path(k)) as AudioStreamOggVorbis
+		if stream != null and not stream.loop and stream.get_length() > 60.0:
+			tracks += 1
+	checks.check(tracks == 10, "ten complete songs load with track looping off")
+	var rotation := MusicRotation.new()
+	var previous := -1
+	var cycles_are_unique := true
+	for cycle in 3:
+		var songs := {}
+		for k in MusicRotation.TRACKS.size():
+			var track := rotation.next_index()
+			if track == previous:
+				cycles_are_unique = false
+			songs[track] = true
+			previous = track
+		cycles_are_unique = cycles_are_unique and songs.size() == MusicRotation.TRACKS.size()
+	checks.check(cycles_are_unique, "three cycles play every song once and avoid immediate repeats")
+	root.add_child(rotation)
+	rotation.set_audible(true)
+	var first := rotation.stream
+	rotation.stop()
+	rotation.finished.emit()
+	checks.check(first != null and rotation.stream != null and first != rotation.stream, "when a track finishes, the rotation loads the next song")
+	rotation.set_audible(false)
+	checks.check(rotation.stream_paused, "muting pauses the current song")
+	rotation.stop()
+	rotation.stream = null
+	rotation.queue_free()
+	# The audio server drops stopped playbacks after its next mix.
+	OS.delay_msec(70)
+	await process_frame
+	await process_frame
+	var original := Settings.path
+	Settings.path = "user://sound-test-settings.cfg"
+	Settings.set_value("music_volume", 0.0)
+	Settings.save_file()
+	Settings.set_value("music_volume", 1.0)
+	Settings.load_file()
+	var music := AudioServer.get_bus_index(Sound.MUSIC_BUS)
+	var effects := AudioServer.get_bus_index(Sound.EFFECTS_BUS)
+	checks.check(Settings.music_volume == 0.0 and AudioServer.is_bus_mute(music) and not AudioServer.is_bus_mute(effects), "music volume persists and mutes just the Music bus")
+	Settings.path = original
+	DirAccess.remove_absolute("user://sound-test-settings.cfg")

@@ -24,8 +24,12 @@ const FEED_TIME := 6.0
 ## How long a line from your team's bots shows.
 const CHAT_TIME := 7.0
 const HIT_TIME := 0.25
+const AIR_HIT_TIME := 0.75
+const SHIELD_FLASH_TIME := 0.26
+const SHIELD_COLOUR := Color("94d9fd")
 const HURT_TIME := 1.5
 const MESSAGE_TIME := 3.5
+const WAIT_FOR_FLAG := "Return your flag to score"
 ## Design pixels the HUD keeps between itself and the touch controls.
 const TOUCH_GAP := 6.0
 const COMPASS_NAMES: Array[String] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
@@ -44,6 +48,8 @@ var _lines: Array[Dictionary] = []
 ## Seconds left on the hit marker, and whether the hit killed.
 var _hit_left := 0.0
 var _hit_killed := false
+var _air_hit_left := 0.0
+var _shield_flash_left := 0.0
 ## Where recent damage came from, with seconds left to show it.
 var _hurts: Array[Dictionary] = []
 var _flash := 0.0
@@ -110,7 +116,10 @@ func _make_end_card() -> void:
 func watch(value: Match) -> void:
 	game = value
 	game.damaged.connect(_on_damaged)
+	game.shield_hit.connect(_on_shield_hit)
+	game.air_hit.connect(_on_air_hit)
 	game.killed.connect(_on_killed)
+	game.carrier_stopped.connect(_on_carrier_stopped)
 	game.flag_taken.connect(_on_flag_taken)
 	game.flag_dropped.connect(_on_flag_dropped)
 	game.flag_returned.connect(_on_flag_returned)
@@ -162,6 +171,12 @@ func _on_flag_captured(team: int, _soldier_id: int) -> void:
 	_say("%s team captured the flag" % Soldier.TEAM_NAMES[team])
 
 
+func _on_carrier_stopped(carrier_id: int, killer_id: int) -> void:
+	var carrier := game.soldier(carrier_id)
+	if soldier != null and carrier != null and carrier.team != soldier.team:
+		_say("You stopped the carrier" if killer_id == soldier.entity_id else "Enemy carrier stopped")
+
+
 func _on_power_lost(team: int) -> void:
 	_say("Our generator is down" if _mine(team) else "Enemy generator destroyed")
 
@@ -190,16 +205,28 @@ func _on_match_over(team: int) -> void:
 	_restart_button.grab_focus.call_deferred()
 
 
-func _on_damaged(victim_id: int, attacker_id: int, _amount: float, from: Vector3) -> void:
+func _on_shield_hit(victim_id: int, _amount: float, _from: Vector3) -> void:
+	if soldier != null and victim_id == soldier.entity_id:
+		_shield_flash_left = SHIELD_FLASH_TIME
+
+
+func _on_air_hit(attacker_id: int, _victim_id: int) -> void:
+	if soldier != null and attacker_id == soldier.entity_id:
+		_air_hit_left = AIR_HIT_TIME
+
+
+func _on_damaged(victim_id: int, attacker_id: int, amount: float, from: Vector3) -> void:
 	if soldier == null:
 		return
 	if attacker_id == soldier.entity_id and victim_id != soldier.entity_id:
 		_hit_left = HIT_TIME
 		_hit_killed = false
 	if victim_id == soldier.entity_id:
-		_flash = 0.35
+		if amount > 0.0:
+			_flash = 0.35
 		if attacker_id != soldier.entity_id:
-			_hurts.append({ "from": from, "left": HURT_TIME })
+			var colour := InkUi.PINK if amount > 0.0 else SHIELD_COLOUR
+			_hurts.append({ "from": from, "left": HURT_TIME, "colour": colour })
 
 
 func _on_killed(victim_id: int, killer_id: int, weapon_slot: int) -> void:
@@ -266,6 +293,8 @@ func _process(delta: float) -> void:
 	_message_left = maxf(_message_left - delta, 0.0)
 	_generator_hit_left = maxf(_generator_hit_left - delta, 0.0)
 	_hit_left = maxf(_hit_left - delta, 0.0)
+	_air_hit_left = maxf(_air_hit_left - delta, 0.0)
+	_shield_flash_left = maxf(_shield_flash_left - delta, 0.0)
 	_flash = maxf(_flash - delta, 0.0)
 	# Each arc fades in while its bar isn't full and out a second after it is.
 	var health_full := soldier.health >= soldier.tuning.health_max
@@ -340,6 +369,14 @@ func _draw() -> void:
 		for dir: Vector2 in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
 			var d := dir.normalized()
 			InkUi.stroke(self, centre + d * 9.0 * u, centre + d * 17.0 * u, colour, thick)
+	if _air_hit_left > 0.0:
+		var alpha := clampf(_air_hit_left * 4.0, 0.0, 1.0)
+		InkUi.centred(self, centre - Vector2(0.0, 29.0 * u), "AIR HIT", InkUi.Face.BLACK, _px(14), Color(InkUi.AMBER, alpha), 3)
+	if _shield_flash_left > 0.0:
+		var alpha := _shield_flash_left / SHIELD_FLASH_TIME
+		var radius := lerpf(34.0, 25.0, alpha) * u
+		draw_arc(centre, radius, 0.0, TAU, 40, Color(InkUi.INK, alpha), 4.0 * u, true)
+		draw_arc(centre, radius, 0.0, TAU, 40, Color(SHIELD_COLOUR, alpha), 2.0 * u, true)
 	# An arc around the crosshair pointing at where each hit came from, up for
 	# ahead.
 	for hurt in _hurts:
@@ -349,7 +386,7 @@ func _draw() -> void:
 		var radius := 62.0 * u
 		var alpha := clampf(hurt.left / HURT_TIME, 0.0, 1.0)
 		draw_arc(centre, radius, angle - 0.37, angle + 0.37, 16, Color(InkUi.INK, alpha), 9.0 * u, true)
-		draw_arc(centre, radius, angle - 0.35, angle + 0.35, 16, Color(InkUi.PINK, alpha), 5.0 * u, true)
+		draw_arc(centre, radius, angle - 0.35, angle + 0.35, 16, Color(hurt.colour, alpha), 5.0 * u, true)
 	_avoid = _touch_rects()
 	var avoid := _avoid
 	_top_edge = 0.0
@@ -369,8 +406,10 @@ func _draw() -> void:
 		_draw_sensor_marks(u)
 		_draw_generator_marker(u)
 		_draw_flag_markers(u)
-	if _message_left > 0.0:
-		_banner(Vector2(centre.x, size.y * 0.3), _message, 20, clampf(_message_left, 0.0, 1.0))
+	var words := notice()
+	if not words.is_empty():
+		var alpha := 1.0 if words == WAIT_FOR_FLAG else clampf(_message_left, 0.0, 1.0)
+		_banner(Vector2(centre.x, size.y * 0.3), words, 20, alpha)
 	if soldier.dead:
 		_banner(Vector2(centre.x, size.y * 0.38), "Respawning in %d" % ceili(maxf(soldier.respawn_in, 0.0)), 26, 1.0)
 
@@ -803,6 +842,8 @@ func power_mark_on(team: int) -> bool:
 
 ## The notice showing now, or empty.
 func notice() -> String:
+	if game != null and soldier != null and game.awaiting_flag_return(soldier):
+		return WAIT_FOR_FLAG
 	return _message if _message_left > 0.0 else ""
 
 

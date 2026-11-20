@@ -42,7 +42,7 @@ func _assign(game: Match) -> void:
 	for id in jobs.keys():
 		var brain := director.brain_of(id)
 		var hull: Vehicle = game.fleet.hulls.get(jobs[id].hull)
-		if brain == null or brain.soldier.dead or not _available_at_pad(game, hull) or brain.soldier.vehicle_id != 0 or game.tick >= jobs[id].until:
+		if brain == null or brain.soldier.dead or brain.is_flag_runner() or not _available_at_pad(game, hull) or brain.soldier.vehicle_id != 0 or game.tick >= jobs[id].until:
 			jobs.erase(id)
 	for team in 2:
 		var boss := director.commander(team)
@@ -97,7 +97,7 @@ func _reserve(boss: TeamCommander, hull: Vehicle, want: int, reach: float) -> in
 		var best_distance := reach
 		for brain: BotBrain in boss.brains():
 			var who := brain.soldier
-			if who.dead or who.vehicle_id != 0 or jobs.has(who.entity_id) or boss.order_locks.has(who.entity_id):
+			if who.dead or who.vehicle_id != 0 or brain.is_flag_runner() or jobs.has(who.entity_id) or boss.order_locks.has(who.entity_id):
 				continue
 			var guard := hull.kind == Vehicle.Kind.GUNSHIP and brain.role == BotBrain.Role.LIGHT_DEFENCE
 			if not guard and brain.role not in [BotBrain.Role.OFFENCE, BotBrain.Role.MIDFIELD]:

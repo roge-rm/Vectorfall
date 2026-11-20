@@ -408,10 +408,21 @@ func _sends_raid() -> void:
 	await ticks(60)
 	var flag_turret := boss._flag_turret()
 	var aimed := 0
+	var runner: BotBrain
 	for brain in director.brains:
-		if brain.soldier.team == 0 and brain.role == R.OFFENCE and brain.role_target == flag_turret:
+		if brain.soldier.team != 0 or brain.role != R.OFFENCE:
+			continue
+		if brain.is_flag_runner():
+			runner = brain
+		elif brain.role_target == flag_turret:
 			aimed += 1
-	checks.check(flag_turret != 0 and game.asset(flag_turret).guard_points.is_empty() and aimed == _role_count(director, 0, [R.OFFENCE]) and aimed > 0, "offence goes for their flag turret first (%d bots)" % aimed)
+	var aims_for_flag := false
+	if runner != null:
+		var was_attacking := runner.attacking
+		runner.attacking = true
+		aims_for_flag = runner._role_goal()[0] == BotBrain.Goal.TAKE_FLAG
+		runner.attacking = was_attacking
+	checks.check(aims_for_flag and flag_turret != 0 and game.asset(flag_turret).guard_points.is_empty() and aimed == _role_count(director, 0, [R.OFFENCE]) - 1 and aimed > 0, "one flag runner and %d offence bots targeting its turret" % aimed)
 	boss.next_raid = game.tick
 	boss.think(true)
 	var target := game.asset(boss.raid_target)

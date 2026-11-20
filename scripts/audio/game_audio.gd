@@ -7,11 +7,13 @@ extends Node3D
 ## that started longest ago, or is dropped if it matters less. Your own jet,
 ## skis, footsteps and landings, repair hum, pack switches, hit markers and
 ## flag and base power jingles play flat. The
-## jets of the JET_VOICES nearest other soldiers loop in 3D, and so does each
-## working generator's hum, heard only close by.
+## nearest jetpacks and engines loop in 3D. Generators hum up close.
 
 const VOICES := 10
 const JET_VOICES := 3
+const ENGINE_VOICES := 3
+const ENGINE_REACH := 165.0
+const CONTACT_GAP := 45
 const FLAT_VOICES := 4
 ## How far world sounds carry, in metres.
 const REACH := 260.0
@@ -26,6 +28,7 @@ const CHAINGUN_GAP := 0.06
 
 var game: Match
 var soldier: Soldier
+var map: GameMap
 var _pool: Array[AudioStreamPlayer3D] = []
 ## Milliseconds of play: it stops while the game is paused, like the players.
 var _clock := 0
@@ -39,6 +42,12 @@ var _jet: AudioStreamPlayer
 var _ski: AudioStreamPlayer
 var _repair: AudioStreamPlayer
 var _jets: Array[AudioStreamPlayer3D] = []
+var _engines: Array[AudioStreamPlayer3D] = []
+var _engine_hulls: Array[int] = []
+var _engine_refresh := 0
+var _last_hull := 0
+var _last_contact := -CONTACT_GAP
+var _ski_surface := ""
 ## Each generator's hum, by its asset.
 var _hums: Dictionary[Object, AudioStreamPlayer3D] = {}
 var _step_left := 0.0
@@ -83,6 +92,15 @@ func _init() -> void:
 		add_child(jet)
 		_jets.append(jet)
 
+	for k in ENGINE_VOICES:
+		var engine := AudioStreamPlayer3D.new()
+		engine.bus = Sound.EFFECTS_BUS
+		engine.unit_size = 9.0
+		engine.max_distance = ENGINE_REACH
+		add_child(engine)
+		_engines.append(engine)
+		_engine_hulls.append(0)
+
 
 func _loop_player(sound_name: String) -> AudioStreamPlayer:
 	var player := AudioStreamPlayer.new()
@@ -93,9 +111,10 @@ func _loop_player(sound_name: String) -> AudioStreamPlayer:
 
 
 ## Listens to a match, with you as `who`.
-func watch(match_node: Match, who: Soldier) -> void:
+func watch(match_node: Match, who: Soldier, world: GameMap = null) -> void:
 	game = match_node
 	soldier = who
+	map = world
 	game.fired.connect(_on_fired)
 	game.impacted.connect(_on_impacted)
 	game.hit.connect(_on_hit)
@@ -236,13 +255,19 @@ func _on_shield_hit(victim_id: int, _amount: float, _from: Vector3) -> void:
 		play_at("shield_hit", who.centre(), -4.0, 1, 0.95 + 0.1 * randf())
 
 
-func _on_impacted(weapon: int, at: Vector3, _normal: Vector3) -> void:
+func _on_impacted(weapon: int, at: Vector3, normal: Vector3) -> void:
 	var sound := HIT_SOUNDS[weapon]
-	if sound.is_empty():
-		return
-	# Blasts matter most; small hits only take a free voice.
+	# Blasts matter most. Hard surfaces add a short crack or ring to small hits.
 	var priority := 3 if Weapon.all[weapon].splash_radius > 0.0 else 0
-	play_at(sound, at, 0.0 if priority == 3 else -6.0, priority)
+	if priority == 0 and _clock - _last_contact >= CONTACT_GAP:
+		var surface := _surface_at(at, normal)
+		if surface == "_metal" or surface == "_rock":
+			play_at("impact" + surface, at, -10.0, 0)
+		elif sound.is_empty():
+			play_at("impact_dust", at, -15.0, 0)
+		_last_contact = _clock
+	if not sound.is_empty():
+		play_at(sound, at, 0.0 if priority == 3 else -6.0, priority)
 
 
 func _on_hit(attacker_id: int, victim_id: int, _weapon: int) -> void:
@@ -275,28 +300,42 @@ func _process(delta: float) -> void:
 		return
 	_own_sounds(delta)
 	_other_jets()
+	_vehicle_sounds()
 	_generator_hums()
 
 
 func _own_sounds(delta: float) -> void:
 	var alive := not soldier.dead
+	var hull_id := soldier.vehicle_id
+	if _last_hull != hull_id:
+		if alive:
+			play_flat("vehicle_board" if hull_id != 0 else "vehicle_eject", -7.0)
+		_last_hull = hull_id
 	var speed := Vector2(soldier.velocity.x, soldier.velocity.z).length()
 	_set_loop(_jet, alive and soldier.jetting, -8.0, 1.0)
 	_set_loop(_repair, alive and soldier.repair_target != 0, -12.0, 1.0 if soldier.repair_target == soldier.entity_id else 1.15)
-	var skiing := alive and soldier.skiing and speed > 3.0
+	var skiing := alive and hull_id == 0 and soldier.skiing and speed > 3.0
+	if skiing:
+		var surface := _surface_at(soldier.global_position, soldier.floor_normal)
+		if _ski_surface != surface:
+			_ski.stream = SoundBank.get_stream("ski" + surface)
+			_ski_surface = surface
 	# The hiss rises with speed.
 	_set_loop(_ski, skiing, linear_to_db(clampf(speed / 40.0, 0.15, 1.0)) - 10.0, 0.8 + clampf(speed / 60.0, 0.0, 0.6))
-	if not alive:
+	if not alive or hull_id != 0:
 		_was_grounded = true
+		_fall_speed = 0.0
 		return
 	if soldier.grounded and not _was_grounded and _fall_speed > 6.0:
-		play_flat("land", linear_to_db(clampf(_fall_speed / 25.0, 0.3, 1.0)) - 6.0)
+		var surface := _surface_at(soldier.global_position, soldier.floor_normal)
+		play_flat("land" + surface, linear_to_db(clampf(_fall_speed / 25.0, 0.3, 1.0)) - 6.0)
 		_step_left = STEP_TIME
 	elif soldier.grounded and not soldier.skiing and speed > 2.0:
 		_step_left -= delta
 		if _step_left <= 0.0:
 			_step_left = STEP_TIME
-			play_flat("step", -14.0, 0.9 + 0.2 * randf())
+			var surface := _surface_at(soldier.global_position, soldier.floor_normal)
+			play_flat("step" + surface, -14.0, 0.9 + 0.2 * randf())
 	_was_grounded = soldier.grounded
 	_fall_speed = maxf(-soldier.velocity.y, 0.0)
 
@@ -328,6 +367,68 @@ func _other_jets() -> void:
 				jet.play()
 		elif jet.playing:
 			jet.stop()
+
+
+## Above the terrain is a deck or structure. Bare slopes give a stone sound.
+func _surface_at(at: Vector3, normal: Vector3) -> String:
+	if map != null:
+		if absf(at.y - map.ground_height(at.x, at.z)) > 0.7:
+			return "_metal"
+		if map.title == "Nightline Foundry":
+			return "_metal"
+		if map.title == "Saltwake Flats":
+			return "_salt"
+	if normal.length_squared() > 0.1 and absf(normal.y) < 0.88:
+		return "_rock"
+	return ""
+
+
+## Keep a stable voice on the nearest running hulls so an overtaking craft
+## doesn't restart both loops. The local hull takes a slot first.
+func _rank_engines() -> void:
+	var listener := soldier.global_position
+	var riding := soldier.vehicle_id
+	var ranked: Array[Vehicle] = []
+	for hull: Vehicle in game.fleet.hulls.values():
+		if (not hull.empty() or hull.velocity.length_squared() > 9.0) and hull.global_position.distance_squared_to(listener) < ENGINE_REACH * ENGINE_REACH:
+			ranked.append(hull)
+	ranked.sort_custom(func(a: Vehicle, b: Vehicle) -> bool:
+		if a.entity_id == riding or b.entity_id == riding:
+			return a.entity_id == riding and b.entity_id != riding
+		return a.global_position.distance_squared_to(listener) < b.global_position.distance_squared_to(listener)
+	)
+	ranked.resize(mini(ranked.size(), ENGINE_VOICES))
+	var ids: Array[int] = []
+	for hull in ranked:
+		ids.append(hull.entity_id)
+	for k in ENGINE_VOICES:
+		if not ids.has(_engine_hulls[k]):
+			_engine_hulls[k] = 0
+	for id in ids:
+		if not _engine_hulls.has(id):
+			_engine_hulls[_engine_hulls.find(0)] = id
+
+
+func _vehicle_sounds() -> void:
+	if _clock >= _engine_refresh:
+		_rank_engines()
+		_engine_refresh = _clock + 150
+	for k in ENGINE_VOICES:
+		var engine := _engines[k]
+		var hull: Vehicle = game.fleet.hulls.get(_engine_hulls[k])
+		if hull == null:
+			if engine.playing:
+				engine.stop()
+			continue
+		var motor := SoundBank.get_stream(SoundBank.ENGINE_NAMES[hull.kind])
+		if engine.stream != motor:
+			engine.stream = motor
+		var speed := clampf(hull.velocity.length() / Vehicle.SPEED[hull.kind], 0.0, 1.0)
+		engine.global_position = hull.global_position
+		engine.volume_db = lerpf(-21.0, -8.0, speed)
+		engine.pitch_scale = 0.84 + 0.43 * speed + clampf(hull.velocity.y / 60.0, 0.0, 0.14)
+		if not engine.playing:
+			engine.play()
 
 
 ## Each generator hums while it's working and you're near enough to hear it.

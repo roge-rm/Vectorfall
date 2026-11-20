@@ -35,8 +35,12 @@ func _run() -> void:
 	_setup()
 	var crew_ready := false
 	var rider_id := 0
+	var runner_reserved := false
 	for i in 60 * 25:
 		await physics_frame
+		for brain: BotBrain in director.brains:
+			if brain.is_flag_runner() and director.vehicle_orders.jobs.has(brain.soldier.entity_id):
+				runner_reserved = true
 		var ferry: Vehicle = game.fleet.hulls.get(ferry_pad.hull_id)
 		var wing: Vehicle = game.fleet.hulls.get(wing_pad.hull_id)
 		if ferry != null and wing != null and wing.crew[0] != 0 and ferry.crew[0] != 0 and ferry.crew[1] != 0:
@@ -44,6 +48,7 @@ func _run() -> void:
 			rider_id = ferry.crew[1]
 			break
 	checks.check(crew_ready, "bots board a gunship and crew a transport with a passenger")
+	checks.check(not runner_reserved, "the flag runner has no vehicle boarding job")
 	if not crew_ready:
 		checks.finish(self)
 		return

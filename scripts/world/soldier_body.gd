@@ -26,6 +26,8 @@ const PALE := Color(0.98, 0.96, 0.9, 0.0)
 const VISOR := Color(1.0, 0.86, 0.4, 0.0)
 ## Packs and tanks, lighter than the undersuit so they read from behind.
 const PACK := Color(0.58, 0.57, 0.64, 0.0)
+const ARMOUR_TRIM := Color(0.48, 0.47, 0.57, 0.0)
+const UPRIGHT := Basis(Vector3.RIGHT, -PI * 0.5)
 ## White with full team amount: takes the team colour.
 const TEAM := Color(1.0, 1.0, 1.0, 1.0)
 ## The undersuit in the far version: half team colour, so the whole figure
@@ -34,6 +36,7 @@ const FAR_LIMB := Color(0.6, 0.6, 0.64, 0.7)
 const FLAME := Color(1.0, 0.55, 0.15)
 const FLAME_CORE := Color(1.0, 0.95, 0.6)
 const SPARK := Color(1.0, 0.92, 0.55)
+const SHIELD_FLASH_TIME := 0.18
 ## Pack part colours: the repair cross and the ammo crate.
 const CROSS := Color(0.92, 0.2, 0.32, 0.0)
 const CRATE := Color(0.66, 0.58, 0.34, 0.0)
@@ -106,6 +109,7 @@ var _air := 0.0
 var _jet := 0.0
 var _fallen := 0.0
 var _flicker := RandomNumberGenerator.new()
+var _shield_flash_left := 0.0
 ## This armour's leg, in metres.
 var _hip_height := HIP_HEIGHT
 var _thigh := THIGH
@@ -238,13 +242,19 @@ func set_team_colour(colour: Color) -> void:
 	for view: GeometryInstance3D in _meshes_under(self):
 		if view != shell and view != jam_tip:
 			Cel.set_team(view, colour)
-	shell.material_override = shell_material(colour)
+	shell.material_override = shell_material(colour, _shield_flash_left > 0.0)
+
+
+func flash_shield() -> void:
+	if _shield_flash_left <= 0.0:
+		shell.material_override = shell_material(_team_colour, true)
+	_shield_flash_left = SHIELD_FLASH_TIME
 
 
 ## A see-through shell in a team colour, faint in the middle and stronger at
-## the rim, with a thin ink edge. Shared by colour.
-static func shell_material(colour: Color) -> ShaderMaterial:
-	var key := colour.to_html()
+## the rim, with a thin ink edge. Shared by colour and hit state.
+static func shell_material(colour: Color, flashing := false) -> ShaderMaterial:
+	var key := "%s/%s" % [colour.to_html(), flashing]
 	if _shells.has(key):
 		return _shells[key]
 	if _shell_shader == null:
@@ -253,17 +263,19 @@ static func shell_material(colour: Color) -> ShaderMaterial:
 render_mode unshaded, cull_back, depth_draw_never, shadows_disabled, fog_disabled;
 uniform vec3 colour : source_color;
 uniform vec3 ink : source_color;
+uniform float flash = 0.0;
 void fragment() {
 	float rim = 1.0 - abs(dot(NORMAL, VIEW));
 	float edge = smoothstep(0.86, 0.9, rim);
-	ALBEDO = mix(colour, ink, edge);
-	ALPHA = mix(0.12 + 0.6 * pow(rim, 2.5), 0.8, edge);
+	ALBEDO = mix(mix(colour, vec3(1.0), flash * 0.68), ink, edge);
+	ALPHA = mix(0.12 + flash * 0.4 + 0.6 * pow(rim, 2.5), 0.8, edge);
 }
 """
 	var made := ShaderMaterial.new()
 	made.shader = _shell_shader
 	made.set_shader_parameter("colour", colour.lightened(0.25))
 	made.set_shader_parameter("ink", Color(0.14, 0.04, 0.18))
+	made.set_shader_parameter("flash", 1.0 if flashing else 0.0)
 	_shells[key] = made
 	return made
 
@@ -294,7 +306,7 @@ static func mesh(part: String, for_team: int, for_armour: Armour, far := false, 
 		_far = far
 		_level = 0 if far else detail
 		_pack = with_pack
-		var parts := _parts(part, for_team, BUILDS[for_armour])
+		var parts := _parts(part, for_team, BUILDS[for_armour], not far)
 		_meshes[key] = Cel.merged(parts, part == "flame" or part == "sparks" or part == "jam_tip")
 		_far = false
 		_pack = -1
@@ -330,7 +342,7 @@ static func _turned(profile: PackedVector2Array) -> Mesh:
 
 
 ## The pieces of each part in its joint's space, as [mesh, transform, colour].
-static func _parts(part: String, for_team: int, b: Dictionary) -> Array:
+static func _parts(part: String, for_team: int, b: Dictionary, shaped: bool) -> Array:
 	var w: float = b.width
 	var l: float = b.limb
 	var h: float = b.helmet
@@ -350,13 +362,25 @@ static func _parts(part: String, for_team: int, b: Dictionary) -> Array:
 		"thigh_r", "thigh_l":
 			var side := 1.0 if part == "thigh_r" else -1.0
 			_add(parts, _block(Vector3(0.16 * l, thigh, 0.18 * l), 0.025), _at(0, -thigh * 0.5, 0), LIMB)
-			_add(parts, _block(Vector3(0.19 * l, 0.17, 0.21 * l), 0.03), _at(0, -thigh * 0.35, -0.01), TEAM)
+			if shaped:
+				_add(parts, Cel.loft([
+					Vector4(0.061 * l, 0.077 * l, -thigh * 0.217, 0), Vector4(0.102 * l, 0.093 * l, thigh * 0.043, 0),
+					Vector4(0.086 * l, 0.09 * l, thigh * 0.228, 0),
+				], 0.75), _at(0, -thigh * 0.35, -0.02 * l, UPRIGHT), TEAM)
+			else:
+				_add(parts, _block(Vector3(0.19 * l, 0.17, 0.21 * l), 0.03), _at(0, -thigh * 0.35, -0.01), TEAM)
 			# A strap and a pouch on the outside.
 			_add(parts, Cel.box(Vector3(0.16 * l + 0.012, 0.03, 0.18 * l + 0.012)), _at(0, -thigh * 0.72, 0), DARK, 1)
 			_add(parts, _block(Vector3(0.05, 0.1, 0.11), 0.012), _at(side * (0.08 * l + 0.025), -thigh * 0.66, 0.0), PLATE, 1)
 		"shin":
-			_add(parts, _block(Vector3(0.15 * l, shin, 0.17 * l), 0.025), _at(0, -shin * 0.5, 0), LIMB)
-			_add(parts, _block(Vector3(0.16 * l, shin * 0.62, 0.05), 0.015), _at(0, -shin * 0.42, -0.085 * l), PLATE)
+			_add(parts, _block(Vector3(0.15 * l, shin, 0.17 * l), 0.025), _at(0, -shin * 0.5, 0), ARMOUR_TRIM if shaped else LIMB)
+			if shaped:
+				_add(parts, Cel.loft([
+					Vector4(0.051 * l, 0.030 * l, -shin * 0.318, 0), Vector4(0.077 * l, 0.056 * l, -shin * 0.091, 0),
+					Vector4(0.086 * l, 0.061 * l, shin * 0.239, 0),
+				], 0.84), _at(0, -shin * 0.46, -0.065 * l, UPRIGHT), PLATE)
+			else:
+				_add(parts, _block(Vector3(0.16 * l, shin * 0.62, 0.05), 0.015), _at(0, -shin * 0.42, -0.085 * l), PLATE)
 			# Knee pads, bigger and always there on heavy.
 			if heavy:
 				_add(parts, _block(Vector3(0.19 * l, 0.15, 0.08), 0.025), _at(0, -0.03, -0.1 * l), TEAM)
@@ -371,7 +395,7 @@ static func _parts(part: String, for_team: int, b: Dictionary) -> Array:
 			for k in 2:
 				_add(parts, Cel.box(Vector3(0.012, shin * 0.36, 0.012)), _at((k - 0.5) * 0.05 * l, -shin * 0.42, -0.085 * l - 0.03), DARK, 2)
 		"torso":
-			_torso(parts, angular, b)
+			_torso(parts, angular, b, shaped)
 			_pack_part(parts, b)
 		"jam_tip":
 			parts.append([Cel.sphere(0.035, 0.07, 6), Transform3D.IDENTITY, JAM_TIP])
@@ -391,7 +415,16 @@ static func _parts(part: String, for_team: int, b: Dictionary) -> Array:
 				_add(parts, _block(Vector3(0.13, 0.13, 0.13) * l, 0.025), _at(to.x, to.y, to.z), PLATE)
 				# Elbow pad, forearm guard in team colour and a wrist strap.
 				_add(parts, _block(Vector3(0.15 * l, 0.15 * l, 0.09), 0.02), along.call(0.42), PLATE, 1)
-				_add(parts, _block(Vector3(0.15 * l, 0.145 * l, length * 0.32), 0.025), along.call(0.72), TEAM, 1)
+				if shaped and _level > 0:
+					var sweep := -0.018 * l if angular else 0.012 * l
+					var guard := Cel.loft([
+						Vector4(0.044 * l, 0.038 * l, -length * 0.17, sweep),
+						Vector4(0.076 * l, 0.049 * l, -length * 0.04, 0),
+						Vector4(0.068 * l, 0.066 * l, length * 0.18, 0),
+					], 0.42 if angular else 0.88)
+					var plate: Transform3D = along.call(0.71)
+					plate.origin += plate.basis.y * 0.028 * l
+					_add(parts, guard, plate, TEAM, 1)
 				_add(parts, Cel.box(Vector3(0.135 * l, 0.135 * l, 0.025)), along.call(0.9), DARK, 2)
 		"flame":
 			var p: float = b.pack
@@ -413,7 +446,16 @@ static func _parts(part: String, for_team: int, b: Dictionary) -> Array:
 static func _head(parts: Array, angular: bool, h: float) -> void:
 	_add(parts, Cel.box(Vector3(0.1, 0.08, 0.1)), _at(0, -0.02, 0), LIMB)
 	if angular:
-		_add(parts, _block(Vector3(0.27, 0.25, 0.3) * h, 0.035), _at(0, 0.13, 0.01), TEAM)
+		if _far:
+			_add(parts, _block(Vector3(0.27, 0.25, 0.3) * h, 0.035), _at(0, 0.13, 0.01), TEAM)
+		else:
+			var helmet := Cel.loft([
+				Vector4(0.092 * h, 0.095 * h, -0.145 * h, 0),
+				Vector4(0.136 * h, 0.119 * h, -0.047 * h, 0),
+				Vector4(0.122 * h, 0.116 * h, 0.096 * h, 0),
+				Vector4(0.091 * h, 0.085 * h, 0.15 * h, 0),
+			], 0.67)
+			_add(parts, helmet, _at(0, 0.13, 0.01), TEAM)
 		_add(parts, _block(Vector3(0.05, 0.09, 0.32) * h, 0.012), _at(0, 0.28 * h, 0.02), LIMB)
 		_add(parts, _block(Vector3(0.21, 0.05, 0.04) * h, 0.01), _at(0, 0.14, -0.15 * h), VISOR)
 		_add(parts, _block(Vector3(0.17, 0.07, 0.06) * h, 0.015), _at(0, 0.045, -0.14 * h), PLATE, 1)
@@ -427,7 +469,15 @@ static func _head(parts: Array, angular: bool, h: float) -> void:
 		for k in dome.size():
 			dome[k] *= h
 		_add(parts, _turned(dome), _at(0, 0.0, 0.01), TEAM)
-		_add(parts, _block(Vector3(0.28, 0.075, 0.1) * h, 0.02), _at(0, 0.13 * h, -0.115 * h), VISOR)
+		if _far:
+			_add(parts, _block(Vector3(0.28, 0.075, 0.1) * h, 0.02), _at(0, 0.13 * h, -0.115 * h), VISOR)
+		else:
+			var lens := Cel.loft([
+				Vector4(0.094 * h, 0.031 * h, -0.067 * h, 0),
+				Vector4(0.133 * h, 0.046 * h, -0.012 * h, 0),
+				Vector4(0.141 * h, 0.047 * h, 0.05 * h, 0),
+			], 0.87)
+			_add(parts, lens, _at(0, 0.134 * h, -0.108 * h), VISOR)
 		var sideways := Basis(Vector3.BACK, PI * 0.5)
 		for side: float in [1.0, -1.0]:
 			_add(parts, _drum(0.06 * h, 0.04), Transform3D(sideways, Vector3(side * 0.165 * h, 0.1 * h, 0.02)), PLATE, 1)
@@ -436,14 +486,53 @@ static func _head(parts: Array, angular: bool, h: float) -> void:
 		_add(parts, Cel.box(Vector3(0.012, 0.2, 0.012)), _at(-0.12 * h, 0.26 * h, 0.08 * h), DARK, 2)
 
 
-static func _torso(parts: Array, angular: bool, b: Dictionary) -> void:
+## Yaw points the loft out along the arm. A shallow downward slope and
+## a rearward sweep keep its top below the helmet.
+static func _shoulder(parts: Array, build: Dictionary, angular: bool, side: float) -> void:
+	var width: float = build.width
+	var shoulder: float = build.shoulder
+	var depth: float = build.depth
+	var span := 0.116 + 0.075 * shoulder
+	var height := 0.027 + 0.014 * sqrt(shoulder)
+	var sweep := -side * (0.022 if angular else 0.071) * depth
+	var root := Vector3(side * 0.18 * width, 0.545, -0.022 * depth)
+	var direction := Basis(Vector3.BACK, -side * 0.30) * Basis(Vector3.UP, side * PI * 0.5)
+	var profile: Array[Vector4] = [
+		Vector4(0.108 * depth, height * 0.8, 0, 0),
+		Vector4(0.137 * depth, height, span * 0.52, sweep * 0.26),
+		Vector4((0.092 if angular else 0.071) * depth, height * 0.48, span, sweep),
+	]
+	if _far:
+		profile[0].x = profile[1].x
+		profile.remove_at(1)
+	var cut := 0.4 if angular else 0.9
+	_add(parts, Cel.loft(profile, cut), Transform3D(direction, root), TEAM)
+	if _far or shoulder < 0.8:
+		return
+	# The lower plate overlaps the shell while descending along the arm.
+	var lower_span := span * (0.82 if shoulder > 1.4 else 0.68)
+	var lower := Cel.loft([
+		Vector4(0.105 * depth, 0.031, 0, sweep * 0.15),
+		Vector4(0.114 * depth, 0.036, lower_span * 0.52, sweep * 0.44),
+		Vector4(0.070 * depth, 0.019, lower_span, sweep * 0.76),
+	], cut)
+	var lower_root := root + direction.z * (span * 0.28) + Vector3.DOWN * 0.048
+	_add(parts, lower, Transform3D(direction, lower_root), ARMOUR_TRIM, 1)
+
+
+static func _torso(parts: Array, angular: bool, b: Dictionary, shaped: bool) -> void:
 	var w: float = b.width
-	var s: float = b.shoulder
 	var p: float = b.pack
 	var d: float = b.depth
 	var front := -0.15 * d - 0.01
 	_add(parts, _block(Vector3(0.34 * w, 0.16, 0.22 * d), 0.025), _at(0, 0.1, 0), LIMB)
-	_add(parts, _block(Vector3(0.48 * w, 0.42, 0.3 * d), 0.045), _at(0, 0.36, 0), TEAM)
+	if shaped:
+		_add(parts, Cel.loft([
+			Vector4(0.164 * w, 0.109 * d, -0.21, 0), Vector4(0.212 * w, 0.137 * d, -0.09, 0),
+			Vector4(0.238 * w, 0.157 * d, 0.128, 0), Vector4(0.166 * w, 0.108 * d, 0.21, 0),
+		], 0.81), _at(0, 0.36, 0, UPRIGHT), TEAM)
+	else:
+		_add(parts, _block(Vector3(0.48 * w, 0.42, 0.3 * d), 0.045), _at(0, 0.36, 0), TEAM)
 	# A second chest plate over the top, side panels, a collar, and a belt
 	# with a buckle and pouches.
 	_add(parts, _block(Vector3(0.44 * w, 0.15, 0.06), 0.02), _at(0, 0.48, front - 0.005), TEAM, 1)
@@ -454,7 +543,15 @@ static func _torso(parts: Array, angular: bool, b: Dictionary) -> void:
 			_add(parts, Cel.box(Vector3(0.1 * w, 0.012, 0.02)), _at(side * 0.15 * w, 0.2 + k * 0.03, front + 0.002), DARK, 2)
 		# Cables from the pack over the shoulders.
 		_add(parts, Cel.box(Vector3(0.025, 0.025, 0.32 * d)), _at(side * 0.13 * w, 0.585, 0.02), DARK, 2)
-	_add(parts, _block(Vector3(0.24, 0.07, 0.2), 0.015), _at(0, 0.585, 0), PLATE, 1)
+	if shaped:
+		var collar := Cel.loft([
+			Vector4(0.08 * w, 0.018, -0.133 * d, 0),
+			Vector4(0.143 * w, 0.029, -0.045 * d, 0),
+			Vector4(0.103 * w, 0.023, 0.097 * d, 0),
+		], 0.5 if angular else 0.88)
+		_add(parts, collar, _at(0, 0.56, 0), ARMOUR_TRIM, 1)
+	for side: float in [-1, 1]:
+		_shoulder(parts, b, angular, side)
 	_add(parts, Cel.box(Vector3(0.37 * w, 0.055, 0.24 * d)), _at(0, 0.03, 0), DARK, 1)
 	_add(parts, _block(Vector3(0.07, 0.05, 0.02), 0.008), _at(0, 0.03, -0.12 * d - 0.01), PALE, 1)
 	# The pack grows wider and deeper faster than it grows taller.
@@ -463,36 +560,30 @@ static func _torso(parts: Array, angular: bool, b: Dictionary) -> void:
 		# Heavy: a block between the two halves of the pack.
 		_add(parts, _block(Vector3(0.2 * p, 0.42 * tall, 0.12 * p), 0.03), _at(0, 0.34, 0.22 * d), PACK)
 	if angular:
-		# Lime: layered slab shoulders sloping out, a twin pack with fins, a
-		# chevron.
+		# Lime's twin pack has fins and a chevron on the chest.
 		for side: float in [1.0, -1.0]:
-			var slope := Basis(Vector3.BACK, side * -0.35)
-			var out := side * (0.27 * w + 0.06 * s)
-			_add(parts, _block(Vector3(0.22, 0.08, 0.28) * Vector3(s, sqrt(s), s), 0.025), Transform3D(slope, Vector3(out, 0.6, 0)), TEAM)
-			_add(parts, _block(Vector3(0.2, 0.06, 0.24) * Vector3(s, sqrt(s), s), 0.02), Transform3D(slope, Vector3(out + side * 0.03 * s, 0.53, 0)), PLATE, 1)
-			_add(parts, Cel.box(Vector3(0.04, 0.012, 0.26) * Vector3(s, 1.0, s)), Transform3D(slope, Vector3(out + side * 0.04 * s, 0.6 + 0.04 * sqrt(s), 0)), PALE, 2)
 			_add(parts, _block(Vector3(0.11 * p, 0.6 * tall, 0.16 * p), 0.02), _at(side * 0.12 * p, 0.36, 0.24 * d), PACK)
 			_add(parts, _block(Vector3(0.12 * p, 0.08 * tall, 0.18 * p), 0.015), _at(side * 0.12 * p, 0.36 + 0.3 * tall, 0.24 * d), TEAM)
 			var fin := Basis(Vector3.BACK, side * 0.35)
 			_add(parts, _block(Vector3(0.022, 0.24 * tall, 0.15 * p), 0.008), Transform3D(fin, Vector3(side * 0.2 * p, 0.24, 0.26 * d)), TEAM, 1)
+			if shaped:
+				var mark := Color(0.78, 0.76, 0.85, 0.35)
+				_add(parts, _block(Vector3(0.055 * p, 0.32 * tall, 0.014), 0.004), _at(side * 0.12 * p, 0.35, 0.24 * d + 0.084 * p), mark, 1)
 			for k in 3:
 				_add(parts, Cel.box(Vector3(0.07 * p, 0.014, 0.012)), _at(side * 0.12 * p, 0.42 + k * 0.035, 0.24 * d + 0.08 * p + 0.004), DARK, 2)
 			_add(parts, _block(Vector3(0.05, 0.22, 0.02), 0.006), Transform3D(Basis(Vector3.BACK, side * 0.75), Vector3(side * 0.065, 0.32, front - 0.002)), PALE)
 		_add(parts, _block(Vector3(0.1 * p, 0.4 * tall, 0.04), 0.01), _at(0, 0.34, 0.17 * d + 0.02), DARK, 1)
 	else:
-		# Blue: round shoulders with rims, twin tanks with bands and
-		# valves, a ring.
+		# Blue's twin tanks have bands and valves, with a ring on the chest.
 		for side: float in [1.0, -1.0]:
-			var at := Vector3(side * (0.27 * w + 0.05 * s), 0.56, 0)
-			_add(parts, Cel.sphere(0.12 * s, 0.2 * s, 6 if _far else 12), Transform3D(Basis.IDENTITY, at), TEAM)
-			_add(parts, _drum(0.122 * s, 0.03), Transform3D(Basis.IDENTITY, at - Vector3(0, 0.035 * s, 0)), PLATE, 1)
 			var tank := Vector3(side * 0.1 * p, 0.34, 0.25 * d)
 			var r := 0.09 * p
 			var half := 0.25 * tall
 			_add(parts, _turned(PackedVector2Array([Vector2(r * 0.6, -half), Vector2(r, -half + r * 0.4), Vector2(r, half)])), Transform3D(Basis.IDENTITY, tank), PACK)
 			_add(parts, Cel.sphere(r, 0.12 * p, 6 if _far else 12), Transform3D(Basis.IDENTITY, tank + Vector3(0, half, 0)), TEAM)
 			for k in 2:
-				_add(parts, _drum(r * 1.08, 0.03, 0.006), Transform3D(Basis.IDENTITY, tank + Vector3(0, half * (0.5 - k * 0.9), 0)), DARK, 1)
+				var band := (TEAM if k == 0 else ARMOUR_TRIM) if shaped else DARK
+				_add(parts, _drum(r * 1.08, 0.03, 0.006), Transform3D(Basis.IDENTITY, tank + Vector3(0, half * (0.5 - k * 0.9), 0)), band, 1)
 			_add(parts, _drum(0.022, 0.05, 0.005), Transform3D(Basis.IDENTITY, tank + Vector3(0, half + 0.065 * p, 0)), PLATE, 1)
 		_add(parts, Cel.box(Vector3(0.2 * p, 0.025, 0.025)), _at(0, 0.34 + 0.25 * tall * 0.6, 0.25 * d), DARK, 2)
 		var flat := Basis(Vector3.RIGHT, PI * 0.5)
@@ -628,7 +719,11 @@ func _process(delta: float) -> void:
 		var spinner := guns[Weapon.CHAINGUN].get_node("Spinner") as Node3D
 		spinner.rotation.z += s.spin * delta * 40.0
 	flame.visible = _jet > 0.5
-	shell.visible = s.shielded()
+	if _shield_flash_left > 0.0:
+		_shield_flash_left = maxf(0.0, _shield_flash_left - delta)
+		if _shield_flash_left == 0.0:
+			shell.material_override = shell_material(_team_colour)
+	shell.visible = s.shielded() or _shield_flash_left > 0.0
 	jam_tip.visible = s.jamming() and _flicker.randf() < 0.7
 	if jam_tip.visible:
 		jam_tip.scale = Vector3.ONE * _flicker.randf_range(0.6, 1.3)

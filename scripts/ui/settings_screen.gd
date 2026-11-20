@@ -3,7 +3,7 @@ extends Control
 
 ## The settings: look speed for touch, mouse and gamepad, invert look, touch
 ## control size, jet scheme, gyro aim on a phone or tablet, aim assist, auto ski, view distance, outlines, render scale, commander
-## mode and the two volumes, with Defaults to put them all back. Each change
+## mode and the volumes, with Defaults to put them all back. Each change
 ## is saved and applied at once; `changed` tells a running match to pick up
 ## the ones that are its own.
 
@@ -110,3 +110,4 @@ func _build() -> void:
 	var volumes := MenuKit.volume_steps()
 	_choice("Sound volume", "sound_volume", volumes, MenuKit.percents(volumes))
 	_choice("Voice volume", "voice_volume", volumes, MenuKit.percents(volumes))
+	_choice("Music volume", "music_volume", volumes, MenuKit.percents(volumes))

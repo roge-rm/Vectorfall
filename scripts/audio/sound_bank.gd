@@ -10,7 +10,13 @@ extends RefCounted
 const RATE := 22050
 const VOICE_RATE := 16000
 ## Every effect name get() knows.
-const NAMES: Array[String] = ["disc_fire", "disc_blast", "chaingun", "grenade_fire", "grenade_blast", "mortar_fire", "mortar_blast", "plasma_fire", "plasma_hit", "sniper_fire", "blaster_fire", "blaster_hit", "throw", "hand_grenade_blast", "mine_place", "mine_arm", "mine_blast", "pack_on", "pack_off", "repair", "shield_hit", "hit", "kill", "jet", "ski", "step", "land", "flag_grab", "flag_alarm", "flag_dropped", "flag_returned", "flag_captured", "flag_lost", "click", "back", "generator_hum", "power_down", "power_up", "turret_fire", "asset_destroyed"]
+const NAMES: Array[String] = ["disc_fire", "disc_blast", "chaingun", "grenade_fire", "grenade_blast", "mortar_fire", "mortar_blast", "plasma_fire", "plasma_hit", "sniper_fire", "blaster_fire", "blaster_hit", "throw", "hand_grenade_blast", "mine_place", "mine_arm", "mine_blast", "pack_on", "pack_off", "repair", "shield_hit", "hit", "kill", "jet", "ski", "step", "land", "flag_grab", "flag_alarm", "flag_dropped", "flag_returned", "flag_captured", "flag_lost", "click", "back", "generator_hum", "power_down", "power_up", "turret_fire", "asset_destroyed",
+	"engine_sled", "engine_needlewing", "engine_kite", "engine_ferry", "engine_crawler",
+	"ski_rock", "ski_metal", "ski_salt", "step_rock", "step_metal", "step_salt",
+	"land_rock", "land_metal", "land_salt", "impact_rock", "impact_metal", "impact_dust",
+	"vehicle_board", "vehicle_eject",
+]
+const ENGINE_NAMES: Array[String] = ["engine_sled", "engine_needlewing", "engine_kite", "engine_ferry", "engine_crawler"]
 ## Vowel formants in Hz (first, second) for the robot voices.
 const VOWELS: Array[Vector2] = [Vector2(780, 1250), Vector2(520, 1850), Vector2(320, 2250), Vector2(520, 900), Vector2(350, 760)]
 ## Robot voice pitch in Hz per team: team 0 low and buzzy, team 1 higher and hollow.
@@ -78,6 +84,24 @@ static func build() -> void:
 	_streams["power_up"] = _wav(_sweep(rng, 0.8, 70.0, 440.0, 0.6))
 	_streams["turret_fire"] = _wav(_zap(rng, 0.22, 1300.0, 260.0, 0.2))
 	_streams["asset_destroyed"] = _wav(_blast(rng, 1.8, 0.5, 1.0))
+	# The loop profiles give each hull a different pulse and engine tone.
+	var engines := [
+		Vector4(91, 13, 2.9, 0.22), Vector4(140, 18, 3.4, 0.45), Vector4(53, 10, 2.4, 0.58),
+		Vector4(72, 5, 2.7, 0.36), Vector4(39, 22, 1.8, 0.52),
+	]
+	for k in engines.size():
+		_streams[ENGINE_NAMES[k]] = _wav(_loop(_engine(rng, engines[k])), true)
+	_streams["ski_rock"] = _wav(_loop(_scrape(rng, 560.0, 0.40)), true)
+	_streams["ski_metal"] = _wav(_loop(_scrape(rng, 1210.0, 0.30)), true)
+	_streams["ski_salt"] = _wav(_loop(_scrape(rng, 2220.0, 0.19)), true)
+	for material in ["rock", "metal", "salt"]:
+		_streams["step_" + material] = _wav(_contact(rng, material, 0.11, 0.41))
+		_streams["land_" + material] = _wav(_contact(rng, material, 0.24, 0.68))
+	_streams["impact_rock"] = _wav(_contact(rng, "rock", 0.14, 0.55))
+	_streams["impact_metal"] = _wav(_contact(rng, "metal", 0.17, 0.58))
+	_streams["impact_dust"] = _wav(_thud(rng, 0.065, 970.0, 0.28))
+	_streams["vehicle_board"] = _wav(_tube(rng, 0.21, 210.0, 0.6))
+	_streams["vehicle_eject"] = _wav(_sweep(rng, 0.21, 410.0, 110.0, 0.43))
 	build_ms = (Time.get_ticks_usec() - started) / 1000.0
 
 
@@ -278,6 +302,61 @@ static func _ski(rng: RandomNumberGenerator) -> PackedFloat32Array:
 	return _normalise(out, 0.5)
 
 
+## Low engine note, a faster whine and a pulse under filtered air.
+static func _engine(rng: RandomNumberGenerator, tune: Vector4) -> PackedFloat32Array:
+	var out := _buffer(1.1)
+	var air := 0.0
+	var low := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		var noise := rng.randf_range(-1.0, 1.0)
+		air += 0.35 * (noise - air)
+		low += 0.04 * (noise - low)
+		var pulse := pow(0.5 + 0.5 * sin(t * TAU * tune.y), 2.4)
+		var note := sin(t * TAU * tune.x + 0.2 * sin(t * TAU * 2.0))
+		var whine := sin(t * TAU * tune.x * tune.z)
+		out[i] = note * (0.4 + 0.26 * pulse) + whine * 0.20 + tune.w * (air + 2.8 * low) * (0.65 + pulse * 0.35)
+	return _normalise(out, 0.62)
+
+
+## Looping contact noise for a ski on stone, metal or salt.
+static func _scrape(rng: RandomNumberGenerator, frequency: float, grit: float) -> PackedFloat32Array:
+	var out := _buffer(1.1)
+	var low := 0.0
+	var grain := 0.0
+	var follow := 1.0 - exp(-TAU * frequency / RATE)
+	for i in out.size():
+		var t := float(i) / RATE
+		var noise := rng.randf_range(-1.0, 1.0)
+		low += follow * (noise - low)
+		grain *= 0.91
+		if rng.randf() > 0.994:
+			grain = rng.randf_range(-0.8, 0.8)
+		out[i] = (noise - low) * 0.27 + low * grit + grain * 0.31 + sin(t * TAU * frequency) * grit * 0.13
+	return _normalise(out, 0.42)
+
+
+## A boot or a hit. Metal rings through the rough contact transient.
+static func _contact(rng: RandomNumberGenerator, material: String, duration: float, peak: float) -> PackedFloat32Array:
+	var out := _buffer(duration)
+	var metal := material == "metal"
+	var rock := material == "rock"
+	var low := 0.0
+	for i in out.size():
+		var t := float(i) / RATE
+		var noise := rng.randf_range(-1.0, 1.0)
+		low += (0.18 if rock else 0.45) * (noise - low)
+		var body := (0.75 * low + 0.25 * (noise - low)) * exp(-t * 4.5 / duration)
+		if metal:
+			body += (sin(t * TAU * 710.0) + 0.33 * sin(t * TAU * 1277.0)) * 0.48 * exp(-t * 4.0 / duration)
+		elif rock:
+			body += sin(t * TAU * 137.0) * 0.65 * exp(-t * 5.0 / duration)
+		else:
+			body *= 0.7 + 0.3 * sin(t * TAU * 79.0)
+		out[i] = body * minf(1.0, t * 850.0)
+	return _normalise(out, peak)
+
+
 ## A soft warbling hum with a quiet crackle, for the repair pack.
 static func _repair(rng: RandomNumberGenerator) -> PackedFloat32Array:
 	var out := _buffer(1.1)
@@ -395,7 +474,7 @@ static func _syllables(rng: RandomNumberGenerator, team: int) -> Array[PackedByt
 			s2 = Vector4(x, s2.x, y2, s2.z)
 			var y3 := f3[0] * x + f3[2] * s3.y - f3[3] * s3.z - f3[4] * s3.w
 			s3 = Vector4(x, s3.x, y3, s3.z)
-			out[i] = (y1 + y2 + y3 * 0.4) * (0.6 + 0.4 * sin(ring_rate * i))
+			out[i] = (y1 + y2 + y3 * 0.4) * (0.78 + 0.22 * sin(ring_rate * i))
 		bank.append(_bytes(_normalise(out, 0.6)))
 	return bank
 
@@ -417,7 +496,7 @@ static func _say(bank: Array[PackedByteArray], line: int, team: int) -> AudioStr
 	gap.resize(int(0.025 * VOICE_RATE) * 2)
 	var click := _buffer(0.02, VOICE_RATE)
 	for i in click.size():
-		click[i] = (0.3 if (i / 8) % 2 == 0 else -0.3) * (1.0 - float(i) / click.size())
+		click[i] = (0.18 if (i / 8) % 2 == 0 else -0.18) * (1.0 - float(i) / click.size())
 	var data := _bytes(click)
 	data.append_array(gap)
 	var half := SYLLABLES / 2
@@ -428,6 +507,11 @@ static func _say(bank: Array[PackedByteArray], line: int, team: int) -> AudioStr
 		data.append_array(bank[pick])
 		if (line + k) % 2 == 0:
 			data.append_array(gap)
+	var tail := _buffer(0.027, VOICE_RATE)
+	for i in tail.size():
+		var t := float(i) / VOICE_RATE
+		tail[i] = sin(t * TAU * 1440.0) * sin(t * TAU * 1920.0) * 0.14 * exp(-t * 130.0)
+	data.append_array(_bytes(tail))
 	var stream := AudioStreamWAV.new()
 	stream.format = AudioStreamWAV.FORMAT_16_BITS
 	stream.mix_rate = VOICE_RATE

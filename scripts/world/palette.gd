@@ -73,6 +73,7 @@ static var teams: Array[Color] = Soldier.TEAM_COLOURS.duplicate()
 @export var hatching := true
 ## Outline width, 1 for the usual, and how much it wobbles like a brush.
 @export var line_width := 1.0
+@export var figure_line_scale := 1.0
 @export var line_brush := 0.15
 
 ## Light strips along built things, by alpha, like tech lights at dusk.
@@ -97,6 +98,8 @@ static var teams: Array[Color] = Soldier.TEAM_COLOURS.duplicate()
 ## 0 for none.
 @export var rock_alt := Color(0.5, 0.5, 0.5)
 @export var strata := 0.0
+## Metres from the camera at which softened rock bands blend together.
+@export var strata_fade_distance := 0.0
 
 @export_group("Sky detail")
 ## A third sky colour at middle_height (0 horizon, 1 straight up), by its

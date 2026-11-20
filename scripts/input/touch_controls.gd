@@ -105,6 +105,7 @@ var menu: OrderMenu
 var scale_factor := 1.0
 ## The soldier they drive, read for the weapon in hand and what's left.
 var soldier: Soldier
+var movement_only := false
 ## While true, as when the loadout screen is open, touches are left to the
 ## screen above.
 var blocked := false:
@@ -230,7 +231,7 @@ func _input(event: InputEvent) -> void:
 		if event.pressed:
 			_press(event.index, event.position)
 		else:
-			_release(event.index)
+			_release(event)
 		queue_redraw()
 	elif event is InputEventScreenDrag and _touches.has(event.index):
 		var role: Variant = _touches[event.index]
@@ -252,6 +253,8 @@ func _input(event: InputEvent) -> void:
 
 
 func button_shown(k: int) -> bool:
+	if movement_only:
+		return k == 1 or k == 2
 	if soldier == null or soldier.game == null:
 		return k != BOARD_BUTTON
 	var hull: Vehicle = soldier.game.fleet.hulls.get(soldier.vehicle_id)
@@ -301,7 +304,7 @@ func _press(index: int, at: Vector2) -> void:
 	# never picks an order.
 	if pause_rect().grow(pause_radius() * (START_REACH - 1.0)).has_point(at):
 		_touches[index] = "pause"
-		pause_pressed.emit()
+		get_viewport().set_input_as_handled()
 		return
 	var k := _button_at(at, START_REACH)
 	if k < 0 and menu != null and menu.covers(at):
@@ -337,15 +340,23 @@ func _press(index: int, at: Vector2) -> void:
 		_touches[index] = "look"
 
 
-func _release(index: int) -> void:
+func _release(event: InputEventScreenTouch) -> void:
+	var index := event.index
 	if not _touches.has(index):
 		return
 	var role: Variant = _touches[index]
 	_touches.erase(index)
-	if role is String and role == "stick":
-		stick = Vector2.ZERO
-		_stick_lifted = _clock
-		_stick_double = false
+	if role is String:
+		match role:
+			"stick":
+				stick = Vector2.ZERO
+				_stick_lifted = _clock
+				_stick_double = false
+			"pause":
+				# Open after this tap so its emulated click can't reach the menu.
+				get_viewport().set_input_as_handled()
+				if not event.canceled and pause_rect().has_point(event.position):
+					pause_pressed.emit.call_deferred()
 	_update_buttons()
 
 

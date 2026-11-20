@@ -10,9 +10,12 @@ extends Node
 ## beside it), -loadout (the loadout screen it opens) and -dead (the respawn
 ## count with the LOADOUT button). "-- touch=1.3" sets the touch controls'
 ## size for the touch and later pictures, and "-- out=/some/folder/ui-" saves
-## as /some/folder/ui-<size>-<what>.png instead. Uses its own settings file.
+## as /some/folder/ui-<size>-<what>.png instead. "-- release" saves the menu,
+## a touch flag chase and the ski course in the milestone 13 release folder.
+## Uses its own settings file.
 
 const FOLDER := "/srv/downloads/temp/debug/vectorfall/ui"
+const RELEASE_FOLDER := "/srv/downloads/temp/debug/vectorfall/m13/release"
 
 var _tag := "1280x720"
 var _out := FOLDER + "/"
@@ -27,7 +30,11 @@ func _ready() -> void:
 	_tag = "%dx%d" % [window_size.x, window_size.y]
 	Settings.path = "user://shot-settings.cfg"
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.path))
-	for arg in OS.get_cmdline_user_args():
+	var args := OS.get_cmdline_user_args()
+	var release := args.has("release")
+	if release:
+		_out = RELEASE_FOLDER + "/"
+	for arg in args:
 		if arg.begins_with("out="):
 			_out = arg.substr(4)
 	DirAccess.make_dir_recursive_absolute(_out.get_base_dir())
@@ -35,6 +42,14 @@ func _ready() -> void:
 	var menu: MainMenu = load("res://scenes/menu.tscn").instantiate()
 	add_child(menu)
 	await _save("menu")
+	if release:
+		menu.queue_free()
+		await get_tree().process_frame
+		await _release_chase()
+		await _release_practice()
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.path))
+		get_tree().quit()
+		return
 	menu.show_setup()
 	await _save("setup")
 	menu.show_settings()
@@ -113,14 +128,61 @@ func _ready() -> void:
 	get_tree().quit()
 
 
+func _release_chase() -> void:
+	MatchSetup.current = MatchSetup.new()
+	MatchSetup.current.map = "white_signal"
+	MatchSetup.current.own_bots = 0
+	MatchSetup.current.enemy_bots = 1
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	add_child(main)
+	var game: Match = main.game
+	var player: Soldier = main.player
+	var carrier: Soldier = main.enemy
+	var map: GameMap = main.map
+	var pose := CommandSource.new()
+	pose.yaw = -PI * 0.5
+	game.sources[carrier.entity_id] = pose
+	carrier.position = game.stands[0]
+	for i in 3:
+		await get_tree().physics_frame
+
+	# Bring the chase into view of the tunnel while keeping the live flag HUD.
+	player.position = Vector3(-128, map.ground_height(-128, 0) + 0.25, 0)
+	player.velocity = Vector3.ZERO
+	main.input.source.yaw = -PI * 0.5
+	main.input.source.pitch = 0.025
+	main.input.set_device(LocalInput.Device.TOUCH)
+	carrier.position = Vector3(-112, map.ground_height(-112, 4) + 3.2, 4)
+	carrier.velocity = Vector3(4, 0, 0)
+	game.prepare_terrain()
+	for i in 8:
+		await get_tree().physics_frame
+	var impact := Vector3(-109, map.ground_height(-109, -5) + 0.05, -5)
+	main.effects.blast(impact, Vector3.UP, Weapon.all[Weapon.DISC].splash_radius)
+	await _save("flag-chase", 4)
+	main.queue_free()
+	await get_tree().process_frame
+
+
+func _release_practice() -> void:
+	var practice: SkiPractice = load("res://scenes/ski_practice.tscn").instantiate()
+	add_child(practice)
+	practice.input.set_device(LocalInput.Device.TOUCH)
+	await _save("ski-practice")
+
+
 func _wait(seconds: float) -> void:
 	await get_tree().create_timer(seconds, true, false, true).timeout
 
 
-func _save(what: String) -> void:
-	for i in 12:
+func _save(what: String, frames := 12) -> void:
+	for i in frames:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	var path := "%s%s-%s.png" % [_out, _tag, what]
-	get_viewport().get_texture().get_image().save_png(path)
+	var saved := get_viewport().get_texture().get_image().save_png(path)
+	if saved != OK:
+		push_error("Could not save " + path)
+		get_tree().quit(1)
+		return
 	print("Saved ", path)

@@ -38,7 +38,10 @@ const ROOM_GUARD := 6.0
 const FIELD_SIZE := Vector3(3.0, 1.0, 3.0)
 ## The map main.gd loads when nothing else is asked for.
 const DEFAULT := "ochre_fold"
-const NAMES: Array[String] = ["ochre_fold", "test"]
+const NAMES: Array[String] = [
+	"ochre_fold", "test", "saltwake_flats", "nightline_foundry", "copper_steps",
+	"caldera_relay", "gannet_reach", "white_signal", "glass_ravine", "greenfall_terraces", "beacon_wreck",
+]
 
 ## The map to load next, set by a tool or test before the main scene loads.
 ## Empty means the --map argument or DEFAULT.
@@ -78,6 +81,24 @@ static func make(map_name: String) -> GameMap:
 	match map_name:
 		"test":
 			return TestMap.new()
+		"saltwake_flats":
+			return SaltwakeFlats.new()
+		"nightline_foundry":
+			return NightlineFoundry.new()
+		"copper_steps":
+			return CopperSteps.new()
+		"caldera_relay":
+			return CalderaRelay.new()
+		"gannet_reach":
+			return GannetReach.new()
+		"white_signal":
+			return WhiteSignal.new()
+		"glass_ravine":
+			return GlassRavine.new()
+		"greenfall_terraces":
+			return GreenfallTerraces.new()
+		"beacon_wreck":
+			return BeaconWreck.new()
 	return OchreFold.new()
 
 
@@ -251,8 +272,13 @@ func add_vehicle_pads(game: Match, team: int) -> void:
 		if not anchors.is_empty():
 			x = route_graph.points[anchors[0]].x
 			z = (i - 2) * 13.0
-		var at := Vector3(x, surface_at(x, z), z)
+		var pad := _vehicle_pad_at(team, lineup[i], Vector2(x, z))
+		var at := Vector3(pad.x, surface_at(pad.x, pad.y), pad.y)
 		game.fleet.add_pad(team, lineup[i], at, asset_facing(team))
+
+
+func _vehicle_pad_at(_team: int, _kind: Vehicle.Kind, at: Vector2) -> Vector2:
+	return at
 
 
 ## The spot a carrier touches to score.
@@ -419,7 +445,7 @@ func _build_base(team: int) -> void:
 	_box(base, Vector3(14.0, 1.0, 10.0), Transform3D(ramp_basis, ramp_centre), Cel.material(palette.structure))
 	# A tower at the back with a deck on top, in a dark team colour so the
 	# flag in front stands out from it.
-	var team_wall := Cel.team_material(Palette.team(team).lerp(palette.structure, 0.35).darkened(0.3))
+	var team_wall := Cel.team_material(Palette.team(team).lerp(palette.structure, 0.42).darkened(0.12))
 	_build_stand(base, team)
 	var back := x - ahead * (BASE_SIZE * 0.5 - 4.0)
 	_box(base, Vector3(4.0, 14.0, 4.0), Transform3D(Basis.IDENTITY, Vector3(back, ground + 9.0, 0.0)), team_wall)

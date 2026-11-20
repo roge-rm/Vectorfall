@@ -71,7 +71,7 @@ static func build(parent: BaseAsset, kind: int, team: int) -> Node3D:
 func _view(view_name: String, under: Node3D) -> MeshInstance3D:
 	var view := MeshInstance3D.new()
 	view.name = view_name
-	view.material_override = Cel.material(Color.WHITE, 1.0, true, true)
+	view.material_override = Cel.material(Color.WHITE, 1.0, true, true, false, true)
 	under.add_child(view)
 	return view
 
@@ -212,7 +212,11 @@ static func _generator() -> Array:
 	var parts := []
 	parts.append([Cel.bevel_box(Vector3(2.8, 0.25, 2.3), 0.04), _at(0.0, 0.125, 0.0), TRIM])
 	for side: float in [-1.0, 1.0]:
-		parts.append([Cel.bevel_box(Vector3(0.75, 1.6, 2.0), 0.06), _at(side * 0.95, 1.05, 0.0), TEAM_DARK])
+		var shell := Cel.loft([
+			Vector4(0.30, 0.61, -1.0, 0), Vector4(0.375, 0.80, -0.66, 0),
+			Vector4(0.375, 0.80, 0.68, 0), Vector4(0.30, 0.61, 1.0, 0),
+		], 0.6)
+		parts.append([shell, _at(side * 0.95, 1.05, 0.0), TEAM_DARK])
 		for k in 3:
 			parts.append([Cel.box(Vector3(0.06, 0.1, 1.4)), _at(side * 1.33, 0.7 + k * 0.25, 0.0), TRIM])
 		parts.append([Cel.box(Vector3(0.4, 0.08, 0.04)), _at(side * 0.95, 1.55, -1.01), LIGHT_ON])
@@ -250,8 +254,12 @@ static func _turret_post() -> Array:
 ## two barrels out the front, and a light slit over them.
 static func _turret_head() -> Array:
 	var parts := []
-	parts.append([Cel.bevel_box(Vector3(0.9, 0.5, 0.9), 0.06), _at(0.0, 0.05, 0.0), TEAM_PART])
-	parts.append([Cel.bevel_box(Vector3(0.7, 0.1, 0.6), 0.03), _at(0.0, 0.35, 0.05), PALE])
+	var cowling := Cel.loft([
+		Vector4(0.34, 0.17, -0.45, 0), Vector4(0.46, 0.24, -0.12, 0),
+		Vector4(0.39, 0.23, 0.45, 0),
+	], 0.65)
+	parts.append([cowling, _at(0.0, 0.05, 0.0), TEAM_PART])
+	parts.append([Cel.bevel_box(Vector3(0.61, 0.075, 0.56), 0.03), _at(0.0, 0.29, 0.05), PALE])
 	for side: float in [-1.0, 1.0]:
 		parts.append([Cel.bevel_box(Vector3(0.2, 0.32, 0.65), 0.03), _at(side * 0.55, 0.02, 0.05), TEAM_DARK])
 		parts.append([Cel.cylinder(0.07, 0.07, 0.85, 6), _forward(side * 0.17, -0.02, -0.82), TRIM])
@@ -281,8 +289,12 @@ static func _sensor_dish() -> Array:
 	var parts := []
 	var tip := Basis(Vector3.RIGHT, -1.1)
 	var face := tip * Vector3.UP
-	parts.append([Cel.cylinder(0.7, 0.12, 0.22, 10), Transform3D(tip, face * 0.12), TEAM_PART])
-	parts.append([Cel.cylinder(0.72, 0.72, 0.04, 10), Transform3D(tip, face * 0.24), TRIM])
+	var dish := Cel.lathe(PackedVector2Array([
+		Vector2(0.0, 0.0), Vector2(0.12, 0.0), Vector2(0.46, 0.09),
+		Vector2(0.68, 0.205), Vector2(0.72, 0.235), Vector2(0.68, 0.26),
+		Vector2(0.42, 0.14), Vector2(0.0, 0.07),
+	]), 10)
+	parts.append([dish, Transform3D(tip, Vector3.ZERO), TEAM_PART])
 	parts.append([Cel.cylinder(0.025, 0.025, 0.6, 4), Transform3D(tip, face * 0.5), TRIM])
 	parts.append([Cel.sphere(0.07, 0.14, 6), Transform3D(tip, face * 0.82), LIGHT_ON])
 	parts.append([Cel.box(Vector3(0.12, 0.3, 0.12)), _at(0.0, -0.05, 0.0), TRIM])
