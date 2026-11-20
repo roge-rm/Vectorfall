@@ -2,7 +2,7 @@ class_name SettingsScreen
 extends Control
 
 ## The settings: look speed for touch, mouse and gamepad, invert look, touch
-## control size, auto ski, view distance, outlines, render scale, commander
+## control size, jet scheme, gyro aim on a phone or tablet, aim assist, auto ski, view distance, outlines, render scale, commander
 ## mode and the two volumes, with Defaults to put them all back. Each change
 ## is saved and applied at once; `changed` tells a running match to pick up
 ## the ones that are its own.
@@ -90,6 +90,13 @@ func _build() -> void:
 	_choice("Look speed, gamepad", "look_pad", Settings.LOOK_SPEEDS, looks)
 	_toggle("Invert look", "invert_look")
 	_choice("Touch controls size", "touch_size", Settings.TOUCH_SIZES, MenuKit.percents(Settings.TOUCH_SIZES))
+	_choice("Jet", "touch_scheme", [0, 1], ["Button", "Stick and button"])
+	if OS.has_feature("mobile"):
+		var gyros: Array[String] = ["Off"]
+		gyros.append_array(MenuKit.percents(Settings.GYRO_SPEEDS.slice(1)))
+		_choice("Gyro aim", "gyro", Settings.GYRO_SPEEDS, gyros)
+		_toggle("Invert gyro", "invert_gyro")
+	_choice("Aim assist", "aim_assist", [0, 1, 2], ["Off", "Low", "High"])
 	_toggle("Auto ski", "auto_ski")
 	_toggle("Commander mode", "commander_mode")
 	_section("Graphics")

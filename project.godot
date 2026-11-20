@@ -124,6 +124,8 @@ pause={
 [input_devices]
 
 pointing/emulate_touch_from_mouse=false
+sensors/enable_gravity=true
+sensors/enable_gyroscope=true
 
 [physics]
 

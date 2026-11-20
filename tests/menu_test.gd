@@ -6,7 +6,9 @@ extends SceneTree
 ## screens, pausing stops the sim ticking and resuming starts it, settings
 ## changed from the pause menu reach the match, and auto ski skis when fast.
 ## The home screen's footnote follows the chosen match. Saved loadouts round
-## trip through the settings file.
+## trip through the settings file. Gyro aim turns only when on, and aim
+## assist slows look near an enemy, pulls toward its lead and leaves the
+## mouse alone.
 ## Uses its own settings file, not yours.
 ##   tools/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --fixed-fps 60 --path . -s tests/menu_test.gd
 
@@ -46,13 +48,18 @@ func _settings() -> void:
 	Settings.auto_ski = true
 	Settings.commander_mode = true
 	Settings.touch_size = 1.3
+	Settings.touch_scheme = 1
+	Settings.gyro = 1.5
+	Settings.invert_gyro = true
+	Settings.aim_assist = 2
 	var sniper := Loadout.make(SoldierBody.Armour.LIGHT, [Weapon.SNIPER, Weapon.GRENADE_LAUNCHER], Pack.JAMMER)
 	Settings.save_loadout(2, sniper)
 	Settings.save_file()
 	Settings.reset()
-	checks.check(Settings.look_mouse == 1.0 and not Settings.invert_look and Settings.outlines, "reset puts the settings back")
+	checks.check(Settings.look_mouse == 1.0 and not Settings.invert_look and Settings.outlines and Settings.gyro == 0.0 and Settings.aim_assist == 1, "reset puts the settings back, gyro off and aim assist low")
 	Settings.load_file()
-	var loaded := Settings.look_mouse == 1.5 and Settings.invert_look and Settings.render_scale == 0.67 and Settings.view_distance == 900.0 and not Settings.outlines and Settings.auto_ski and Settings.commander_mode and Settings.touch_size == 1.3
+	var loaded := Settings.look_mouse == 1.5 and Settings.invert_look and Settings.render_scale == 0.67 and Settings.view_distance == 900.0 and not Settings.outlines and Settings.auto_ski and Settings.commander_mode and Settings.touch_size == 1.3 and Settings.touch_scheme == 1
+	loaded = loaded and Settings.gyro == 1.5 and Settings.invert_gyro and Settings.aim_assist == 2
 	checks.check(loaded and is_equal_approx(Settings.voice_volume, 0.3), "settings save and load")
 	checks.check(Settings.loadout_slot == 2 and Settings.current_loadout().equals(sniper) and Settings.loadout(0).equals(Loadout.from_dict(Settings.default_loadouts()[0])), "saved loadouts and the last one used save and load")
 	var voices := AudioServer.get_bus_index(Sound.VOICES_BUS)
@@ -82,6 +89,9 @@ func _settings_row() -> void:
 	row = _row(screen, "Render scale")
 	row.get_meta("step").call(-1)
 	checks.check(is_equal_approx(root.scaling_3d_scale, 0.8), "the Render scale row applies at once")
+	row = _row(screen, "Aim assist")
+	row.get_meta("step").call(1)
+	checks.check(Settings.aim_assist == 2, "the Aim assist row steps up to High")
 	screen._reset()
 	checks.check(not Settings.invert_look and Settings.view_distance == 1200.0 and root.scaling_3d_scale == 1.0, "Defaults puts everything back and applies it")
 	screen.free()
@@ -202,6 +212,9 @@ func _match() -> void:
 	await ticks(10)
 	checks.check(not paused and game.tick > tick, "resume starts the sim again")
 
+	await _check_stick_jet(main)
+	_check_gyro(main)
+	_check_aim_assist(main)
 	Settings.auto_ski = true
 	var player: Soldier = main.player
 	player.velocity = Vector3(20.0, 0.0, 0.0)
@@ -212,3 +225,139 @@ func _match() -> void:
 	checks.check(command.buttons & PlayerCommand.SKI == 0, "and doesn't with it off")
 	main.free()
 	MatchSetup.current = MatchSetup.new()
+
+
+## A touch down or up on the touch controls at a point in their own space.
+func _touch_at(touch: TouchControls, index: int, at: Vector2, pressed: bool) -> void:
+	var to_window := root.get_final_transform() * touch.get_global_transform_with_canvas()
+	var event := InputEventScreenTouch.new()
+	event.index = index
+	event.pressed = pressed
+	event.position = to_window * at
+	Input.parse_input_event(event)
+	await process_frame
+
+
+func _check_stick_jet(main: Node) -> void:
+	var touch: TouchControls = main.touch
+	var home := touch.stick_home()
+	var jet := PlayerCommand.JET
+	Settings.touch_scheme = 0
+	await _touch_at(touch, 0, home, true)
+	await _touch_at(touch, 0, home, false)
+	await _touch_at(touch, 0, home, true)
+	checks.check(touch.buttons & jet == 0, "double-tap and hold does nothing with the jet scheme off")
+	await _touch_at(touch, 0, home, false)
+	Settings.touch_scheme = 1
+	touch.release_all()
+	await create_timer(0.4).timeout
+	await _touch_at(touch, 0, home, true)
+	checks.check(touch.buttons & jet == 0, "a single stick touch doesn't jet")
+	await _touch_at(touch, 0, home, false)
+	await _touch_at(touch, 0, home, true)
+	checks.check(touch.buttons & jet != 0, "double-tap and hold on the stick jets")
+	await _touch_at(touch, 0, home, false)
+	checks.check(touch.buttons & jet == 0, "and stops when the touch lifts")
+	await create_timer(0.4).timeout
+	await _touch_at(touch, 0, home, true)
+	checks.check(touch.buttons & jet == 0, "a second touch after 0.3 s is a new single touch")
+	var to_window := root.get_final_transform() * touch.get_global_transform_with_canvas()
+	var drag := InputEventScreenDrag.new()
+	drag.index = 0
+	drag.position = to_window * (home + Vector2(0.0, -touch.stick_radius() * 1.3))
+	Input.parse_input_event(drag)
+	await process_frame
+	checks.check(touch.buttons & jet != 0 and touch.stick.y > 0.9, "pushing past the ring jets and still steers")
+	Settings.touch_scheme = 0
+	Input.parse_input_event(drag.duplicate())
+	touch._update_buttons()
+	checks.check(touch.buttons & jet == 0, "past the ring does nothing with the scheme off")
+	await _touch_at(touch, 0, home, false)
+	touch.release_all()
+	Settings.touch_scheme = 0
+
+
+## Gyro aim adds the fake turn rate to yaw while on, and nothing while off.
+func _check_gyro(main: Node) -> void:
+	var input: LocalInput = main.input
+	input.set_device(LocalInput.Device.TOUCH)
+	Settings.aim_assist = 0
+	input.read_gyro = func() -> Vector3: return Vector3(0.0, 1.0, 0.0)
+	input.read_gravity = func() -> Vector3: return Vector3(0.0, -9.8, 0.0)
+	input.source.yaw = 0.0
+	Settings.gyro = 0.0
+	input.make_command(1.0 / 60.0)
+	checks.check(input.source.yaw == 0.0, "gyro off doesn't turn")
+	Settings.gyro = 1.0
+	input.make_command(1.0 / 60.0)
+	var want := (1.0 - LocalInput.GYRO_DEAD_ZONE) / 60.0
+	checks.check(is_equal_approx(input.source.yaw, want), "gyro on turns left at the phone's rate (%.4f, want %.4f)" % [input.source.yaw, want])
+	input.read_gravity = func() -> Vector3: return Vector3(0.0, 9.8, 0.0)
+	input.make_command(1.0 / 60.0)
+	checks.check(is_zero_approx(input.source.yaw), "the other landscape way up turns the other way (%.4f)" % input.source.yaw)
+	input.read_gyro = func() -> Vector3: return Vector3(0.0, 0.03, 0.0)
+	input.make_command(1.0 / 60.0)
+	checks.check(is_zero_approx(input.source.yaw), "drift under the dead zone doesn't turn")
+	input.read_gyro = Input.get_gyroscope
+	input.read_gravity = Input.get_gravity
+	Settings.gyro = 0.0
+	Settings.aim_assist = 1
+
+
+## Aim assist with an enemy hung in the air in front of you.
+func _check_aim_assist(main: Node) -> void:
+	var input: LocalInput = main.input
+	var player: Soldier = main.player
+	var enemy: Soldier = main.enemy
+	var touch: TouchControls = main.touch
+	input.set_device(LocalInput.Device.TOUCH)
+	Settings.aim_assist = 1
+	var up := player.global_position + Vector3.UP * 40.0
+	player.global_position = up
+	player.velocity = Vector3.ZERO
+	player.weapon = player.weapons.find(Weapon.DISC)
+	enemy.global_position = up + Vector3(0.0, 0.0, -25.0)
+	enemy.velocity = Vector3.ZERO
+	var aim := input.assist.find(player, 0.0, 0.0)
+	checks.check(aim != null and aim.target_id == enemy.entity_id, "aim assist finds the enemy in front")
+	if aim == null:
+		return
+	# A drag right, on the aim point and with the enemy behind you.
+	var turned := func(yaw: float, pitch: float) -> float:
+		input.source.yaw = yaw
+		input.source.pitch = pitch
+		touch._look = Vector2(10.0, 0.0)
+		input.make_command(1.0 / 60.0)
+		return absf(wrapf(input.source.yaw - yaw, -PI, PI))
+	var full := 10.0 * input.touch_sensitivity * Settings.look_touch
+	var near: float = turned.call(aim.yaw, aim.pitch)
+	var away: float = turned.call(PI, 0.0)
+	checks.check(near < full * 0.7 and near > full * 0.5, "aim assist slows look on an enemy (%.4f of %.4f)" % [near, full])
+	checks.check(is_equal_approx(away, full), "and not looking away from one (%.4f)" % away)
+
+	# The enemy runs right: the pull turns you right toward its lead while
+	# you move, and not while you're idle.
+	enemy.velocity = Vector3(10.0, 0.0, 0.0)
+	var at_body := enemy.global_position + Vector3.UP * enemy.tuning.height * 0.5 - player.eye_transform().origin
+	var body_yaw := atan2(-at_body.x, -at_body.z)
+	input.source.yaw = body_yaw
+	input.source.pitch = 0.0
+	input.make_command(1.0 / 60.0)
+	checks.check(input.source.yaw == body_yaw, "no pull while idle")
+	touch.stick = Vector2(0.0, 1.0)
+	input.make_command(1.0 / 60.0)
+	var pulled := wrapf(input.source.yaw - body_yaw, -PI, PI)
+	var step := AimAssist.PULL[1] / 60.0
+	checks.check(pulled < 0.0 and absf(pulled) <= step * 1.01, "moving pulls toward the lead ahead of a running enemy (%.5f, step %.5f)" % [pulled, step])
+	touch.stick = Vector2.ZERO
+
+	# A mouse gets no slowdown and no pull.
+	input.set_device(LocalInput.Device.KEYBOARD)
+	input.source.yaw = aim.yaw
+	input.source.pitch = aim.pitch
+	enemy.velocity = Vector3.ZERO
+	input._mouse_look = Vector2(-10.0, 0.0)
+	input.make_command(1.0 / 60.0)
+	var mouse_full := 10.0 * input.mouse_sensitivity * Settings.look_mouse
+	checks.check(is_equal_approx(wrapf(input.source.yaw - aim.yaw, -PI, PI), mouse_full), "aim assist leaves the mouse alone")
+	Settings.aim_assist = 1

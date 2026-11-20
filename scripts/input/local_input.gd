@@ -4,7 +4,9 @@ extends Node
 ## Turns keyboard and mouse, gamepad and touch into PlayerCommands for the
 ## local soldier, and keeps track of which kind of device was used last so the
 ## touch controls show only when you're using touch. Look speeds, invert
-## look and auto ski come from Settings each tick, so changes apply at once.
+## look, gyro, aim assist and auto ski come from Settings each tick, so
+## changes apply at once. Gyro aim and aim assist only change the yaw and
+## pitch sent.
 
 enum Device { KEYBOARD, GAMEPAD, TOUCH }
 
@@ -20,6 +22,10 @@ signal loadout_requested
 @export var stick_look_speed := 3.2
 ## Radians per pixel of touch drag.
 @export var touch_sensitivity := 0.006
+## Gyro turn rates below this, in radians per second, are drift and ignored.
+const GYRO_DEAD_ZONE := 0.04
+## Gravity across the screen past this, in m/s², says which way up the phone is.
+const GYRO_UPRIGHT := 3.0
 
 var device := Device.KEYBOARD
 var source := Source.new()
@@ -46,6 +52,13 @@ var _loadout: Dictionary = {}
 ## While true, as when the loadout screen is open, commands only keep looking
 ## where they were and carry orders and loadouts.
 var held_off := false
+## Read each tick for gyro aim: the turn rate in radians per second and the
+## gravity, both in the screen's frame. Tests swap in their own.
+var read_gyro: Callable = Input.get_gyroscope
+var read_gravity: Callable = Input.get_gravity
+## True while the phone's screen frame reads upside down, see gyro_look().
+var _gyro_flipped := false
+var assist := AimAssist.new()
 
 
 ## The CommandSource the match asks each tick.
@@ -176,19 +189,35 @@ func set_device(value: Device) -> void:
 
 func make_command(delta: float) -> PlayerCommand:
 	var command := PlayerCommand.new()
-	var look := -_mouse_look * mouse_sensitivity * Settings.look_mouse
+	var mouse := -_mouse_look * mouse_sensitivity * Settings.look_mouse
 	_mouse_look = Vector2.ZERO
 	var stick := Input.get_vector("look_left", "look_right", "look_up", "look_down")
 	# Squared response, finer near the middle of the stick.
-	look -= stick * stick.abs() * stick_look_speed * Settings.look_pad * delta
+	var look := -stick * stick.abs() * stick_look_speed * Settings.look_pad * delta
 	if touch != null:
 		look -= touch.take_look() * touch_sensitivity * Settings.look_touch
 	if Settings.invert_look:
+		mouse.y = -mouse.y
 		look.y = -look.y
+	var gyro := Vector2.ZERO
+	var aim: AimAssist.Aim = null
 	if held_off:
+		mouse = Vector2.ZERO
 		look = Vector2.ZERO
-	source.yaw = wrapf(source.yaw + look.x, -PI, PI)
-	source.pitch = clampf(source.pitch + look.y, -Soldier.PITCH_LIMIT, Soldier.PITCH_LIMIT)
+	else:
+		if device == Device.TOUCH and Settings.gyro > 0.0 and (menu == null or not menu.visible):
+			gyro = gyro_look(read_gyro.call(), read_gravity.call(), delta)
+		if device != Device.KEYBOARD and Settings.aim_assist > 0:
+			aim = assist.find(soldier, source.yaw, source.pitch)
+			look *= AimAssist.slowdown(aim, Settings.aim_assist)
+	var turn := mouse + look + gyro
+	source.yaw = wrapf(source.yaw + turn.x, -PI, PI)
+	source.pitch = clampf(source.pitch + turn.y, -Soldier.PITCH_LIMIT, Soldier.PITCH_LIMIT)
+	# The pull only works while you move or look, so it never aims for you.
+	if aim != null and (turn != Vector2.ZERO or _moving()):
+		var pulled := AimAssist.pull(source.yaw, source.pitch, aim, AimAssist.PULL[Settings.aim_assist] * delta)
+		source.yaw = wrapf(pulled.x, -PI, PI)
+		source.pitch = clampf(pulled.y, -Soldier.PITCH_LIMIT, Soldier.PITCH_LIMIT)
 	command.yaw = source.yaw
 	command.pitch = source.pitch
 	command.order = _order
@@ -237,6 +266,34 @@ func make_command(delta: float) -> PlayerCommand:
 			command.buttons |= pair[1]
 	_auto_ski(command)
 	return command
+
+
+## Yaw and pitch to add for a gyro turn rate over delta seconds. With the
+## screen's x right, y up and z out of it, turning about y is yaw and about x
+## is pitch. Godot turns the sensor into the screen's frame but can miss a
+## flip from one landscape to the other, so gravity pointing up the screen
+## means the frame is upside down and both turns change sign.
+func gyro_look(rate: Vector3, gravity: Vector3, delta: float) -> Vector2:
+	if absf(gravity.y) > GYRO_UPRIGHT:
+		_gyro_flipped = gravity.y > 0.0
+	var turn := Vector2(rate.y, rate.x)
+	# A soft dead zone, so turns just past it start from nothing.
+	var size := turn.length()
+	if size <= GYRO_DEAD_ZONE:
+		return Vector2.ZERO
+	turn *= (size - GYRO_DEAD_ZONE) / size
+	if _gyro_flipped:
+		turn = -turn
+	if Settings.invert_gyro:
+		turn.y = -turn.y
+	return turn * Settings.gyro * delta
+
+
+## Whether the move stick or keys are pushed, for the aim assist pull.
+func _moving() -> bool:
+	if device == Device.TOUCH:
+		return touch != null and touch.stick.length() > 0.1
+	return Input.get_vector("move_left", "move_right", "move_back", "move_forward").length() > 0.1
 
 
 ## With auto ski on, skis whenever you're faster than a run or in the air,

@@ -71,6 +71,11 @@ const LEFT_SHARE := 0.25
 ## 100%, so a big tablet doesn't get huge buttons. A 20:9 phone of about 400
 ## dpi stays under it and looks the same as without it.
 const MM_PER_DESIGN := 0.22
+## With Settings.touch_scheme 1 the stick also jets: a second touch within
+## STICK_TAP_SECONDS of the last one lifting, held, or a push past
+## STICK_JET_PUSH times the ring's radius.
+const STICK_TAP_SECONDS := 0.3
+const STICK_JET_PUSH := 1.15
 ## Buttons sent for one tick per tap.
 const PULSES := PlayerCommand.NEXT_WEAPON | PlayerCommand.GRENADE | PlayerCommand.MINE
 ## Buttons held while touched and also sent for a tick on the tap, so a
@@ -88,6 +93,10 @@ var _pulses := 0
 var _touches: Dictionary[int, Variant] = {}
 var _stick_origin := Vector2.ZERO
 var _stick_at := Vector2.ZERO
+## When the last stick touch lifted, in msec, and whether this one is a double tap.
+var _clock := 0.0
+var _stick_lifted := -100000.0
+var _stick_double := false
 ## The order menu, opened by ORDERS and picked from by taps.
 var menu: OrderMenu
 ## Size of the controls, times the normal size.
@@ -234,6 +243,7 @@ func _input(event: InputEvent) -> void:
 			var reach := STICK_REACH * design_unit()
 			var offset: Vector2 = (_stick_at - _stick_origin).limit_length(reach) / reach
 			stick = Vector2(offset.x, -offset.y)
+			_update_buttons()
 			queue_redraw()
 		elif role is String and role == "look":
 			_look += event.relative
@@ -299,6 +309,8 @@ func _press(index: int, at: Vector2) -> void:
 		_stick_origin = at
 		_stick_at = at
 		stick = Vector2.ZERO
+		_stick_double = _clock - _stick_lifted <= STICK_TAP_SECONDS
+		_update_buttons()
 	else:
 		_touches[index] = "look"
 
@@ -310,7 +322,14 @@ func _release(index: int) -> void:
 	_touches.erase(index)
 	if role is String and role == "stick":
 		stick = Vector2.ZERO
+		_stick_lifted = _clock
+		_stick_double = false
 	_update_buttons()
+
+
+## Frame time for the double tap, so it matches in tests and on a device.
+func _process(delta: float) -> void:
+	_clock += delta
 
 
 ## Buttons held are the ones any touch holds.
@@ -321,6 +340,16 @@ func _update_buttons() -> void:
 			buttons |= role
 		elif role is Array:
 			buttons |= role[1]
+	if stick_jets():
+		buttons |= PlayerCommand.JET
+
+
+## Whether the stick is jetting: on the second touch of a double tap, or
+## pushed past its ring.
+func stick_jets() -> bool:
+	if Settings.touch_scheme != 1 or not _touches.values().has("stick"):
+		return false
+	return _stick_double or (_stick_at - _stick_origin).length() > STICK_JET_PUSH * stick_radius()
 
 
 func _notification(what: int) -> void:
@@ -333,6 +362,7 @@ func _notification(what: int) -> void:
 func release_all() -> void:
 	_touches.clear()
 	stick = Vector2.ZERO
+	_stick_double = false
 	buttons = 0
 	_look = Vector2.ZERO
 	_pulses = 0
@@ -395,8 +425,11 @@ func _draw() -> void:
 	var reach := STICK_REACH * s
 	var push := (knob - origin).limit_length(reach) / reach
 	var knob_at := origin + push * (ring - thumb)
+	var jetting := stick_jets()
 	draw_circle(knob_at, thumb, InkUi.INK)
-	draw_circle(knob_at, thumb - line, InkUi.CREAM)
+	draw_circle(knob_at, thumb - line, InkUi.ORANGE if jetting else InkUi.CREAM)
+	if jetting:
+		draw_arc(origin, ring - line * 0.5, 0.0, TAU, 48, Color(InkUi.ORANGE, 0.8), line * 1.5, true)
 	# The pause button: two ink bars in a cream square.
 	var pause := pause_rect()
 	var p := pause.size.x

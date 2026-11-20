@@ -12,6 +12,8 @@ const VIEW_DISTANCES: Array[float] = [600.0, 900.0, 1200.0, 1800.0, 2400.0]
 const RENDER_SCALES: Array[float] = [0.5, 0.67, 0.8, 1.0]
 const LOOK_SPEEDS: Array[float] = [0.25, 0.4, 0.55, 0.7, 0.85, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
 const TOUCH_SIZES: Array[float] = [0.8, 0.9, 1.0, 1.15, 1.3]
+## Gyro aim speeds, times the phone's own turn, with 0 for off.
+const GYRO_SPEEDS: Array[float] = [0.0, 0.5, 1.0, 1.5, 2.0]
 
 ## Graphics a slow device starts with, until the player picks their own.
 const WEAK_VIEW_DISTANCE := 900.0
@@ -31,6 +33,14 @@ static var look_pad := 1.0
 static var invert_look := false
 ## Size of the touch controls, times the normal size.
 static var touch_size := 1.0
+## How touch jets: 0 is the JET button only, 1 adds the move stick (double-tap
+## and hold, or push past its ring). More schemes can follow.
+static var touch_scheme := 0
+## Turning the phone turns your view, times this, with 0 for off. Touch only.
+static var gyro := 0.0
+static var invert_gyro := false
+## Aim assist for touch and the gamepad, an AimAssist.Level: 0 off, 1 low, 2 high.
+static var aim_assist := 1
 ## Skis for you whenever you're faster than a run or in the air.
 static var auto_ski := false
 ## Lets you hand out your bots' roles from the order menu.
@@ -97,6 +107,10 @@ static func reset() -> void:
 	look_pad = 1.0
 	invert_look = false
 	touch_size = 1.0
+	touch_scheme = 0
+	gyro = 0.0
+	invert_gyro = false
+	aim_assist = 1
 	auto_ski = false
 	commander_mode = false
 	sound_volume = 0.8
@@ -126,6 +140,14 @@ static func value(setting: String) -> Variant:
 			return invert_look
 		"touch_size":
 			return touch_size
+		"touch_scheme":
+			return touch_scheme
+		"gyro":
+			return gyro
+		"invert_gyro":
+			return invert_gyro
+		"aim_assist":
+			return aim_assist
 		"auto_ski":
 			return auto_ski
 		"commander_mode":
@@ -157,6 +179,14 @@ static func set_value(setting: String, to: Variant) -> void:
 			invert_look = to
 		"touch_size":
 			touch_size = to
+		"touch_scheme":
+			touch_scheme = to
+		"gyro":
+			gyro = to
+		"invert_gyro":
+			invert_gyro = to
+		"aim_assist":
+			aim_assist = to
 		"auto_ski":
 			auto_ski = to
 		"commander_mode":
@@ -179,6 +209,10 @@ static func load_file() -> void:
 		look_pad = clampf(file.get_value("controls", "look_pad", look_pad), 0.1, 5.0)
 		invert_look = file.get_value("controls", "invert_look", invert_look)
 		touch_size = clampf(file.get_value("controls", "touch_size", touch_size), 0.5, 2.0)
+		touch_scheme = clampi(file.get_value("controls", "touch_scheme", touch_scheme), 0, 1)
+		gyro = clampf(file.get_value("controls", "gyro", gyro), 0.0, 3.0)
+		invert_gyro = file.get_value("controls", "invert_gyro", invert_gyro)
+		aim_assist = clampi(file.get_value("controls", "aim_assist", aim_assist), 0, 2)
 		auto_ski = file.get_value("controls", "auto_ski", auto_ski)
 		commander_mode = file.get_value("bots", "commander", commander_mode)
 		sound_volume = clampf(file.get_value("sound", "effects", sound_volume), 0.0, 1.0)
@@ -203,6 +237,10 @@ static func save_file() -> void:
 	file.set_value("controls", "look_pad", look_pad)
 	file.set_value("controls", "invert_look", invert_look)
 	file.set_value("controls", "touch_size", touch_size)
+	file.set_value("controls", "touch_scheme", touch_scheme)
+	file.set_value("controls", "gyro", gyro)
+	file.set_value("controls", "invert_gyro", invert_gyro)
+	file.set_value("controls", "aim_assist", aim_assist)
 	file.set_value("controls", "auto_ski", auto_ski)
 	file.set_value("bots", "commander", commander_mode)
 	file.set_value("sound", "effects", sound_volume)
