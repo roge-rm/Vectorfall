@@ -232,6 +232,29 @@ func members() -> Array[Soldier]:
 	return found
 
 
+## A gunship stays over our side until our flag is stolen. The transports
+## aim for the flank, with room to put their squad down outside the base.
+func vehicle_carrier() -> Soldier:
+	var flag: Flag = game.flags.get(team)
+	return game.soldier(flag.carrier_id) if flag != null and flag.mode == Flag.Mode.CARRIED else null
+
+
+func vehicle_destination(kind: int) -> Vector3:
+	if not game.stands.has(team) or not game.stands.has(1 - team):
+		return Vector3.INF
+	var home: Vector3 = game.stands[team]
+	var enemy: Vector3 = game.stands[1 - team]
+	var forward := (enemy - home).sign()
+	if kind == Vehicle.Kind.GUNSHIP:
+		var carrier := vehicle_carrier()
+		return carrier.at() if carrier != null else home + Vector3(45.0 * forward.x, 0, -20)
+	if kind == Vehicle.Kind.TRANSPORT:
+		return enemy + Vector3(-62.0 * forward.x, 0, 38.0)
+	if kind == Vehicle.Kind.BOMBER:
+		return enemy
+	return enemy + Vector3(-46.0 * forward.x, 0, -33.0)
+
+
 func brains() -> Array[BotBrain]:
 	var found: Array[BotBrain] = []
 	for brain in director.brains:
@@ -1310,7 +1333,7 @@ func _repair_pick(asset_id: int, ordered := false) -> BotBrain:
 	for brain in brains():
 		var id := brain.soldier.entity_id
 		var s := brain.soldier
-		if raiders.has(id) or repairers.has(id) or game.carried_flag(id) != null or URGENT_ROLES.has(brain.role):
+		if s.vehicle_id != 0 or raiders.has(id) or repairers.has(id) or game.carried_flag(id) != null or URGENT_ROLES.has(brain.role):
 			continue
 		if order_locks.has(id) and not (ordered and order_locks[id].order == Orders.Kind.REPAIR_BASE):
 			continue
@@ -1427,7 +1450,7 @@ func _check_raid() -> void:
 	var picks: Array[BotBrain] = []
 	for brain in brains():
 		var id := brain.soldier.entity_id
-		if brain.role != BotBrain.Role.OFFENCE or brain.attacking or order_locks.has(id) or repairers.has(id) or game.carried_flag(id) != null:
+		if brain.soldier.vehicle_id != 0 or brain.role != BotBrain.Role.OFFENCE or brain.attacking or order_locks.has(id) or repairers.has(id) or game.carried_flag(id) != null:
 			continue
 		picks.append(brain)
 	if picks.size() < 2:

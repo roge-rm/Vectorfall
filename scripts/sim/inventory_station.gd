@@ -49,7 +49,7 @@ func _process(_delta: float) -> void:
 ## True if a soldier counts as on the pad: alive, on this team and with its
 ## feet over the pad.
 func holds(who: Soldier) -> bool:
-	if who.dead or who.team != team:
+	if who.dead or who.vehicle_id != 0 or who.team != team:
 		return false
 	var d := who.at() - global_position
 	var up := d.y - PAD_TOP

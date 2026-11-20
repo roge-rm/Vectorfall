@@ -19,8 +19,8 @@ extends CommandSource
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
 ## goal_target.
-enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX, DEPLOY }
-const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base", "deploy"]
+enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX, DEPLOY, VEHICLE }
+const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base", "deploy", "board"]
 ## OFFENCE takes out the enemy flag turret (role_target) while it works,
 ## then goes for the enemy flag and carries it, DEFENCE holds by the flag,
 ## LIGHT_DEFENCE watches the way enemies come in and chases carriers, ESCORT
@@ -339,6 +339,12 @@ func before_work() -> void:
 	_disc_check = false
 	if soldier == null or game == null or soldier.dead:
 		return
+	if soldier.vehicle_id != 0:
+		_command = director.vehicle_orders.rider_command(self)
+		yaw = _command.yaw
+		pitch = _command.pitch
+		_steer.clear()
+		return
 	if _thinks_now():
 		perception.look(soldier, game, director)
 		combat.look_at_asset(self)
@@ -346,7 +352,7 @@ func before_work() -> void:
 
 ## True if it carries a search on this tick, after before_work().
 func wants_points() -> bool:
-	return soldier != null and game != null and not soldier.dead and _search != null and not _search.done and not was_dead and _works_now()
+	return _command == null and soldier != null and game != null and not soldier.dead and _search != null and not _search.done and not was_dead and _works_now()
 
 
 ## Main thread, before work(): takes points for the search it carries on from
@@ -385,6 +391,8 @@ func after_work() -> void:
 ## Works out this tick's command. May run on a worker thread: see the class
 ## notes.
 func work(delta: float) -> void:
+	if _command != null:
+		return
 	var command := PlayerCommand.new()
 	command.yaw = yaw
 	command.pitch = pitch
@@ -412,6 +420,7 @@ func work(delta: float) -> void:
 		combat.apply(self, command, delta)
 	gear.apply(self, command)
 	_aim_deploy(command)
+	director.vehicle_orders.request_board(self, command)
 	if _command.loadout.size() > 0:
 		command.loadout = _command.loadout
 	yaw = command.yaw
@@ -602,12 +611,19 @@ func _think_ctf() -> void:
 func _choose_goal() -> Array:
 	var next := _role_goal()
 	var kind: Goal = next[0]
-	if not CALM_GOALS.has(kind) or combat.target_id != 0 or combat.hurt_recently(game.tick):
+	var own: Flag = game.flags.get(soldier.team)
+	var home_safe := own == null or own.mode == Flag.Mode.HOME
+	var safe := combat.target_id == 0 and not combat.hurt_recently(game.tick)
+	if safe and home_safe and kind in [Goal.DEFEND, Goal.MIDFIELD, Goal.RALLY, Goal.TAKE_FLAG, Goal.RAID]:
+		var boss := director.commander(soldier.team)
+		var boarding := director.vehicle_orders.board_target(soldier.entity_id)
+		if boarding != Vector3.INF and (boss == null or not boss.order_locks.has(soldier.entity_id)):
+			return [Goal.VEHICLE, boarding]
+	if not CALM_GOALS.has(kind) or not safe:
 		if goal == Goal.STATION:
 			station_until = -1
 		return next
-	var own: Flag = game.flags.get(soldier.team)
-	if own != null and own.mode != Flag.Mode.HOME:
+	if not home_safe:
 		return next
 	var deploy_at := _deploy_goal()
 	if deploy_at != Vector3.INF:

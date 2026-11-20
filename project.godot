@@ -9,7 +9,7 @@ config/description="Team capture the flag with jetpacks."
 run/main_scene="res://scenes/menu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://art/icon.svg"
-config/version="0.9.0"
+config/version="0.10.0"
 boot_splash/bg_color=Color(0.1, 0.12, 0.2, 1)
 boot_splash/show_image=false
 config/quit_on_go_back=false
@@ -75,6 +75,10 @@ ski={
 use={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"device":-1,"physical_keycode":69), Object(InputEventJoypadButton,"device":-1,"button_index":2,"pressed":true)]
+}
+board={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"device":-1,"physical_keycode":82), Object(InputEventJoypadButton,"device":-1,"button_index":1,"pressed":true)]
 }
 deploy={
 "deadzone": 0.5,

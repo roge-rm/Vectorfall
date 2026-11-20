@@ -153,6 +153,7 @@ func _match() -> void:
 	await ticks(60)
 	var game: Match = main.game
 	checks.check(main.map is TestMap, "the chosen map loads")
+	checks.check(main.game.fleet.hulls.size() == 10, "the Test map spawns all five vehicles for each team")
 	checks.check(main.player.team == 1 and game.entities.size() == 8, "you're on the chosen team with 2 and 5 bots (%d soldiers)" % game.entities.size())
 	var own := 0
 	for brain: BotBrain in main.bots.brains:

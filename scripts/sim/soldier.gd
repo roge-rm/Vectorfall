@@ -86,6 +86,9 @@ var pack_on := false
 var use_held := false
 var deploy_held := false
 var deploy_ready := true
+var vehicle_id := 0
+var vehicle_seat := -1
+var board_held := false
 ## Who the repair pack healed this tick: this soldier's id, a teammate's, or
 ## 0 for no one.
 var repair_target := 0
@@ -119,7 +122,7 @@ func _init() -> void:
 	floor_max_angle = deg_to_rad(50.0)
 	floor_constant_speed = true
 	collision_layer = Match.SOLDIER_LAYER
-	collision_mask = Match.WORLD_LAYER | Match.SOLDIER_LAYER | Match.ASSET_LAYER
+	collision_mask = Match.WORLD_LAYER | Match.SOLDIER_LAYER | Match.ASSET_LAYER | Vehicle.HULL_LAYER
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
 	capsule.radius = tuning.radius
@@ -335,8 +338,36 @@ func revive(where: Transform3D) -> void:
 ## collide with the world, assets and the other team's force fields.
 func _set_alive_layers(alive: bool) -> void:
 	collision_layer = Match.SOLDIER_LAYER if alive else 0
-	var solid := Match.WORLD_LAYER | Match.ASSET_LAYER | Match.enemy_fields(team)
+	var solid := Match.WORLD_LAYER | Match.ASSET_LAYER | Vehicle.HULL_LAYER | Match.enemy_fields(team)
 	collision_mask = solid | Match.SOLDIER_LAYER if alive else solid
+
+
+func mount(id: int, seat: int) -> void:
+	vehicle_id = id
+	vehicle_seat = seat
+	body.visible = id == 0
+	if id != 0:
+		collision_layer = 0
+		collision_mask = 0
+		grounded = false
+		skiing = false
+		ski_held = false
+		jetting = false
+		repair_target = 0
+		switch_pack(false)
+	else:
+		_set_alive_layers(not dead)
+
+
+func simulate_rider(command: PlayerCommand, delta: float, has_personal_fire: bool) -> void:
+	if not command.loadout.is_empty():
+		next_loadout = Loadout.from_dict(command.loadout).fixed()
+	yaw = wrapf(command.yaw, -PI, PI)
+	pitch = clampf(command.pitch, -PITCH_LIMIT, PITCH_LIMIT)
+	rotation.y = yaw
+	energy = minf(tuning.energy_max, energy + refill_rate() * delta)
+	if has_personal_fire:
+		_use_weapon(command, delta)
 
 
 func eye_transform() -> Transform3D:
@@ -690,6 +721,9 @@ func get_state() -> Dictionary:
 		"use_held": use_held,
 		"deploy_held": deploy_held,
 		"deploy_ready": deploy_ready,
+		"vehicle": vehicle_id,
+		"vehicle_seat": vehicle_seat,
+		"board_held": board_held,
 		"repair_target": repair_target,
 	}
 
@@ -733,5 +767,6 @@ func set_state(state: Dictionary) -> void:
 	use_held = state.get("use_held", false)
 	deploy_held = state.get("deploy_held", false)
 	deploy_ready = state.get("deploy_ready", true)
+	board_held = state.get("board_held", false)
 	repair_target = state.get("repair_target", 0)
-	_set_alive_layers(not dead)
+	mount(state.get("vehicle", 0), state.get("vehicle_seat", -1))

@@ -53,6 +53,7 @@ func _ready() -> void:
 		for at in map.station_points(team):
 			game.add_station(team, at)
 		map.add_base_power(game, team)
+		map.add_vehicle_pads(game, team)
 	add_child(game)
 	game.match_over.connect(_on_match_over)
 	input = LocalInput.new()
@@ -177,6 +178,7 @@ func _process(_delta: float) -> void:
 
 func _on_device_changed(device: LocalInput.Device) -> void:
 	touch.visible = device == LocalInput.Device.TOUCH
+	hud.device = device
 
 
 ## Picks up settings that belong to the match after they change.

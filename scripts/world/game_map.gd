@@ -240,6 +240,21 @@ func add_base_power(game: Match, team: int) -> void:
 		game.add_field(team, at, FIELD_SIZE)
 
 
+## The base's vehicle pads, clear of the flag deck.
+func add_vehicle_pads(game: Match, team: int) -> void:
+	var anchors := route_graph.interest_points(RouteGraph.VEHICLE_PAD, team)
+	var lineup := [Vehicle.Kind.BIKE, Vehicle.Kind.TANK, Vehicle.Kind.GUNSHIP, Vehicle.Kind.BOMBER, Vehicle.Kind.TRANSPORT]
+	var sides: Array[Vector2] = [Vector2(-13, -24), Vector2(-13, 24), Vector2(6, -27), Vector2(6, 27), Vector2(-13, 57)]
+	for i in lineup.size():
+		var x := base_x(team) + front(team) * sides[i].x
+		var z: float = sides[i].y
+		if not anchors.is_empty():
+			x = route_graph.points[anchors[0]].x
+			z = (i - 2) * 13.0
+		var at := Vector3(x, surface_at(x, z), z)
+		game.fleet.add_pad(team, lineup[i], at, asset_facing(team))
+
+
 ## The spot a carrier touches to score.
 func stand_point(team: int) -> Vector3:
 	return stand_top(team) + Vector3.UP * 0.5

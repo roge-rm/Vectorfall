@@ -88,6 +88,7 @@ func _ready() -> void:
 			game.add_station(team, at)
 		if not no_base:
 			map.add_base_power(game, team)
+			map.add_vehicle_pads(game, team)
 	game.settings.capture_limit = 1000000
 	game.settings.time_limit = minutes * 60.0 + 10.0
 	game.start_clock()

@@ -18,7 +18,7 @@ for name in "$@"; do
 	tests+=("-s tests/${name%.gd}.gd")
 done
 status=0
-if [ ${#tests[@]} -eq 0 ]; then tests=("-s tests/jetpack_test.gd" "-s tests/ski_test.gd" "-s tests/command_test.gd" "-s tests/weapon_test.gd" "-s tests/armour_test.gd" "-s tests/throw_test.gd" "-s tests/pack_test.gd" "-s tests/station_test.gd" "-s tests/base_power_test.gd" "-s tests/deploy_test.gd" "-s tests/force_field_test.gd" "-s tests/flag_test.gd" "-s tests/map_test.gd" "-s tests/terrain_test.gd" "-s tests/ochre_fold_test.gd" "-s tests/route_test.gd" "-s tests/perception_test.gd" "-s tests/bot_move_test.gd" "-s tests/bot_fight_test.gd" "-s tests/commander_test.gd" "-s tests/orders_test.gd" "-s tests/main_scene_test.gd" "-s tests/menu_test.gd" "-s tests/sound_test.gd"); fi
+if [ ${#tests[@]} -eq 0 ]; then tests=("-s tests/jetpack_test.gd" "-s tests/ski_test.gd" "-s tests/command_test.gd" "-s tests/weapon_test.gd" "-s tests/armour_test.gd" "-s tests/throw_test.gd" "-s tests/pack_test.gd" "-s tests/station_test.gd" "-s tests/base_power_test.gd" "-s tests/deploy_test.gd" "-s tests/vehicle_test.gd" "-s tests/vehicle_bots_test.gd" "-s tests/force_field_test.gd" "-s tests/flag_test.gd" "-s tests/map_test.gd" "-s tests/terrain_test.gd" "-s tests/ochre_fold_test.gd" "-s tests/route_test.gd" "-s tests/perception_test.gd" "-s tests/bot_move_test.gd" "-s tests/bot_fight_test.gd" "-s tests/commander_test.gd" "-s tests/orders_test.gd" "-s tests/main_scene_test.gd" "-s tests/menu_test.gd" "-s tests/sound_test.gd"); fi
 for test in "${tests[@]}"; do
 	echo "== $test"
 	# shellcheck disable=SC2086

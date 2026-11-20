@@ -61,7 +61,8 @@ func _build_guns() -> void:
 func _process(delta: float) -> void:
 	if soldier == null:
 		return
-	visible = not soldier.dead
+	var hull: Vehicle = soldier.game.fleet.hulls.get(soldier.vehicle_id) if soldier.game != null else null
+	visible = not soldier.dead and (hull == null or hull.uses_personal_weapon(soldier.vehicle_seat))
 	if soldier.weapons != _built:
 		_build_guns()
 	if soldier.shots != _shots:

@@ -18,6 +18,7 @@ const PREV_WEAPON := 128
 ## Held to throw a hand grenade or place a mine. One throw per press.
 const GRENADE := 256
 const MINE := 512
+const BOARD := 1024
 
 ## x is right and y is forward, length at most 1.
 var move := Vector2.ZERO
@@ -26,6 +27,8 @@ var move := Vector2.ZERO
 var yaw := 0.0
 var pitch := 0.0
 var buttons := 0
+## An optional specific hull to board. Zero boards the nearest one.
+var board_id := 0
 ## Index in the soldier's carried weapons to switch to, or -1 to keep the
 ## current one.
 var weapon := -1
@@ -47,7 +50,7 @@ func duplicate() -> PlayerCommand:
 
 
 func to_dict() -> Dictionary:
-	return { "move": move, "yaw": yaw, "pitch": pitch, "buttons": buttons, "weapon": weapon, "order": order, "order_arg": order_arg, "loadout": loadout.duplicate(true) }
+	return { "move": move, "yaw": yaw, "pitch": pitch, "buttons": buttons, "board_id": board_id, "weapon": weapon, "order": order, "order_arg": order_arg, "loadout": loadout.duplicate(true) }
 
 
 static func from_dict(data: Dictionary) -> PlayerCommand:
@@ -56,6 +59,7 @@ static func from_dict(data: Dictionary) -> PlayerCommand:
 	command.yaw = data.get("yaw", 0.0)
 	command.pitch = data.get("pitch", 0.0)
 	command.buttons = data.get("buttons", 0)
+	command.board_id = data.get("board_id", 0)
 	command.weapon = data.get("weapon", -1)
 	command.order = data.get("order", 0)
 	command.order_arg = data.get("order_arg", 0)

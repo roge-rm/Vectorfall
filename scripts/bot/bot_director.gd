@@ -48,6 +48,7 @@ static var threads := true
 const MAX_THREADS := 4
 
 var game: Match
+var vehicle_orders := BotVehicles.new(self)
 var graph: RouteGraph
 var planner := RoutePlanner.new()
 ## Each team's skill level, an index into SKILLS, for bots added without one.
@@ -239,6 +240,7 @@ func run_bots(delta: float) -> void:
 		Prof.add("bot.commander", Time.get_ticks_usec() - commander_t)
 	else:
 		before_tick()
+	vehicle_orders.update()
 	Soldier.use_snapshot = true
 	for brain in brains:
 		brain.before_work()
@@ -740,6 +742,7 @@ func get_state() -> Dictionary:
 		"points_owed": _points_owed,
 		"brains": brain_states,
 		"commanded_tick": _commanded_tick,
+		"vehicle_orders": vehicle_orders.get_state(),
 		"commanders": commanders.keys().map(func(team: int) -> Array: return [team, commanders[team].get_state()]),
 	}
 
@@ -753,6 +756,7 @@ func set_state(state: Dictionary) -> void:
 	_search_turns.assign(state.get("search_turns", []))
 	_points_owed = state.get("points_owed", 0)
 	_commanded_tick = state.commanded_tick
+	vehicle_orders.set_state(state.get("vehicle_orders", {}))
 	for pair: Array in state.commanders:
 		if commanders.has(pair[0]):
 			commanders[pair[0]].set_state(pair[1])

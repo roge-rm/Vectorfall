@@ -35,6 +35,7 @@ const BOLT_ROOM := 16.0
 const GENERATOR_HIT_TIME := 4.0
 
 var soldier: Soldier
+var device := LocalInput.Device.KEYBOARD
 var game: Match
 ## The touch controls, which the HUD keeps clear of while they show.
 var touch: TouchControls
@@ -308,6 +309,8 @@ func _touch_rects() -> Array[Rect2]:
 		return rects
 	var gap := TOUCH_GAP * _u()
 	for k in TouchControls.BUTTONS.size():
+		if not touch.button_shown(k):
+			continue
 		if k == TouchControls.ORDERS_BUTTON:
 			rects.append(touch.orders_rect().grow(gap))
 		else:
@@ -353,6 +356,14 @@ func _draw() -> void:
 	if game != null:
 		_top_edge = _draw_score(u)
 	_bottom_edge = _draw_status(u, avoid)
+	if game != null and soldier.vehicle_id == 0 and not soldier.dead:
+		var nearby := game.fleet.nearby(soldier)
+		if nearby != null:
+			var prompt := Vehicle.NAMES[nearby.kind]
+			if device != LocalInput.Device.TOUCH:
+				var key := "B" if device == LocalInput.Device.GAMEPAD else "R"
+				prompt = "%s · Board [%s]" % [prompt, key]
+			InkUi.centred(self, centre + Vector2(0, 46.0 * u), prompt, InkUi.Face.BLACK, _px(13), InkUi.CREAM, 3)
 	_draw_feed(u, avoid)
 	if game != null:
 		_draw_sensor_marks(u)
@@ -513,6 +524,22 @@ func _draw_status(u: float, avoid: Array[Rect2]) -> float:
 	var weapon := Weapon.all[soldier.weapon_slot()]
 	var amount := "%d energy" % roundi(weapon.energy_per_shot) if weapon.uses_energy() else str(soldier.ammo[soldier.weapon])
 	var words := "%s · %s · %d m/s" % [weapon.name, amount, roundi(soldier.horizontal_speed())]
+	var hull: Vehicle = game.fleet.hulls.get(soldier.vehicle_id) if game != null else null
+	if hull != null:
+		var at := Vector2(size.x * 0.5, size.y - 19.0 * u)
+		var seat := "Pilot" if hull.flies() else "Driver"
+		if soldier.vehicle_seat > 0:
+			seat = "Gunner" if hull.kind == Vehicle.Kind.GUNSHIP else "Passenger"
+		var readout := "%s · %s · %d m/s · %d%% hull" % [
+			Vehicle.NAMES[hull.kind], seat, roundi(hull.velocity.length()), ceili(hull.health / Vehicle.MAX_HEALTH[hull.kind] * 100.0),
+		]
+		InkUi.centred(self, at, readout, InkUi.Face.BLACK, _px(13), InkUi.CREAM, 3)
+		var hint := "Exit [B]" if device == LocalInput.Device.GAMEPAD else "Exit [R]"
+		if hull.uses_personal_weapon(soldier.vehicle_seat):
+			hint = "%s · %s" % [weapon.name, amount] if device == LocalInput.Device.TOUCH else "%s · %s · %s" % [weapon.name, amount, hint]
+		if device != LocalInput.Device.TOUCH or hull.uses_personal_weapon(soldier.vehicle_seat):
+			InkUi.centred(self, at - Vector2(0, 18.0 * u), hint, InkUi.Face.BLACK, _px(11), InkUi.CREAM, 3)
+		return at.y - 32.0 * u
 	var px := _px(13.0)
 	var baseline := size.y - 14.0 * u
 	var top := baseline - px

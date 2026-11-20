@@ -207,7 +207,7 @@ func make_command(delta: float) -> PlayerCommand:
 	else:
 		if device == Device.TOUCH and Settings.gyro > 0.0 and (menu == null or not menu.visible):
 			gyro = gyro_look(read_gyro.call(), read_gravity.call(), delta)
-		if device != Device.KEYBOARD and Settings.aim_assist > 0:
+		if device != Device.KEYBOARD and Settings.aim_assist > 0 and (soldier == null or soldier.vehicle_id == 0):
 			aim = assist.find(soldier, source.yaw, source.pitch)
 			look *= AimAssist.slowdown(aim, Settings.aim_assist)
 	var turn := mouse + look + gyro
@@ -261,7 +261,7 @@ func make_command(delta: float) -> PlayerCommand:
 		command.buttons |= PlayerCommand.MINE
 		_mine_pending = false
 	command.move = Input.get_vector("move_left", "move_right", "move_back", "move_forward")
-	for pair: Array in [["fire", PlayerCommand.FIRE], ["jump", PlayerCommand.JUMP], ["jet", PlayerCommand.JET], ["use", PlayerCommand.USE], ["deploy", PlayerCommand.DEPLOY], ["ski", PlayerCommand.SKI]]:
+	for pair: Array in [["fire", PlayerCommand.FIRE], ["jump", PlayerCommand.JUMP], ["jet", PlayerCommand.JET], ["use", PlayerCommand.USE], ["deploy", PlayerCommand.DEPLOY], ["board", PlayerCommand.BOARD], ["ski", PlayerCommand.SKI]]:
 		if Input.is_action_pressed(pair[0]):
 			command.buttons |= pair[1]
 	_auto_ski(command)

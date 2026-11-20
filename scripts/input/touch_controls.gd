@@ -41,6 +41,7 @@ const BUTTONS := [
 	["PACK", PlayerCommand.USE, Vector2(108.0, 114.0), 15.0, false, 10, InkUi.CREAM, InkUi.INK],
 	["GREN", PlayerCommand.GRENADE, Vector2(84.0, 222.0), 15.0, false, 10, InkUi.CREAM, InkUi.INK],
 	["MINE", PlayerCommand.MINE, Vector2(48.0, 222.0), 15.0, false, 10, InkUi.CREAM, InkUi.INK],
+	["BOARD", PlayerCommand.BOARD, Vector2(145.0, 197.0), 24.0, false, 12, InkUi.CREAM, InkUi.INK],
 ]
 ## How opaque the round buttons are when not held.
 const BUTTON_ALPHA := 0.55
@@ -52,6 +53,7 @@ const ORDERS_BUTTON := 5
 const PACK_BUTTON := 6
 const GRENADE_BUTTON := 7
 const MINE_BUTTON := 8
+const BOARD_BUTTON := 9
 ## BUTTONS indexes a touch can slide between, once it started on JET or JUMP.
 const SLIDE_GROUP := [0, 1, 2]
 ## How far past its edge a button still counts: where a touch starts, and for
@@ -77,7 +79,7 @@ const MM_PER_DESIGN := 0.22
 const STICK_TAP_SECONDS := 0.3
 const STICK_JET_PUSH := 1.15
 ## Buttons sent for one tick per tap.
-const PULSES := PlayerCommand.NEXT_WEAPON | PlayerCommand.GRENADE | PlayerCommand.MINE
+const PULSES := PlayerCommand.NEXT_WEAPON | PlayerCommand.GRENADE | PlayerCommand.MINE | PlayerCommand.BOARD
 ## Buttons held while touched and also sent for a tick on the tap, so a
 ## quick tap between ticks still toggles a pack.
 const HELD_AND_TAPPED := PlayerCommand.USE
@@ -249,11 +251,31 @@ func _input(event: InputEvent) -> void:
 			_look += event.relative
 
 
+func button_shown(k: int) -> bool:
+	if soldier == null or soldier.game == null:
+		return k != BOARD_BUTTON
+	var hull: Vehicle = soldier.game.fleet.hulls.get(soldier.vehicle_id)
+	if hull == null:
+		return k != BOARD_BUTTON or soldier.game.fleet.nearby(soldier) != null
+	match k:
+		PACK_BUTTON, GRENADE_BUTTON, MINE_BUTTON:
+			return false
+		WEAPON_BUTTON:
+			return hull.uses_personal_weapon(soldier.vehicle_seat)
+		1, 2:
+			return hull.flies() and soldier.vehicle_seat == 0
+		0, 3:
+			return hull.uses_personal_weapon(soldier.vehicle_seat) or (Vehicle.WEAPONS[hull.kind] >= 0 and soldier.vehicle_seat == hull.weapon_seat())
+	return true
+
+
 ## The button under a point, or -1. Where circles overlap the nearest centre wins.
 func _button_at(at: Vector2, reach: float, only: Array = []) -> int:
 	var best := -1
 	var best_score := reach
 	for k in BUTTONS.size():
+		if not button_shown(k):
+			continue
 		if not only.is_empty() and not only.has(k):
 			continue
 		var score := at.distance_to(button_centre(k)) / button_radius(k)
@@ -375,6 +397,8 @@ func _draw() -> void:
 	var s := design_unit()
 	var line := maxf(2.0, 2.0 * s)
 	for k in BUTTONS.size():
+		if not button_shown(k):
+			continue
 		var held: bool = buttons & BUTTONS[k][1] != 0 or (k == ORDERS_BUTTON and menu != null and menu.visible)
 		var fill: Color = BUTTONS[k][6]
 		var ink: Color = BUTTONS[k][7]
@@ -383,6 +407,11 @@ func _draw() -> void:
 		# Faded while there's nothing for it to do.
 		var spent := false
 		if soldier != null:
+			if soldier.vehicle_id != 0:
+				match k:
+					1: label = "UP"
+					2: label = "DOWN"
+					BOARD_BUTTON: label = "EXIT"
 			match k:
 				WEAPON_BUTTON:
 					label = Weapon.all[soldier.weapon_slot()].short_name

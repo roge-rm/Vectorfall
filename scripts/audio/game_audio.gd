@@ -18,7 +18,7 @@ const REACH := 260.0
 const STEP_TIME := 0.33
 ## Each weapon's firing sound and its hit or blast sound, by slot. The
 ## chaingun's hits make no sound.
-const FIRE_SOUNDS: Array[String] = ["disc_fire", "chaingun", "grenade_fire", "mortar_fire", "plasma_fire", "sniper_fire", "blaster_fire", "throw", "throw"]
+const FIRE_SOUNDS: Array[String] = ["disc_fire", "chaingun", "grenade_fire", "mortar_fire", "plasma_fire", "sniper_fire", "blaster_fire", "throw", "throw", "turret_fire"]
 const HIT_SOUNDS: Array[String] = ["disc_blast", "", "grenade_blast", "mortar_blast", "plasma_hit", "blaster_hit", "blaster_hit", "hand_grenade_blast", "mine_blast", "plasma_hit"]
 ## Seconds between one soldier's chaingun sounds, so a burst doesn't take
 ## every voice.

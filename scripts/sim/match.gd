@@ -120,6 +120,7 @@ var terrain: Terrain
 ## The match's bots, if it has any. They work out their commands for the tick
 ## before anything moves.
 var bots: BotDirector
+var fleet := VehicleFleet.new(self)
 
 
 func _init(match_seed := 1) -> void:
@@ -150,7 +151,8 @@ func step(delta: float) -> void:
 		var command := source.make_command(delta) if source != null else PlayerCommand.new()
 		if command.order != 0:
 			ordered.emit(id, command.order, command.order_arg)
-		entities[id].simulate(command, delta)
+		_move_soldier(entities[id], command, delta)
+	_step_fleet(delta)
 	_step_stations(delta, ids)
 	_step_turrets(delta)
 	_step_projectiles(delta)
@@ -182,8 +184,11 @@ func _profiled_step(delta: float) -> void:
 		if command.order != 0:
 			ordered.emit(id, command.order, command.order_arg)
 		t = Time.get_ticks_usec()
-		entities[id].simulate(command, delta)
+		_move_soldier(entities[id], command, delta)
 		Prof.add("soldier_sim", Time.get_ticks_usec() - t)
+	t = Time.get_ticks_usec()
+	_step_fleet(delta)
+	Prof.add("vehicles", Time.get_ticks_usec() - t)
 	_step_stations(delta, ids)
 	t = Time.get_ticks_usec()
 	_step_turrets(delta)
@@ -199,6 +204,18 @@ func _profiled_step(delta: float) -> void:
 	_step_fields()
 	_step_sensors()
 	Prof.add("tick", Time.get_ticks_usec() - t0)
+
+
+func _move_soldier(who: Soldier, command: PlayerCommand, delta: float) -> void:
+	if fleet.pads.is_empty():
+		who.simulate(command, delta)
+	else:
+		fleet.command(who, command, delta)
+
+
+func _step_fleet(delta: float) -> void:
+	if not fleet.pads.is_empty():
+		fleet.step(delta)
 
 
 ## Makes the terrain collision under everything now, before the first tick,
@@ -223,6 +240,10 @@ func _keep_terrain_collision(ids: Array, next_tick := true) -> void:
 		points.append(flags[team].global_position)
 		# A frozen flag reports the jump it was moved by as a speed.
 		speeds.append(0.0 if flags[team].freeze else flags[team].linear_velocity.length())
+	for hull: Vehicle in fleet.hulls.values():
+		if not hull.empty() or hull.velocity.length_squared() > 0.1:
+			points.append(hull.position)
+			speeds.append(hull.velocity.length())
 	terrain.keep_collision_near(points, speeds, next_tick)
 
 
@@ -656,7 +677,7 @@ func carried_flag(soldier_id: int) -> Flag:
 
 
 func _touching(who: Soldier, point: Vector3, reach: float) -> bool:
-	return not who.dead and who.distance_to_body(point) <= reach
+	return not who.dead and who.vehicle_id == 0 and who.distance_to_body(point) <= reach
 
 
 func _step_flags(delta: float) -> void:
@@ -804,6 +825,7 @@ func _launch(shooter: Soldier, weapon: Weapon, dir: Vector3, muzzle_offset: Vect
 	next_id += 1
 	shot.weapon = weapon.slot
 	shot.shooter = shooter.entity_id
+	shot.vehicle_id = shooter.vehicle_id
 	shot.team = shooter.team
 	shot.position = eye.origin
 	shot.velocity = dir * weapon.speed + shooter.velocity * weapon.inherit
@@ -839,7 +861,10 @@ func _step_projectiles(delta: float) -> void:
 		# A thrown mine passes through soldiers and sticks to the world or
 		# an asset.
 		var is_mine := shot.weapon == Weapon.MINE
-		var mask := WORLD_LAYER | ASSET_LAYER | PAD_LAYER
+		var own_hull: Vehicle = fleet.hulls.get(shot.vehicle_id)
+		if own_hull != null:
+			exclude.append(own_hull.get_rid())
+		var mask := WORLD_LAYER | ASSET_LAYER | PAD_LAYER | Vehicle.HULL_LAYER
 		var hit := world_ray(shot.position, to, mask if is_mine else mask | SOLDIER_LAYER, exclude)
 		shot.age += delta
 		if is_mine:
@@ -851,9 +876,10 @@ func _step_projectiles(delta: float) -> void:
 		elif not hit.is_empty():
 			var victim := hit.collider as Soldier
 			var machine := hit.collider as BaseAsset
+			var hull := hit.collider as Vehicle
 			var normal: Vector3 = hit.normal
 			# Grenades bounce off the world and go off on a soldier or asset.
-			if victim == null and machine == null and shot.bounces_left != 0:
+			if victim == null and machine == null and hull == null and shot.bounces_left != 0:
 				# The rest of the tick's move is dropped, which is under 2 cm at
 				# grenade speeds after a bounce.
 				shot.position = hit.position + normal * 0.05
@@ -865,7 +891,7 @@ func _step_projectiles(delta: float) -> void:
 				else:
 					kept.append(shot)
 			else:
-				_impact(shot, hit.position + normal * 0.05, normal, victim, machine)
+				_impact(shot, hit.position + normal * 0.05, normal, victim, machine, hull)
 		elif weapon.fuse > 0.0 and shot.age >= weapon.fuse:
 			_impact(shot, to, Vector3.UP, null)
 		elif shot.age >= weapon.lifetime:
@@ -876,7 +902,7 @@ func _step_projectiles(delta: float) -> void:
 	projectiles = kept
 
 
-func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier, machine: BaseAsset = null) -> void:
+func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier, machine: BaseAsset = null, hull: Vehicle = null) -> void:
 	var weapon := Weapon.all[shot.weapon]
 	shot.position = at
 	impacted.emit(weapon.slot, at, normal)
@@ -898,8 +924,12 @@ func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier, ma
 	var direct_asset := machine if machine != null and shot.damage > 0.0 else null
 	if direct_asset != null:
 		damage_asset(direct_asset, shot.damage, shot.shooter, shot.team, at)
+	var direct_hull := hull if hull != null and shot.damage > 0.0 else null
+	if direct_hull != null:
+		direct_hull.push(shot.velocity.normalized() * maxf(weapon.hit_impulse, weapon.splash_impulse))
+		fleet.damage(direct_hull, shot.damage, shot.shooter, shot.team, weapon.slot)
 	if weapon.splash_radius > 0.0:
-		explode(at, weapon.slot, shot.shooter, direct, -1, direct_asset, shot.team)
+		explode(at, weapon.slot, shot.shooter, direct, -1, direct_asset, shot.team, direct_hull)
 
 
 ## A blast from a weapon at a point: splash damage and a push on every living
@@ -907,7 +937,7 @@ func _impact(shot: Projectile, at: Vector3, normal: Vector3, victim: Soldier, ma
 ## splash damage on every enemy asset in range it can see. asset_team is the
 ## attacker's team for assets when the attacker is gone, if attacker_team
 ## isn't given.
-func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = null, attacker_team := -1, skip_asset: BaseAsset = null, asset_team := -1) -> void:
+func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = null, attacker_team := -1, skip_asset: BaseAsset = null, asset_team := -1, skip_hull: Vehicle = null) -> void:
 	var weapon := Weapon.all[weapon_slot]
 	# With the attacker gone, its team still takes no damage, as in damage().
 	var orphan_team := attacker_team if soldier(attacker_id) == null else -1
@@ -917,7 +947,7 @@ func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = nu
 	ids.sort()
 	for id: int in ids:
 		var target := soldier(id)
-		if target == null or target == skip or target.dead:
+		if target == null or target == skip or target.dead or target.vehicle_id != 0:
 			continue
 		var distance := target.distance_to_body(at)
 		if distance > weapon.splash_radius:
@@ -945,6 +975,20 @@ func explode(at: Vector3, weapon_slot: int, attacker_id: int, skip: Soldier = nu
 			if distance > weapon.splash_radius or not world_ray(at, target.centre(), blocks).is_empty():
 				continue
 			damage_asset(target, weapon.splash_damage_at(distance), attacker_id, team, at)
+	var vehicle_team := team_of(attacker_id)
+	if vehicle_team < 0:
+		vehicle_team = asset_team if attacker_team < 0 else attacker_team
+	var hull_ids := fleet.hulls.keys()
+	hull_ids.sort()
+	for id: int in hull_ids:
+		var hull: Vehicle = fleet.hulls.get(id)
+		if hull == null or hull == skip_hull:
+			continue
+		var distance := hull.distance_to_body(at)
+		if distance > weapon.splash_radius or not line_clear(at, hull.position):
+			continue
+		hull.push((hull.position - at).normalized() * weapon.splash_impulse_at(distance))
+		fleet.damage(hull, weapon.splash_damage_at(distance), attacker_id, vehicle_team, weapon_slot)
 	_set_off_mines_near(at)
 
 
@@ -1031,6 +1075,9 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 		hit.emit(attacker_id, victim.entity_id, weapon_slot)
 	damaged.emit(victim.entity_id, attacker_id, amount, from)
 	if victim.health <= 0.0:
+		var hull: Vehicle = fleet.hulls.get(victim.vehicle_id)
+		if hull != null and not fleet.eject(hull, victim, true):
+			victim.mount(0, -1)
 		victim.die()
 		var held := carried_flag(victim.entity_id)
 		if held != null:
@@ -1050,7 +1097,7 @@ func repair_target(healer: Soldier, reach: float) -> Node3D:
 	ids.sort()
 	for id: int in ids:
 		var other := soldier(id)
-		if other == null or other == healer or other.dead or other.team != healer.team or other.health >= other.tuning.health_max:
+		if other == null or other == healer or other.dead or other.vehicle_id != 0 or other.team != healer.team or other.health >= other.tuning.health_max:
 			continue
 		var distance := other.distance_to_body(eye.origin)
 		if distance > best_distance:
@@ -1134,6 +1181,7 @@ func get_state() -> Dictionary:
 		"stations": station_states,
 		"assets": asset_states,
 		"fields": field_states,
+		"fleet": fleet.get_state(),
 		"tick": tick,
 		"seed": seed_value,
 		"rng_state": rng.state,
@@ -1240,6 +1288,7 @@ func set_state(state: Dictionary) -> void:
 	mines.clear()
 	for mine_state: Dictionary in state.get("mines", []):
 		mines.append(Mine.from_state(mine_state))
+	fleet.set_state(state.get("fleet", {}))
 	next_id = state.next_id
 	if is_inside_tree():
 		_step_sensors()

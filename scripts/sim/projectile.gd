@@ -8,6 +8,7 @@ var id := 0
 var weapon := 0
 ## Entity id of the soldier or turret that fired it.
 var shooter := 0
+var vehicle_id := 0
 var team := 0
 var position := Vector3.ZERO
 var velocity := Vector3.ZERO
@@ -35,6 +36,7 @@ func get_state() -> Dictionary:
 		"id": id,
 		"weapon": weapon,
 		"shooter": shooter,
+		"vehicle": vehicle_id,
 		"team": team,
 		"position": position,
 		"velocity": velocity,
@@ -50,6 +52,7 @@ static func from_state(state: Dictionary) -> Projectile:
 	shot.id = state.id
 	shot.weapon = state.weapon
 	shot.shooter = state.shooter
+	shot.vehicle_id = state.get("vehicle", 0)
 	shot.team = state.team
 	shot.position = state.position
 	shot.velocity = state.velocity
