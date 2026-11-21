@@ -654,8 +654,9 @@ static func flight_time(to: Vector3, w: Weapon) -> float:
 ## Where to aim so a shot from eye meets a target at "at" moving with
 ## velocity: the shot inherits part of the shooter's velocity, and a target
 ## in the air falls at fall m/s².
-static func lead(eye: Vector3, shooter_velocity: Vector3, at: Vector3, velocity: Vector3, fall: float, w: Weapon) -> Vector3:
-	var relative := velocity - shooter_velocity * w.inherit
+static func lead(eye: Vector3, shooter_velocity: Vector3, at: Vector3, velocity: Vector3, fall: float, w: Weapon, inherit_override := -1.0) -> Vector3:
+	var inherit := w.inherit if inherit_override < 0.0 else inherit_override
+	var relative := velocity - shooter_velocity * inherit
 	var t := flight_time(at - eye, w)
 	var aim := at
 	for k in 4:

@@ -21,9 +21,11 @@ extends Node
 ##   --check       print a CHECK line for tools/bot-check.sh, and exit with an
 ##                 error if the bots stopped moving: 60 s or more stuck
 ##   --track       report every bot's position and goal every 5 s
+##   --vehicle-report   report reservations, trips and crew exits
 ## The capture limit is off, so the match runs the whole time. The report has
 ## each team's roles every 10 s and its commander's decisions.
 
+const VehicleReport := preload("res://tools/bot_match/vehicle_report.gd")
 const REPORTS := "res://build/bot-reports"
 
 var map: GameMap
@@ -50,6 +52,7 @@ var repaired := { "generator": 0, "turret": 0, "sensor": 0 }
 var asset_events: Array[Dictionary] = []
 var vehicle_boardings: Array[Dictionary] = []
 var vehicle_ticks := {}
+var _vehicle_report: VehicleReport
 var tracked_positions: Array[Dictionary] = []
 var _ridden_hulls := {}
 
@@ -101,6 +104,8 @@ func _ready() -> void:
 	game.start_clock()
 	add_child(game)
 	director = BotDirector.new(game, map.route_graph)
+	if args.has("--vehicle-report"):
+		_vehicle_report = VehicleReport.new(game, director)
 	director.skill_levels.assign(skills)
 	director.personalities = not plain
 	for team in 2:
@@ -215,6 +220,8 @@ func _run() -> void:
 		await get_tree().physics_frame
 		if game.tick > 0:
 			_track_bots()
+			if _vehicle_report != null:
+				_vehicle_report.observe()
 		if profile:
 			# physics_frame comes before the nodes' physics ticks and the physics
 			# step, so the time since the last one is a whole frame.
@@ -374,6 +381,7 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		"carrier_deaths": carrier_deaths,
 		"generator_raids": generator_raids,
 		"vehicle_boardings": vehicle_boardings,
+		"vehicle_report": _vehicle_report.report() if _vehicle_report != null else {},
 		"vehicle_rider_seconds": vehicle_seconds,
 		"tracked_positions": tracked_positions,
 		"assets_destroyed": destroyed,

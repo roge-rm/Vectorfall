@@ -20,7 +20,7 @@ const ENGINE_NAMES: Array[String] = ["engine_sled", "engine_needlewing", "engine
 ## Vowel formants in Hz (first, second) for the robot voices.
 const VOWELS: Array[Vector2] = [Vector2(780, 1250), Vector2(520, 1850), Vector2(320, 2250), Vector2(520, 900), Vector2(350, 760)]
 ## Robot voice pitch in Hz per team: team 0 low and buzzy, team 1 higher and hollow.
-const VOICE_PITCH: Array[float] = [105.0, 160.0]
+const VOICE_PITCH: Array[float] = [88.0, 125.0]
 const SYLLABLES := 12
 
 static var _streams: Dictionary[String, AudioStreamWAV] = {}
@@ -40,21 +40,21 @@ static func build() -> void:
 	_streams["disc_fire"] = _wav(_disc_fire(rng))
 	_streams["disc_blast"] = _wav(_disc_blast(rng))
 	_streams["chaingun"] = _wav(_chaingun(rng))
-	_streams["hit"] = _wav(_ticks([1900.0], 0.05))
-	_streams["kill"] = _wav(_ticks([1900.0, 2500.0], 0.05))
-	_streams["jet"] = _wav(_loop(_jet(rng)), true)
+	_streams["hit"] = _wav(_ticks([740.0], 0.05))
+	_streams["kill"] = _wav(_ticks([570.0, 960.0], 0.05))
+	_streams["jet"] = _wav(_loop(_jet(rng), true), true)
 	_streams["ski"] = _wav(_loop(_ski(rng)), true)
 	_streams["step"] = _wav(_thud(rng, 0.07, 900.0, 0.35))
 	_streams["land"] = _wav(_thud(rng, 0.2, 500.0, 0.7))
-	# Jingles: square and triangle notes, up for good news, down for bad.
+	# Flag cues rise for good news and fall for bad.
 	_streams["flag_grab"] = _wav(_jingle([523.3, 659.3, 784.0, 1046.5], 0.075))
 	_streams["flag_alarm"] = _wav(_jingle([880.0, 659.3, 880.0, 659.3], 0.09))
 	_streams["flag_dropped"] = _wav(_jingle([659.3, 493.9], 0.11))
 	_streams["flag_returned"] = _wav(_jingle([392.0, 523.3, 659.3], 0.08))
 	_streams["flag_captured"] = _wav(_jingle([523.3, 659.3, 784.0, 659.3, 784.0, 1046.5], 0.085))
 	_streams["flag_lost"] = _wav(_jingle([523.3, 466.2, 392.0, 311.1], 0.12))
-	_streams["click"] = _wav(_ticks([1200.0], 0.03, 0.35))
-	_streams["back"] = _wav(_ticks([700.0], 0.04, 0.35))
+	_streams["click"] = _wav(_ticks([510.0], 0.03, 0.35))
+	_streams["back"] = _wav(_ticks([300.0], 0.04, 0.35))
 	for team in 2:
 		var bank := _syllables(rng, team)
 		for line in BotLines.TEXT.size():
@@ -64,25 +64,25 @@ static func build() -> void:
 	_streams["grenade_blast"] = _wav(_blast(rng, 0.7, 1.4, 0.85))
 	_streams["mortar_fire"] = _wav(_tube(rng, 0.5, 90.0, 0.95))
 	_streams["mortar_blast"] = _wav(_blast(rng, 1.6, 0.6, 1.0))
-	_streams["plasma_fire"] = _wav(_zap(rng, 0.25, 900.0, 220.0, 0.15))
+	_streams["plasma_fire"] = _wav(_zap(rng, 0.25, 560.0, 145.0, 0.15))
 	_streams["plasma_hit"] = _wav(_fizz(rng, 0.3, 0.7))
-	_streams["sniper_fire"] = _wav(_zap(rng, 0.45, 3200.0, 140.0, 0.4))
-	_streams["blaster_fire"] = _wav(_zap(rng, 0.12, 1800.0, 600.0, 0.05))
+	_streams["sniper_fire"] = _wav(_zap(rng, 0.45, 1750.0, 100.0, 0.24))
+	_streams["blaster_fire"] = _wav(_zap(rng, 0.12, 960.0, 330.0, 0.05))
 	_streams["blaster_hit"] = _wav(_fizz(rng, 0.1, 0.5))
 	_streams["throw"] = _wav(_thud(rng, 0.14, 2400.0, 0.35))
 	_streams["hand_grenade_blast"] = _wav(_blast(rng, 0.9, 1.15, 0.9))
 	_streams["mine_place"] = _wav(_ticks([420.0, 840.0], 0.04, 0.5))
-	_streams["mine_arm"] = _wav(_ticks([1760.0, 2350.0], 0.05, 0.45))
+	_streams["mine_arm"] = _wav(_ticks([640.0, 900.0], 0.05, 0.45))
 	_streams["mine_blast"] = _wav(_blast(rng, 1.1, 0.85, 0.95))
-	_streams["pack_on"] = _wav(_ticks([660.0, 990.0], 0.05, 0.45))
-	_streams["pack_off"] = _wav(_ticks([990.0, 660.0], 0.05, 0.4))
+	_streams["pack_on"] = _wav(_ticks([370.0, 540.0], 0.05, 0.45))
+	_streams["pack_off"] = _wav(_ticks([540.0, 370.0], 0.05, 0.4))
 	_streams["repair"] = _wav(_loop(_repair(rng)), true)
-	_streams["shield_hit"] = _wav(_zap(rng, 0.2, 2600.0, 1500.0, 0.25))
+	_streams["shield_hit"] = _wav(_zap(rng, 0.2, 1350.0, 620.0, 0.20))
 	# Base power, made last so everything before keeps its noise.
 	_streams["generator_hum"] = _wav(_loop(_hum(rng)), true)
 	_streams["power_down"] = _wav(_sweep(rng, 1.1, 420.0, 45.0, 0.7))
 	_streams["power_up"] = _wav(_sweep(rng, 0.8, 70.0, 440.0, 0.6))
-	_streams["turret_fire"] = _wav(_zap(rng, 0.22, 1300.0, 260.0, 0.2))
+	_streams["turret_fire"] = _wav(_zap(rng, 0.22, 780.0, 170.0, 0.2))
 	_streams["asset_destroyed"] = _wav(_blast(rng, 1.8, 0.5, 1.0))
 	# The loop profiles give each hull a different pulse and engine tone.
 	var engines := [
@@ -161,11 +161,11 @@ static func _disc_fire(rng: RandomNumberGenerator) -> PackedFloat32Array:
 	var low := 0.0
 	for i in out.size():
 		var t := float(i) / RATE
-		var freq := 70.0 + 260.0 * exp(-t * 18.0)
+		var freq := 58.0 + 175.0 * exp(-t * 18.0)
 		phase += freq / RATE
 		var body := sin(phase * TAU) * exp(-t * 9.0)
-		# A little square on top for the retro edge.
-		body += 0.25 * signf(sin(phase * TAU * 2.0)) * exp(-t * 22.0)
+		# A short overtone gives the shot an edge.
+		body += 0.18 * sin(phase * TAU * 2.0) * exp(-t * 22.0)
 		low += 0.25 * (rng.randf_range(-1.0, 1.0) - low)
 		out[i] = body + low * 0.9 * exp(-t * 30.0)
 	return _normalise(out, 0.9)
@@ -195,10 +195,10 @@ static func _chaingun(rng: RandomNumberGenerator) -> PackedFloat32Array:
 	var band := 0.0
 	for i in out.size():
 		var t := float(i) / RATE
-		phase += (190.0 - 600.0 * t) / RATE
+		phase += (145.0 - 500.0 * t) / RATE
 		var noise := rng.randf_range(-1.0, 1.0)
 		band += 0.5 * (noise - band)
-		out[i] = (band * 0.8 + signf(sin(phase * TAU)) * 0.35) * exp(-t * 55.0)
+		out[i] = (band * 0.8 + sin(phase * TAU) * 0.55) * exp(-t * 55.0)
 	return _normalise(out, 0.8)
 
 
@@ -278,11 +278,10 @@ static func _jet(rng: RandomNumberGenerator) -> PackedFloat32Array:
 	var low := 0.0
 	var lower := 0.0
 	for i in out.size():
-		var t := float(i) / RATE
 		var noise := rng.randf_range(-1.0, 1.0)
 		low += 0.35 * (noise - low)
 		lower += 0.03 * (noise - lower)
-		out[i] = low * (0.7 + 0.15 * sin(t * TAU * 11.0)) + lower * 3.0
+		out[i] = low * 0.7 + lower * 3.0
 	return _normalise(out, 0.7)
 
 
@@ -315,7 +314,7 @@ static func _engine(rng: RandomNumberGenerator, tune: Vector4) -> PackedFloat32A
 		var pulse := pow(0.5 + 0.5 * sin(t * TAU * tune.y), 2.4)
 		var note := sin(t * TAU * tune.x + 0.2 * sin(t * TAU * 2.0))
 		var whine := sin(t * TAU * tune.x * tune.z)
-		out[i] = note * (0.4 + 0.26 * pulse) + whine * 0.20 + tune.w * (air + 2.8 * low) * (0.65 + pulse * 0.35)
+		out[i] = note * (0.4 + 0.26 * pulse) + whine * 0.11 + tune.w * (air + 2.8 * low) * (0.65 + pulse * 0.35)
 	return _normalise(out, 0.62)
 
 
@@ -348,7 +347,7 @@ static func _contact(rng: RandomNumberGenerator, material: String, duration: flo
 		low += (0.18 if rock else 0.45) * (noise - low)
 		var body := (0.75 * low + 0.25 * (noise - low)) * exp(-t * 4.5 / duration)
 		if metal:
-			body += (sin(t * TAU * 710.0) + 0.33 * sin(t * TAU * 1277.0)) * 0.48 * exp(-t * 4.0 / duration)
+			body += (sin(t * TAU * 480.0) + 0.33 * sin(t * TAU * 810.0)) * 0.48 * exp(-t * 4.0 / duration)
 		elif rock:
 			body += sin(t * TAU * 137.0) * 0.65 * exp(-t * 5.0 / duration)
 		else:
@@ -365,7 +364,7 @@ static func _repair(rng: RandomNumberGenerator) -> PackedFloat32Array:
 		var t := float(i) / RATE
 		low += 0.2 * (rng.randf_range(-1.0, 1.0) - low)
 		var wobble := 0.75 + 0.25 * sin(t * TAU * 9.0)
-		out[i] = (sin(t * TAU * 330.0) + 0.5 * sin(t * TAU * 495.0)) * wobble + low * 0.6
+		out[i] = (sin(t * TAU * 165.0) + 0.5 * sin(t * TAU * 247.5)) * wobble + low * 0.6
 	return _normalise(out, 0.45)
 
 
@@ -397,13 +396,15 @@ static func _sweep(rng: RandomNumberGenerator, length: float, from: float, to: f
 
 
 ## Crossfades the last 0.1 s into the start, so the loop has no click.
-static func _loop(samples: PackedFloat32Array) -> PackedFloat32Array:
+static func _loop(samples: PackedFloat32Array, equal_power := false) -> PackedFloat32Array:
 	var fade := int(0.1 * RATE)
 	var n := samples.size() - fade
 	var out := samples.slice(0, n)
 	for i in fade:
 		var k := float(i) / fade
-		out[i] = samples[i] * k + samples[n + i] * (1.0 - k)
+		var head := sqrt(k) if equal_power else k
+		var tail := sqrt(1.0 - k) if equal_power else 1.0 - k
+		out[i] = samples[i] * head + samples[n + i] * tail
 	return out
 
 
@@ -424,15 +425,13 @@ static func _jingle(notes: Array, length: float) -> PackedFloat32Array:
 	var n := int(length * RATE)
 	var out := _buffer(length * notes.size() + 0.15)
 	for k in notes.size():
-		var freq: float = notes[k]
+		var freq: float = notes[k] * 0.5
 		var tail := n + int(0.15 * RATE) if k == notes.size() - 1 else n
 		for i in tail:
 			var t := float(i) / RATE
-			var p := fmod(t * freq, 1.0)
-			var square := 1.0 if p < 0.25 else -1.0
-			var q := fmod(t * freq * 0.5, 1.0)
-			var triangle := 4.0 * absf(q - 0.5) - 1.0
-			out[k * n + i] += (square * 0.3 + triangle * 0.6) * minf(1.0, t * 400.0) * exp(-t * 9.0)
+			var phase := t * freq * TAU
+			var tone := sin(phase) + 0.22 * sin(phase * 2.0)
+			out[k * n + i] += tone * minf(1.0, t * 180.0) * exp(-t * 13.0)
 	return _normalise(out, 0.55)
 
 
@@ -449,7 +448,7 @@ static func _syllables(rng: RandomNumberGenerator, team: int) -> Array[PackedByt
 		var out := _buffer(length + (0.03 if hiss else 0.0), VOICE_RATE)
 		var f1 := _band(vowel.x, 6.0)
 		var f2 := _band(vowel.y, 9.0)
-		var f3 := _band(2600.0 if team == 0 else 3100.0, 5.0)
+		var f3 := _band(2050.0 if team == 0 else 2400.0, 5.0)
 		# Each filter's last two inputs and outputs.
 		var s1 := Vector4.ZERO
 		var s2 := Vector4.ZERO

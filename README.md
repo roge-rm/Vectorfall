@@ -4,12 +4,11 @@ Vectorfall is a capture-the-flag shooter for Android and Linux. Ski down a hill,
 
 It's in the spirit of Tribes, with bots you can play a whole match with and the look of an old science fiction paperback. Two teams of up to eight play on ten arenas. Bots change jobs as the match goes, chase flag carriers, repair the base and take orders from you.
 
-New in 0.11.0
+New in 0.12.0
 
-- Nine new arenas, including the foundry yard on Nightline Foundry, the tunnel on White Signal and the high bridge on Glass Ravine.
-- Ski Practice teaches you to ski downhill, jet over a crest and grab a flag. It keeps your best time.
-- Ten original music tracks, more sound effects and clearer cues for hitting a shield, landing a direct shot in the air and stopping a carrier.
-- One attacking bot per team goes for the flag on foot while the other attackers can take vehicles or attack the base.
+- Bot ferry crews wait for passengers, pick landing sites and slow down for drops.
+- Gunship crews cover friendly flag runners and intercept enemy flag carriers. Tank and bomber crews leave when their targets are gone.
+- Footsteps are quieter, the jetpack holds a steady sound while you use it, and weapons, radio calls and flag cues have a lower pitch.
 
 This build is for offline play with bots. Online play is planned. Let me know what works and what doesn't, or open an issue here.
 
@@ -45,9 +44,9 @@ The Linux build is for x86-64. It supports mouse and keyboard and a gamepad. And
 
 ## Install
 
-If you have the signed `vectorfall-0.11.0.apk`, open it on Android and follow the install prompt. An older debug install uses a different key, so Android requires that you remove it before installing the signed build. Uninstalling clears its saved settings and loadouts.
+Open the signed APK from the [0.12.0 release](https://github.com/roge-rm/Vectorfall/releases/tag/v0.12.0) on Android and follow the install prompt. An older debug install uses a different key, so Android requires that you remove it before installing the signed build. Uninstalling clears its saved settings and loadouts.
 
-On Linux, run `tools/run.sh` from a checkout with Godot set up as below, or build the standalone executable or Debian package.
+On Debian 13 (amd64), install the `.deb` from the same release. You can also run `tools/run.sh` from a checkout with Godot set up as below.
 
 ## Playing
 

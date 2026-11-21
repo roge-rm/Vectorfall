@@ -619,11 +619,25 @@ func _choose_goal() -> Array:
 	var own: Flag = game.flags.get(soldier.team)
 	var home_safe := own == null or own.mode == Flag.Mode.HOME
 	var safe := combat.target_id == 0 and not combat.hurt_recently(game.tick)
-	if safe and home_safe and kind in [Goal.DEFEND, Goal.MIDFIELD, Goal.RALLY, Goal.TAKE_FLAG, Goal.RAID]:
-		var boss := director.commander(soldier.team)
-		var boarding := director.vehicle_orders.board_target(soldier.entity_id)
-		if boarding != Vector3.INF and (boss == null or not boss.order_locks.has(soldier.entity_id)):
+	var id := soldier.entity_id
+	var boss := director.commander(soldier.team)
+	if boss == null or not boss.order_locks.has(id):
+		if kind in [Goal.MIDFIELD, Goal.RALLY, Goal.TAKE_FLAG, Goal.RAID, Goal.ESCORT]:
+			var delivery := director.vehicle_orders.foot_support(id)
+			if not delivery.is_empty():
+				var runner := game.soldier(delivery.target)
+				if runner != null and not runner.dead and runner.vehicle_id == 0 and runner.at().distance_squared_to(soldier.at()) < 120.0 * 120.0:
+					return [Goal.ESCORT, _escort_spot(runner)]
+				if kind in [Goal.MIDFIELD, Goal.RALLY]:
+					return [kind, delivery.objective]
+		var boarding := director.vehicle_orders.board_target(id)
+		if director.vehicle_orders.is_intercept_job(id) and soldier.at().distance_squared_to(boarding) <= 144.0:
 			return [Goal.VEHICLE, boarding]
+		if safe and boarding != Vector3.INF:
+			var normal_boarding := home_safe and kind in [Goal.DEFEND, Goal.MIDFIELD, Goal.RALLY, Goal.TAKE_FLAG, Goal.RAID]
+			var defence_flight := director.vehicle_orders.is_intercept_job(id) and kind in [Goal.CHASE, Goal.CUT_OFF, Goal.DEFEND, Goal.MIDFIELD, Goal.RALLY, Goal.TAKE_FLAG, Goal.RAID]
+			if normal_boarding or defence_flight:
+				return [Goal.VEHICLE, boarding]
 	if not CALM_GOALS.has(kind) or not safe:
 		if goal == Goal.STATION:
 			station_until = -1

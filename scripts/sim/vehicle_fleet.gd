@@ -3,6 +3,7 @@ extends RefCounted
 
 const BOARD_REACH := 3.0
 const RETURN_AFTER := 30.0
+const SHOT_INHERIT := 0.38
 
 var game: Match
 var pads: Dictionary[int, VehiclePad] = {}
@@ -188,7 +189,7 @@ func _fire(hull: Vehicle, shooter: Soldier) -> void:
 	shot.vehicle_id = hull.entity_id
 	shot.team = shooter.team
 	shot.position = muzzle
-	shot.velocity = direction * weapon.speed + hull.velocity * 0.38
+	shot.velocity = direction * weapon.speed + hull.velocity * SHOT_INHERIT
 	if drop:
 		shot.velocity = Vector3(hull.velocity.x * 0.72, minf(0.0, hull.velocity.y) - 5.0, hull.velocity.z * 0.72)
 	shot.damage = weapon.damage

@@ -335,7 +335,7 @@ func _own_sounds(delta: float) -> void:
 		if _step_left <= 0.0:
 			_step_left = STEP_TIME
 			var surface := _surface_at(soldier.global_position, soldier.floor_normal)
-			play_flat("step" + surface, -14.0, 0.9 + 0.2 * randf())
+			play_flat("step" + surface, -14.0 + linear_to_db(0.2), 0.9 + 0.2 * randf())
 	_was_grounded = soldier.grounded
 	_fall_speed = maxf(-soldier.velocity.y, 0.0)
 
