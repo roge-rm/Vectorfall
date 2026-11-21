@@ -11,6 +11,13 @@
 *.apk
 *.aab
 *.idsig
+*.deb
+
+# Local project notes and design drafts
+/PLAN.md
+/HANDOFF.md
+/docs/m[0-9]*-plan.md
+/docs/ui-paperback.md
 
 # Crash dumps. They're named core.<pid>, because a plain "core" pattern would
 # also hide real folders.
