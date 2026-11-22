@@ -18,6 +18,8 @@ const REACH_DOWN := 0.4
 const PAD_TOP := 0.2
 ## Seconds after a station restocks a soldier before stepping on again does.
 const COOLDOWN := 4.0
+const NEUTRAL := -1
+const AMMO_COOLDOWN := 12.0
 
 var entity_id := 0
 var team := 0
@@ -49,7 +51,7 @@ func _process(_delta: float) -> void:
 ## True if a soldier counts as on the pad: alive, on this team and with its
 ## feet over the pad.
 func holds(who: Soldier) -> bool:
-	if who.dead or who.vehicle_id != 0 or who.team != team:
+	if who.dead or who.vehicle_id != 0 or (team != NEUTRAL and who.team != team):
 		return false
 	var d := who.at() - global_position
 	var up := d.y - PAD_TOP

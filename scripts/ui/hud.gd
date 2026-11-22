@@ -145,6 +145,9 @@ func watch(value: Match) -> void:
 	game.power_back.connect(_on_power_back)
 	game.asset_damaged.connect(_on_asset_damaged)
 	game.deploy_result.connect(_on_deploy_result)
+	game.resupplied.connect(func(id: int) -> void:
+		if soldier != null and soldier.entity_id == id:
+			_say("Ammo refilled"))
 
 
 func _say(text: String) -> void:
@@ -430,6 +433,7 @@ func _draw() -> void:
 		_draw_sensor_marks(u)
 		_draw_generator_marker(u)
 		_draw_flag_markers(u)
+		_draw_control_markers(u)
 		_draw_waypoint(u)
 	var words := notice()
 	if not words.is_empty():
@@ -458,6 +462,11 @@ func _clock_text() -> String:
 
 ## The line under the clock: who has which flag, or what wins.
 func _status_line() -> String:
+	if not game.hold_points.is_empty():
+		for point in game.hold_points:
+			if soldier.at().distance_squared_to(point.position) < 36.0 * 36.0:
+				return "%s · %s" % [point.letter, point.status()]
+		return "Capture and hold"
 	if soldier == null:
 		return ""
 	var own := game.flags.get(soldier.team) as Flag
@@ -560,6 +569,11 @@ func _draw_compass(u: float, width: float, y: float) -> float:
 			continue
 		var rel := clampf(_heading_to(flag.global_position), -span, span)
 		_diamond(Vector2(mid + rel / span * reach, y + height * 0.5), height * 0.42, Palette.team(team))
+	for point in game.hold_points:
+		var rel := clampf(_heading_to(point.position), -span, span)
+		var at := Vector2(mid + rel / span * reach, y + height * 0.5)
+		_diamond(at, height * 0.44, point.colour())
+		InkUi.centred(self, at, point.letter, InkUi.Face.BLACK, _px(9.0), InkUi.INK)
 	return tip.y
 
 
@@ -733,6 +747,21 @@ func _diamond(at: Vector2, radius: float, colour: Color, filled := true) -> void
 	closed.append(points[0])
 	draw_polyline(closed, InkUi.INK, 6.0)
 	draw_polyline(closed, colour, 3.0)
+
+
+func _draw_control_markers(u: float) -> void:
+	var camera := get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var bounds := Rect2(Vector2(85 * u, _top_edge + 20 * u), Vector2(size.x - 170 * u, size.y * 0.72 - _top_edge))
+	for point in game.hold_points:
+		var position_in_world := point.position + Vector3.UP * 7.0
+		if camera.is_position_behind(position_in_world):
+			continue
+		var at := camera.unproject_position(position_in_world)
+		if bounds.has_point(at):
+			InkUi.centred(self, at, "%s · %d m" % [point.letter, int(soldier.at().distance_to(point.position))],
+				InkUi.Face.BOLD, _px(15.0), point.colour(), 3)
 
 
 func _draw_waypoint(u: float) -> void:

@@ -67,6 +67,7 @@ signal match_over(winner: int)
 ## put a loadout on a soldier or restocked it.
 signal station_entered(station_id: int, soldier_id: int)
 signal station_used(station_id: int, soldier_id: int)
+signal resupplied(soldier_id: int)
 ## A base asset took damage, was destroyed, or came back after a repair.
 ## attacker_id is 0 if it isn't known.
 signal asset_damaged(asset_id: int, attacker_id: int, amount: float, from: Vector3)
@@ -131,6 +132,9 @@ const WAYPOINT_TICKS := 30 * 60
 const WAYPOINT_RANGE := 12.0
 
 var arena: GameMap
+var hold_points: Array[HoldPoint] = []
+var neutral_station: InventoryStation
+var neutral_supply_at := Vector3.INF
 var results := MatchResults.new()
 var waypoints := {}
 var remote_orders := {}
@@ -170,7 +174,7 @@ func step(delta: float) -> void:
 	_step_turrets(delta)
 	_step_projectiles(delta)
 	_step_mines(delta)
-	_step_flags(delta)
+	_step_objectives(delta)
 	_step_fields()
 	_step_sensors()
 
@@ -212,7 +216,7 @@ func _profiled_step(delta: float) -> void:
 	Prof.count("projectiles_live", projectiles.size())
 	_step_mines(delta)
 	t = Time.get_ticks_usec()
-	_step_flags(delta)
+	_step_objectives(delta)
 	Prof.add("flags", Time.get_ticks_usec() - t)
 	_step_fields()
 	_step_sensors()
@@ -364,6 +368,9 @@ func add_station(team: int, at: Vector3, asset_id := 0) -> InventoryStation:
 	station.position = at
 	add_child(station)
 	stations[station.entity_id] = station
+	if team == InventoryStation.NEUTRAL:
+		neutral_station = station
+		neutral_supply_at = at
 	return station
 
 
@@ -371,7 +378,7 @@ func add_station(team: int, at: Vector3, asset_id := 0) -> InventoryStation:
 ## while their team has no power.
 func station_under(who: Soldier) -> InventoryStation:
 	for id: int in stations:
-		if stations[id].holds(who) and station_working(stations[id]):
+		if stations[id].team == who.team and stations[id].holds(who) and station_working(stations[id]):
 			return stations[id]
 	return null
 
@@ -399,6 +406,8 @@ func asset_powered(machine: BaseAsset) -> bool:
 
 
 func station_working(station: InventoryStation) -> bool:
+	if station.team == InventoryStation.NEUTRAL:
+		return true
 	if station.asset_id == 0:
 		return powered(station.team)
 	var machine := asset(station.asset_id)
@@ -714,6 +723,10 @@ func _step_stations(delta: float, ids: Array) -> void:
 		for id in now:
 			var who := soldier(id)
 			var entered := not station.on.has(id)
+			if station.team == InventoryStation.NEUTRAL:
+				if entered and not station.cooldowns.has(id):
+					_refill_ammo(station, who)
+				continue
 			if entered:
 				station_entered.emit(station_id, id)
 			var changed := not who.next_loadout.equals(who.loadout)
@@ -730,6 +743,19 @@ func _step_stations(delta: float, ids: Array) -> void:
 
 
 ## Starts the match clock again with the time limit in the settings.
+func _refill_ammo(station: InventoryStation, who: Soldier) -> void:
+	var refilled := false
+	for slot in who.weapons.size():
+		var full := who.max_ammo(slot)
+		if who.ammo[slot] < full:
+			who.ammo[slot] = full
+			refilled = true
+	if refilled:
+		station.cooldowns[who.entity_id] = InventoryStation.AMMO_COOLDOWN
+		resupplied.emit(who.entity_id)
+		station_used.emit(station.entity_id, who.entity_id)
+
+
 func start_clock() -> void:
 	time_left = settings.time_limit
 
@@ -754,6 +780,37 @@ func _at_capture_stand(who: Soldier) -> bool:
 func awaiting_flag_return(who: Soldier) -> bool:
 	var own: Flag = flags.get(who.team)
 	return not over and own != null and own.mode != Flag.Mode.HOME and _at_capture_stand(who) and carried_flag(who.entity_id) != null
+
+
+func add_hold_point(at: Vector3) -> void:
+	var point := HoldPoint.new()
+	point.arena = arena
+	point.letter = String.chr(65 + hold_points.size())
+	point.position = at
+	point.spot = at
+	add_child(point)
+	hold_points.append(point)
+
+
+func _step_objectives(delta: float) -> void:
+	if hold_points.is_empty():
+		_step_flags(delta)
+		return
+	if over:
+		return
+	for point in hold_points:
+		var sides := 0
+		for who: Soldier in entities.values():
+			if who.dead or who.vehicle_id != 0:
+				continue
+			if HoldPoint.contains(who.at(), point.spot):
+				sides |= 1 << who.team
+				if sides == 3:
+					break
+		var scored := point.advance(delta, sides)
+		if scored >= 0:
+			scores[scored] += 1
+	_step_clock(delta)
 
 
 func _step_flags(delta: float) -> void:
@@ -803,10 +860,13 @@ func _step_flags(delta: float) -> void:
 			_capture(flag, carrier)
 			if over:
 				return
-	if not over:
-		time_left = maxf(time_left - delta, 0.0)
-		if time_left <= 0.0:
-			_end(-1 if scores[0] == scores[1] else (0 if scores[0] > scores[1] else 1))
+	_step_clock(delta)
+
+
+func _step_clock(delta: float) -> void:
+	time_left = maxf(time_left - delta, 0.0)
+	if time_left <= 0.0:
+		_end(-1 if scores[0] == scores[1] else (0 if scores[0] > scores[1] else 1))
 
 
 func _take_flag(flag: Flag, who: Soldier) -> void:
@@ -1264,6 +1324,7 @@ func get_state(include_sources := true) -> Dictionary:
 		field_states[id] = fields[id].get_state()
 	return {
 		"scores": scores.duplicate(),
+		"hold_points": hold_points.map(func(point: HoldPoint) -> Dictionary: return point.get_state()),
 		"results": results.get_state(include_sources),
 		"waypoints": waypoints.duplicate(true),
 		"sensed": sensed.duplicate(),
@@ -1323,11 +1384,22 @@ func set_state(state: Dictionary) -> void:
 			add_flag(team, stands[team], flag_state.home)
 			flags[team].entity_id = flag_state.id
 		flags[team].set_state(flag_state)
+	var point_states: Array = state.get("hold_points", [])
+	while hold_points.size() > point_states.size():
+		var removed: HoldPoint = hold_points.pop_back()
+		remove_child(removed)
+		removed.queue_free()
+	for index in point_states.size():
+		if index == hold_points.size():
+			add_hold_point(point_states[index].position)
+		hold_points[index].set_state(point_states[index])
+	neutral_station = null
+	neutral_supply_at = Vector3.INF
 	var station_states: Dictionary = state.get("stations", {})
 	for id: int in stations.keys():
 		var station := stations[id]
 		var saved: Dictionary = station_states.get(id, {})
-		if station.asset_id != 0 and (saved.is_empty() or station.team != saved.team):
+		if (station.asset_id != 0 or station.team == InventoryStation.NEUTRAL) and (saved.is_empty() or station.team != saved.team):
 			remove_child(station)
 			station.queue_free()
 			stations.erase(id)
@@ -1340,6 +1412,9 @@ func set_state(state: Dictionary) -> void:
 			add_child(made)
 			stations[id] = made
 		stations[id].set_state(station_states[id])
+		if stations[id].team == InventoryStation.NEUTRAL:
+			neutral_station = stations[id]
+			neutral_supply_at = station_states[id].position
 	var asset_states: Dictionary = state.get("assets", {})
 	for id: int in assets.keys():
 		var machine := assets[id]

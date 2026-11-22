@@ -8,6 +8,7 @@ var viewer: Soldier
 var rows: VBoxContainer
 var back: Button
 var scroll: ScrollContainer
+var columns: Array[int]
 
 
 func _ready() -> void:
@@ -26,6 +27,8 @@ func _ready() -> void:
 
 
 func open() -> void:
+	columns.assign(range(MatchResults.HEADINGS.size()) if game.hold_points.is_empty()
+		else [MatchResults.Stat.KILLS, MatchResults.Stat.ASSISTS, MatchResults.Stat.REPAIRS])
 	for child in rows.get_children():
 		rows.remove_child(child)
 		child.queue_free()
@@ -60,8 +63,8 @@ func _add_row(label: String, cells: Array, header := false) -> void:
 	name_cell.size_flags_stretch_ratio = 2.75
 	name_cell.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	row.add_child(name_cell)
-	for value in cells:
-		row.add_child(_cell(str(value), header))
+	for index in columns:
+		row.add_child(_cell(str(cells[index]), header))
 
 
 func _cell(words: String, header: bool) -> Label:

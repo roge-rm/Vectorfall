@@ -17,7 +17,7 @@ async function refresh() {
     const response = await fetch("/api/status", { cache: "no-store" });
     const data = await response.json();
     if (!data) throw new Error("Offline");
-    arena.textContent = data.title;
+    arena.textContent = data.mode === "hold" ? data.title + " · Capture and hold" : data.title;
     server.textContent = data.name;
     byId("score").hidden = false;
     byId("lime").textContent = data.score[0];

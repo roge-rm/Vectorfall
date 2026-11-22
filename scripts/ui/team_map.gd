@@ -10,6 +10,7 @@ var chart: Chart
 var recipients: OptionButton
 var send: Button
 var orders: RichTextLabel
+var objective_status: Label
 var back: Button
 var roster := {}
 var refresh_in := 0.0
@@ -46,6 +47,10 @@ func _ready() -> void:
 	sidebar.add_child(recipients)
 	send = MenuKit.button("Send waypoint", _send, 20, false, true)
 	sidebar.add_child(send)
+	if not game.hold_points.is_empty():
+		sidebar.add_child(MenuKit.heading("Control points", 26))
+		objective_status = MenuKit.ink_label("", 14)
+		sidebar.add_child(objective_status)
 	sidebar.add_child(MenuKit.heading("Active orders", 26))
 	orders = RichTextLabel.new()
 	orders.focus_mode = FOCUS_CLICK
@@ -53,7 +58,8 @@ func _ready() -> void:
 	orders.size_flags_vertical = SIZE_EXPAND_FILL
 	sidebar.add_child(orders)
 
-	var legend := MenuKit.ink_label("●  Teammate     ○  Sensor contact     ◆  Flag", 18)
+	var objective := "◆  Flag" if game.hold_points.is_empty() else "A–C  Control points"
+	var legend := MenuKit.ink_label("●  Teammate     ○  Sensor contact     " + objective, 18)
 	legend.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(legend)
 	var footer := MenuKit.button_row(column)
@@ -107,6 +113,11 @@ func _refresh() -> void:
 		recipients.select(maxi(0, recipients.get_item_index(selected)))
 		roster = available
 	var current := "\n".join(lines) if not lines.is_empty() else "No active orders"
+	if objective_status != null:
+		var statuses: PackedStringArray = []
+		for point in game.hold_points:
+			statuses.append("%s · %s" % [point.letter, point.status()])
+		objective_status.text = "\n".join(statuses)
 	if orders.text != current:
 		orders.text = current
 	_sync_send()
@@ -226,6 +237,13 @@ class Chart extends Control:
 		for flag: Flag in game.flags.values():
 			if game.tactical_flag_visible(viewer, flag):
 				_mark(_at(flag.global_position, rect), Palette.team(flag.team))
+		for point in game.hold_points:
+			var at := _at(point.position, rect)
+			_mark(at, point.colour())
+			InkUi.centred(self, at, point.letter, InkUi.Face.BLACK, 13, InkUi.INK)
+		if game.neutral_station != null:
+			var at := _at(game.neutral_station.position, rect)
+			InkUi.centred(self, at + Vector2(0, 14), "Ammo", InkUi.Face.BOLD, 15, HoldPoint.NEUTRAL, 3)
 		if has_pick or has_focus():
 			var at := rect.position + cursor * rect.size
 			draw_line(at - Vector2(10, 0), at + Vector2(10, 0), InkUi.CREAM, 2.0)

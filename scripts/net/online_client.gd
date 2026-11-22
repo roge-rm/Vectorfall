@@ -30,7 +30,7 @@ var last_packet := 0
 func start(address: String, port: int, websocket: bool) -> Error:
 	link.received.connect(_receive)
 	link.joined.connect(func(_id: int) -> void:
-		link.send(1, MatchProtocol.encode({"kind": "join", "team": -1}), 0, true))
+		link.send(1, MatchProtocol.encode({"kind": "join", "hold": true, "team": -1}), 0, true))
 	link.left.connect(func(_id: int) -> void: _fail("Disconnected from the server."))
 	deadline = Time.get_ticks_msec() + MatchTransport.TIMEOUT_MS
 	return link.connect_to(address, port, websocket)

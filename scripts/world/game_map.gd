@@ -40,6 +40,7 @@ const ROOM_GUARD := 6.0
 const FIELD_SIZE := Vector3(3.0, 1.0, 3.0)
 ## The map main.gd loads when nothing else is asked for.
 const DEFAULT := "ochre_fold"
+const CONTROL_ARENAS: Array[String] = ["nightline_foundry", "gannet_reach"]
 const NAMES: Array[String] = [
 	"ochre_fold", "test", "saltwake_flats", "nightline_foundry", "copper_steps",
 	"caldera_relay", "gannet_reach", "white_signal", "glass_ravine", "greenfall_terraces", "beacon_wreck",
@@ -115,6 +116,14 @@ static func chosen_name(fallback := DEFAULT) -> String:
 		if args[k] == "--map":
 			return args[k + 1]
 	return fallback
+
+
+func midfield_supply() -> Vector2:
+	return Vector2.INF
+
+
+func control_sites() -> Array[Vector2]:
+	return []
 
 
 func tactical_bounds() -> Rect2:

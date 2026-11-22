@@ -131,3 +131,11 @@ func _open_water(parent: Node3D) -> void:
 	foam.material_override = Cel.material(Color.WHITE, 0.0, false, true)
 	foam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(foam)
+
+
+func midfield_supply() -> Vector2:
+	return Vector2(0, 12)
+
+
+func control_sites() -> Array[Vector2]:
+	return [Vector2(0, -148), Vector2.ZERO, Vector2(0, 118)]

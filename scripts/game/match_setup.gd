@@ -26,6 +26,8 @@ var own_skill := BotDirector.NORMAL
 var enemy_skill := BotDirector.NORMAL
 var time_limit := 1200.0
 var capture_limit := 5
+var hold := false
+var resupply := false
 
 
 ## The last choices saved, or the defaults.
@@ -44,6 +46,9 @@ static func load_saved() -> MatchSetup:
 	made.enemy_skill = clampi(file.get_value("match", "enemy_skill", made.enemy_skill), 0, top)
 	made.time_limit = clampf(file.get_value("match", "time_limit", made.time_limit), 60.0, 3600.0)
 	made.capture_limit = clampi(file.get_value("match", "capture_limit", made.capture_limit), 1, 20)
+	if made.map in GameMap.CONTROL_ARENAS:
+		made.hold = file.get_value("match", "hold", false) == true
+		made.resupply = file.get_value("match", "resupply", false) == true
 	return made
 
 
@@ -58,6 +63,8 @@ func save() -> void:
 	file.set_value("match", "enemy_skill", enemy_skill)
 	file.set_value("match", "time_limit", time_limit)
 	file.set_value("match", "capture_limit", capture_limit)
+	file.set_value("match", "hold", hold)
+	file.set_value("match", "resupply", resupply)
 	file.save(Settings.path)
 
 
@@ -71,6 +78,6 @@ func skill_levels() -> Array[int]:
 
 func duplicate() -> MatchSetup:
 	var made := MatchSetup.new()
-	for key: String in ["map", "team", "own_bots", "enemy_bots", "own_skill", "enemy_skill", "time_limit", "capture_limit"]:
+	for key: String in ["map", "team", "own_bots", "enemy_bots", "own_skill", "enemy_skill", "time_limit", "capture_limit", "hold", "resupply"]:
 		made.set(key, get(key))
 	return made

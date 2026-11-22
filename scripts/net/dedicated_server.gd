@@ -25,6 +25,8 @@ var map_name := GameMap.DEFAULT
 var teams := 8
 var minutes := 20
 var captures := 5
+var hold := false
+var resupply := false
 var game_port := MatchProtocol.GAME_PORT
 var discovery_port := MatchProtocol.DISCOVERY_PORT
 var web_port := MatchProtocol.WEB_PORT
@@ -40,6 +42,10 @@ func _ready() -> void:
 	var wanted := OS.get_environment("VECTORFALL_MAP")
 	if GameMap.NAMES.has(wanted):
 		map_name = wanted
+	hold = OS.get_environment("VECTORFALL_MODE") == "hold"
+	resupply = OS.get_environment("VECTORFALL_MIDFIELD_RESUPPLY") == "1"
+	if hold and map_name not in GameMap.CONTROL_ARENAS:
+		map_name = GameMap.CONTROL_ARENAS[0]
 	teams = _setting("TEAM_SIZE", 8, 1, MatchProtocol.MAX_TEAM_SIZE)
 	minutes = _setting("MINUTES", 20, 1, 60)
 	captures = _setting("CAPTURES", 5, 1, 20)
@@ -91,7 +97,7 @@ func _new_round() -> void:
 		pending_map = ""
 	map = GameMap.make(map_name)
 	add_child(map)
-	game = ArenaMatch.make(self, map, minutes, captures, epoch, maxi(8, teams))
+	game = ArenaMatch.make(self, map, minutes, captures, epoch, maxi(8, teams), hold, resupply)
 	game.running = false
 	director = BotDirector.new(game, map.route_graph)
 	for team in 2:
@@ -153,6 +159,10 @@ func _release(id: int) -> void:
 func _receive(id: int, packet: PackedByteArray) -> void:
 	var message := MatchProtocol.decode(packet, MatchProtocol.INPUT_MAX)
 	if message.get("kind") == "join" and waiting.has(id):
+		if hold and message.get("hold") != true:
+			_send(id, {"kind": "reject", "reason": "This match needs a client with Capture and hold."}, 0, true)
+			waiting[id] = Time.get_ticks_msec() - MatchTransport.TIMEOUT_MS + 1000
+			return
 		var team: Variant = message.get("team", -1)
 		_assign(id, team if team is int else -1)
 		return
@@ -275,6 +285,7 @@ func _watch_events() -> void:
 	game.carrier_stopped.connect(func(a: int, b: int) -> void: _event(["carrier_stopped", a, b]))
 	game.power_lost.connect(func(a: int) -> void: _event(["power_lost", a]))
 	game.power_back.connect(func(a: int) -> void: _event(["power_back", a]))
+	game.resupplied.connect(func(id: int) -> void: _event(["resupplied", id]))
 	game.station_entered.connect(func(a: int, b: int) -> void: _event(["station_entered", a, b]))
 	game.turret_fired.connect(func(a: int) -> void: _event(["turret_fired", a]))
 	game.asset_destroyed.connect(func(a: int, b: int) -> void: _event(["asset_destroyed", a, b]))
@@ -313,7 +324,8 @@ func _write_status() -> void:
 	file.store_string(JSON.stringify({"name": server_name, "map": map_name, "title": map.title,
 		"game_port": game_port, "ws_port": web_port, "players": names, "bots": director.brains.size(),
 		"slots": teams * 2, "score": game.scores, "seconds": int(ceil(game.time_left)), "round": epoch,
-		"over": game.over, "maps": GameMap.NAMES}))
+		"over": game.over, "mode": "hold" if hold else "ctf",
+		"maps": GameMap.CONTROL_ARENAS if hold else GameMap.NAMES}))
 	file.close()
 	DirAccess.rename_absolute(temporary, status_dir.path_join("status.json"))
 
@@ -327,7 +339,7 @@ func _read_control() -> void:
 		return
 	var request: Variant = JSON.parse_string(FileAccess.get_file_as_string(claimed))
 	DirAccess.remove_absolute(claimed)
-	if request is Dictionary and request.get("map") in GameMap.NAMES:
+	if request is Dictionary and request.get("map") in (GameMap.CONTROL_ARENAS if hold else GameMap.NAMES):
 		pending_map = request.map
 		_new_round()
 

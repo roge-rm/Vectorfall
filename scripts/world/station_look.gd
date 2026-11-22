@@ -17,7 +17,7 @@ const RING_OFF := Color(0.2, 0.19, 0.23)
 
 
 static func build(parent: Node3D, team: int) -> void:
-	var colour := Palette.team(team)
+	var colour := HoldPoint.NEUTRAL if team == InventoryStation.NEUTRAL else Palette.team(team)
 	var r := InventoryStation.PAD_RADIUS
 	var top := InventoryStation.PAD_TOP
 	var parts := []
@@ -57,7 +57,7 @@ static func build(parent: Node3D, team: int) -> void:
 
 ## Shows a station's look powered or not.
 static func set_powered(parent: Node3D, team: int, powered: bool) -> void:
-	var colour := Palette.team(team)
+	var colour := HoldPoint.NEUTRAL if team == InventoryStation.NEUTRAL else Palette.team(team)
 	var look := parent.get_node_or_null("Look") as MeshInstance3D
 	if look != null:
 		Cel.set_team(look, colour if powered else colour.darkened(0.6))

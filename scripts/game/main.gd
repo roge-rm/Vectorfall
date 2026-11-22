@@ -47,7 +47,9 @@ func _ready() -> void:
 	print("Map %s built in %.2f s, its route graph in %.2f s" % [map.title, map.build_seconds, map.graph_seconds])
 	var minutes := setup.time_limit / 60.0 if connection == null else float(connection.minutes)
 	var captures := setup.capture_limit if connection == null else connection.captures
-	game = ArenaMatch.make(self, map, minutes, captures)
+	var hold: bool = setup.hold if connection == null else not connection.initial.get("hold_points", []).is_empty()
+	var resupply := setup.resupply if connection == null else false
+	game = ArenaMatch.make(self, map, minutes, captures, 1, 8, hold, resupply)
 	game.match_over.connect(_on_match_over)
 	input = LocalInput.new()
 	add_child(input)

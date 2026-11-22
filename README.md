@@ -63,6 +63,14 @@ Touch the enemy flag to take it. Bring it back to your stand when your own flag 
 
 Give bots orders to go for the flag, cover you or help at the base. Turn on `Commander mode` in `Settings` to assign roles. Bots can drive and fly vehicles and repair the base.
 
+### Capture and hold
+
+When running from source, choose Nightline Foundry or Gannet Reach in `Match setup`. Set `Mode` to `Capture and hold`.
+
+Stay inside a control point for three seconds with no enemies inside to take it. Your team gets a point for every five seconds it holds. Enemies in the area stop the points. The team with the most points when time runs out wins.
+
+Turn on `Midfield ammo` to try a resupply pad on either arena. Both teams can use it. Wait 12 seconds after a refill. Step back onto the pad to use it again. Use a base station to change your loadout or replace grenades, mines and deployables.
+
 ### Team map and results
 
 When running from source, open the team map with M, the right stick button or `Map` on touch. Pick a teammate and a spot on the map, then press `Send waypoint`.

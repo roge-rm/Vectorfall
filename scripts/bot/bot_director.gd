@@ -48,6 +48,7 @@ static var threads := true
 const MAX_THREADS := 4
 
 var game: Match
+var control_counts: Array[int] = [0, 0]
 var vehicle_orders := BotVehicles.new(self)
 var graph: RouteGraph
 var planner := RoutePlanner.new()
@@ -194,6 +195,12 @@ static func skill_level(skill: float) -> int:
 ## Has both commanders hand out roles again at once, counting every soldier,
 ## people too, ignoring how long bots have been in their roles.
 func assign_roles() -> void:
+	if not game.hold_points.is_empty():
+		control_counts.fill(0)
+		for brain in brains:
+			var team := brain.soldier.team
+			brain.control_slot = control_counts[team]
+			control_counts[team] += 1
 	for team: int in [0, 1]:
 		if commanders.has(team):
 			commanders[team].think(true)

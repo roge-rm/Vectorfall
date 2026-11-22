@@ -14,6 +14,9 @@ const MAP_TITLES: Array[String] = [
 
 var setup: MatchSetup
 var _rows: VBoxContainer
+var _mode_row: Control
+var _supply_row: Control
+var _captures_row: Control
 
 
 func _init() -> void:
@@ -41,6 +44,9 @@ func close() -> void:
 
 
 func start() -> void:
+	if setup.map not in GameMap.CONTROL_ARENAS:
+		setup.hold = false
+		setup.resupply = false
 	setup.save()
 	start_pressed.emit(setup)
 
@@ -57,9 +63,20 @@ func _notification(what: int) -> void:
 		close()
 
 
-func _row(words: String, choices: Array[String], index: int, key: String, values: Array) -> void:
-	_rows.add_child(MenuKit.stepper(words, choices, index, func(k: int) -> void:
-		setup.set(key, values[k])))
+func _row(words: String, choices: Array[String], index: int, key: String, values: Array) -> Control:
+	var row := MenuKit.stepper(words, choices, index, func(k: int) -> void:
+		setup.set(key, values[k])
+		if key == "map" or key == "hold":
+			_update_mode_rows())
+	_rows.add_child(row)
+	return row
+
+
+func _update_mode_rows() -> void:
+	var supported := setup.map in GameMap.CONTROL_ARENAS
+	_mode_row.visible = supported
+	_supply_row.visible = supported
+	_captures_row.visible = not (supported and setup.hold)
 
 
 static func _numbers(top: int) -> Array[String]:
@@ -77,6 +94,8 @@ func _build() -> void:
 	for child in _rows.get_children():
 		child.free()
 	_row("Map", MAP_TITLES, maxi(GameMap.NAMES.find(setup.map), 0), "map", GameMap.NAMES)
+	_mode_row = _row("Mode", ["Capture the flag", "Capture and hold"], int(setup.hold), "hold", [false, true])
+	_supply_row = _row("Midfield ammo", ["Off", "On"], int(setup.resupply), "resupply", [false, true])
 	var teams: Array[String] = []
 	for name_of: String in Soldier.TEAM_NAMES:
 		teams.append(name_of)
@@ -96,4 +115,5 @@ func _build() -> void:
 	var captures: Array[String] = []
 	for n in MatchSetup.CAPTURE_LIMITS:
 		captures.append(str(n))
-	_row("Captures to win", captures, MenuKit.nearest(MatchSetup.CAPTURE_LIMITS, setup.capture_limit), "capture_limit", MatchSetup.CAPTURE_LIMITS)
+	_captures_row = _row("Captures to win", captures, MenuKit.nearest(MatchSetup.CAPTURE_LIMITS, setup.capture_limit), "capture_limit", MatchSetup.CAPTURE_LIMITS)
+	_update_mode_rows()

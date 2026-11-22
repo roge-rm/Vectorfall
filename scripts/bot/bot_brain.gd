@@ -19,8 +19,8 @@ extends CommandSource
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
 ## goal_target.
-enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX, DEPLOY, VEHICLE, WAYPOINT }
-const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base", "deploy", "board", "waypoint"]
+enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX, DEPLOY, VEHICLE, WAYPOINT, TAKE_POINT, HOLD_POINT, RETAKE_POINT, AMMO }
+const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base", "deploy", "board", "waypoint", "take point", "hold point", "retake point", "ammo"]
 ## OFFENCE takes out the enemy flag turret (role_target) while it works,
 ## then goes for the enemy flag and carries it, DEFENCE holds by the flag,
 ## LIGHT_DEFENCE watches the way enemies come in and chases carriers, ESCORT
@@ -145,6 +145,7 @@ var gear := BotGear.new()
 var role := Role.OFFENCE
 ## Which of its role's places it takes, such as a defence spot.
 var role_slot := 0
+var control_slot := 0
 ## Who the role is about: the soldier escorted or chased, or 0.
 var role_target := 0
 
@@ -479,7 +480,7 @@ func _steer_tick(delta: float) -> PlayerCommand:
 		_search_tick = game.tick
 		if _run_search(_search_allow):
 			_take_route()
-	if _ctf():
+	if _ctf() or not game.hold_points.is_empty():
 		_check_goal()
 	elif goal_point >= 0 and _near(director.graph.points[goal_point]):
 		_arrived()
@@ -545,7 +546,7 @@ func think() -> void:
 		if goal == Goal.POINT and _needs_route():
 			replan()
 		return
-	if _ctf():
+	if _ctf() or not game.hold_points.is_empty():
 		_think_ctf()
 		return
 	if goal == Goal.NONE:
@@ -596,7 +597,7 @@ func _think_ctf() -> void:
 	var route_done := not path.is_empty() and path_index >= path.size() - 1 and _near(director.graph.points[path[path_index]])
 	# A goal on a route graph point is reached by the route, which goes round
 	# rocks; a straight line might not.
-	var on_graph := goal_point >= 0 and director.graph.points[goal_point].distance_to(goal_target) < 3.0
+	var on_graph := goal != Goal.AMMO and goal_point >= 0 and director.graph.points[goal_point].distance_to(goal_target) < 3.0
 	# A raid keeps to the route, which goes round the asset and through ways in.
 	var want_direct := (close or route_done) and not on_graph and game.tick >= no_direct_until and goal != Goal.RAID
 	if want_direct and not direct:
@@ -617,6 +618,12 @@ func _choose_goal() -> Array:
 	var waypoint: Dictionary = game.waypoints.get(soldier.entity_id, {})
 	if not waypoint.is_empty() and game.carried_flag(soldier.entity_id) == null:
 		return [Goal.WAYPOINT, waypoint.at]
+	if role != Role.REPAIR and role != Role.GENERATOR and game.carried_flag(soldier.entity_id) == null:
+		var ammo := _ammo_detour()
+		if ammo != Vector3.INF:
+			return [Goal.AMMO, ammo]
+	if not game.hold_points.is_empty():
+		return _control_goal()
 	var next := _role_goal()
 	var kind: Goal = next[0]
 	var own: Flag = game.flags.get(soldier.team)
@@ -657,6 +664,49 @@ func _choose_goal() -> Array:
 	if mate != null and not mate.dead:
 		return [Goal.HELP, mate.at()]
 	return next
+
+
+func _control_goal() -> Array:
+	if role == Role.REPAIR:
+		var repair := _fix_goal()
+		if not repair.is_empty():
+			return repair
+	var points := game.hold_points
+	var point := points[control_slot % points.size()]
+	var crew := director.control_counts[soldier.team]
+	if crew < points.size() and (crew == 1 or control_slot > 0):
+		point = _next_control_point(point, points, crew)
+	if point.owning_team == soldier.team:
+		return [Goal.HOLD_POINT, point.spot]
+	return [Goal.TAKE_POINT if point.owning_team < 0 else Goal.RETAKE_POINT, point.spot]
+
+
+func _next_control_point(assigned: HoldPoint, points: Array[HoldPoint], crew: int) -> HoldPoint:
+	var current := assigned
+	if goal in [Goal.TAKE_POINT, Goal.HOLD_POINT, Goal.RETAKE_POINT]:
+		for point in points:
+			if point.spot == goal_target:
+				current = point
+				break
+	if not current.contested and current.owning_team != soldier.team:
+		return current
+	for offset in points.size():
+		var point := points[(crew + offset) % points.size()]
+		if point.owning_team != soldier.team and not point.contested:
+			return point
+	return current
+
+
+func _ammo_detour() -> Vector3:
+	var station := game.neutral_station
+	if station == null or station.cooldowns.has(soldier.entity_id) or combat.target_id != 0:
+		return Vector3.INF
+	if soldier.at().distance_squared_to(game.neutral_supply_at) > 55.0 * 55.0:
+		return Vector3.INF
+	for slot in soldier.weapons.size():
+		if soldier.max_ammo(slot) > 0 and soldier.ammo[slot] * 4 <= soldier.max_ammo(slot):
+			return game.neutral_supply_at
+	return Vector3.INF
 
 
 func _deploy_goal() -> Vector3:
@@ -972,6 +1022,8 @@ func _hold_range() -> float:
 			return 12.0
 		Goal.RALLY:
 			return 15.0
+		Goal.TAKE_POINT, Goal.HOLD_POINT, Goal.RETAKE_POINT:
+			return HoldPoint.RADIUS * 0.55
 		Goal.ESCORT:
 			return 10.0
 		Goal.CAPTURE:
@@ -1013,6 +1065,9 @@ func _check_goal() -> void:
 		return
 	var to := goal_target - soldier.at()
 	var near := Vector2(to.x, to.z).length() < reach and absf(to.y) < ARRIVE_HEIGHT
+	if goal in [Goal.TAKE_POINT, Goal.HOLD_POINT, Goal.RETAKE_POINT]:
+		at_goal = HoldPoint.contains(soldier.at(), goal_target, HoldPoint.RADIUS if at_goal else reach)
+		return
 	if goal == Goal.RAID and reach == RAID_RANGE:
 		# Stops short of a turret or sensor while it can shoot it.
 		var flat := Vector2(to.x, to.z).length()
@@ -1105,7 +1160,7 @@ func _needs_route() -> bool:
 func _replan() -> void:
 	_search = null
 	var graph := director.graph
-	if _ctf() and goal >= Goal.TAKE_FLAG:
+	if (_ctf() or not game.hold_points.is_empty()) and goal >= Goal.TAKE_FLAG:
 		var prof_t0 := Time.get_ticks_usec() if Prof.on else 0
 		goal_point = graph.nearest(goal_target)
 		if Prof.on:
@@ -1467,6 +1522,7 @@ func get_state() -> Dictionary:
 		"rally_tick": rally_tick,
 		"role": role,
 		"role_slot": role_slot,
+		"control_slot": control_slot,
 		"role_target": role_target,
 		"refilling": refilling,
 		"combat": combat.get_state(),
@@ -1524,6 +1580,7 @@ func set_state(state: Dictionary) -> void:
 	rally_tick = state.rally_tick
 	role = state.role
 	role_slot = state.role_slot
+	control_slot = state.get("control_slot", 0)
 	role_target = state.role_target
 	refilling = state.refilling
 	combat.set_state(state.combat)
