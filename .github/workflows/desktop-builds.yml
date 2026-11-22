@@ -29,7 +29,7 @@ jobs:
       - name: Install packaging tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git librsvg2-bin unzip zip
+          apt-get install -y --no-install-recommends ca-certificates curl file git librsvg2-bin unzip zip
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
