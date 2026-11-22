@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f3e6c8">
+<title>$GODOT_PROJECT_NAME</title>
+$GODOT_HEAD_INCLUDE
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e6c8; }
+  #canvas { display: block; border: 0; outline: none; touch-action: none; }
+  #loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; padding: 16px; text-align: center;
+    background: #f3e6c8; color: #1a1410; font: 16px/1.5 system-ui, sans-serif; }
+  #loading img { width: 96px; height: 96px; border-radius: 22px; }
+  #loading-bar { width: min(320px, 100%); height: 4px; border-radius: 2px; overflow: hidden;
+    visibility: hidden; background: #1a141024; }
+  #loading-fill { width: 0; height: 100%; background: #e0457b; }
+  #loading-amount { min-height: 1.5em; font-size: 13px; font-variant-numeric: tabular-nums; }
+</style>
+<noscript><style>#loading-text { display: none; }</style></noscript>
+</head>
+<body>
+<canvas id="canvas">This browser can't draw the game.</canvas>
+<div id="loading">
+  <img src="index.icon.png" alt="">
+  <div id="loading-text" role="status">Loading $GODOT_PROJECT_NAME…</div>
+  <noscript><span>Vectorfall needs JavaScript turned on.</span></noscript>
+  <div id="loading-bar"><div id="loading-fill"></div></div>
+  <div id="loading-amount"></div>
+</div>
+<script src="$GODOT_URL"></script>
+<script>
+  const loading = document.getElementById('loading');
+  const message = document.getElementById('loading-text');
+  const bar = document.getElementById('loading-bar');
+  const fill = document.getElementById('loading-fill');
+  const amount = document.getElementById('loading-amount');
+  const mb = bytes => (bytes / 1048576).toFixed(1);
+  const startError = 'Vectorfall could not start. Reload the page to try again.';
+
+  function fail(error, explanation) {
+    window.removeEventListener('unhandledrejection', startupRejection);
+    delete window.vectorfallShown;
+    console.error(error);
+    message.textContent = explanation;
+    bar.style.visibility = 'hidden';
+    amount.textContent = '';
+  }
+
+  function startupRejection(event) {
+    fail(event.reason, startError);
+  }
+
+  async function start() {
+    if (typeof Engine === 'undefined') {
+      fail('Engine script missing', 'Vectorfall could not load. Reload the page to try again.');
+      return;
+    }
+    if (!window.isSecureContext) {
+      fail('Insecure context', 'Open Vectorfall over HTTPS to play in your browser.');
+      return;
+    }
+    const missing = Engine.getMissingFeatures({ threads: $GODOT_THREADS_ENABLED });
+    if (missing.length || typeof WebAssembly === 'undefined') {
+      fail(missing, 'Vectorfall needs a recent browser with WebGL 2 and WebAssembly.');
+      return;
+    }
+    window.vectorfallShown = () => {
+      window.removeEventListener('unhandledrejection', startupRejection);
+      loading.remove();
+      delete window.vectorfallShown;
+    };
+    window.addEventListener('unhandledrejection', startupRejection);
+    const engine = new Engine($GODOT_CONFIG);
+    await engine.startGame({
+      onProgress(have, total) {
+        if (have <= 0 || total <= 0) return;
+        bar.style.visibility = 'visible';
+        fill.style.width = Math.min(100, 100 * have / total) + '%';
+        amount.textContent = mb(have) + ' of ' + mb(total) + ' MB';
+        if (have >= total) message.textContent = 'Starting $GODOT_PROJECT_NAME…';
+      },
+    });
+    message.textContent = 'Starting $GODOT_PROJECT_NAME…';
+  }
+
+  start().catch(error => fail(error, startError));
+</script>
+</body>
+</html>

@@ -60,6 +60,7 @@ var _generator_hit_left := 0.0
 var _end: Control
 var _end_band: MenuKit.Band
 var _end_score: Label
+var _ladder_status: Label
 var _restart_button: Button
 var _end_menu_button: Button
 var _results_button: Button
@@ -82,7 +83,7 @@ var _compass := Rect2()
 var _avoid: Array[Rect2] = []
 
 
-func _init() -> void:
+func _init(ladder_run := false) -> void:
 	name = "Hud"
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -96,12 +97,12 @@ func _init() -> void:
 	_map_button.focus_mode = Control.FOCUS_NONE
 	_map_button.hide()
 	add_child(_map_button)
-	_make_end_card()
+	_make_end_card(ladder_run)
 
 
 ## The results: a cream card titled with the winner, the score, Restart and
 ## Main menu, over the game dimmed.
-func _make_end_card() -> void:
+func _make_end_card(ladder_run: bool) -> void:
 	_end = Control.new()
 	_end.name = "MatchOver"
 	_end.visible = false
@@ -117,16 +118,27 @@ func _make_end_card() -> void:
 	_end_band = box.get_parent().get_parent().get_child(0) as MenuKit.Band
 	_end_score = MenuKit.heading("", 30)
 	box.add_child(_end_score)
+	if ladder_run:
+		_ladder_status = MenuKit.ink_label("", 15)
+		_ladder_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_ladder_status.hide()
+		box.add_child(_ladder_status)
 	_results_button = MenuKit.button("Match results", results_requested.emit, MenuKit.BUTTON_SIZE)
 	box.add_child(_results_button)
 	_restart_button = MenuKit.button("Restart (R)", restart_requested.emit, MenuKit.BUTTON_SIZE, false, true)
 	box.add_child(_restart_button)
-	_end_menu_button = MenuKit.button("Main menu", menu_requested.emit, MenuKit.BUTTON_SIZE, true)
+	var menu_title := "Bot ladder" if ladder_run else "Main menu"
+	_end_menu_button = MenuKit.button(menu_title, menu_requested.emit, MenuKit.BUTTON_SIZE, true)
 	box.add_child(_end_menu_button)
 
 
 func online_round() -> void:
 	_restart_button.hide()
+
+
+func show_ladder_clear(words: String) -> void:
+	_ladder_status.text = words
+	_ladder_status.show()
 
 
 ## Listens to a match for hits and kills.
@@ -222,11 +234,19 @@ func _on_match_over(team: int) -> void:
 	_end_band.queue_redraw()
 	_end_score.text = ("%s %d : %d %s" % [Soldier.TEAM_NAMES[0], game.scores[0], game.scores[1], Soldier.TEAM_NAMES[1]]).to_upper()
 	# Focus for a gamepad or keyboard.
-	focus_results()
+	if _ladder_status != null and _ladder_status.visible:
+		_focus_end_button.call_deferred(_end_menu_button)
+	else:
+		focus_results()
 
 
 func focus_results() -> void:
-	_results_button.grab_focus.call_deferred()
+	_focus_end_button.call_deferred(_results_button)
+
+
+func _focus_end_button(button: Button) -> void:
+	if button.is_visible_in_tree():
+		button.grab_focus()
 
 
 func _on_shield_hit(victim_id: int, _amount: float, _from: Vector3) -> void:
@@ -302,8 +322,7 @@ func _name(who: Soldier) -> String:
 		return "?"
 	if who == soldier:
 		return "You"
-	# "Bot 7" reads as "Lime 7", like the design's feed.
-	return who.display_name.replace("Bot", Soldier.TEAM_NAMES[who.team])
+	return who.display_name
 
 
 func _process(delta: float) -> void:

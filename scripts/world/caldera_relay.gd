@@ -90,3 +90,7 @@ func _relay(parent: Node3D, at: Vector2, lamps: Array) -> void:
 		_box(parent, Vector3(0.92, 7.8, 2.6), Transform3D(tilt, rib), Cel.material(RELAY_FRAME))
 		var light_at := rib + tilt * Vector3(0.0, 3.25, 0.0)
 		lamps.append([Cel.box(Vector3(1.0, 0.86, 2.68)), Transform3D(tilt, light_at), Color.WHITE])
+
+
+func control_sites() -> Array[Vector2]:
+	return [Vector2(0, -176), Vector2(0, -68), Vector2(0, 176)]

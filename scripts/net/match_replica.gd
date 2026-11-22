@@ -154,9 +154,10 @@ func _predict(command: PlayerCommand) -> void:
 
 func _names(state: Dictionary) -> void:
 	var humans: Dictionary = state.get("humans", {})
+	var bot_names: Dictionary = client.initial.get("bot_names", {})
 	for id: int in game.entities:
 		var who := game.soldier(id)
-		who.display_name = "You" if who == player else humans.get(id, "Bot %d" % id)
+		who.display_name = "You" if who == player else humans.get(id, bot_names.get(id, "Bot %d" % id))
 
 
 func _freeze_flags() -> void:

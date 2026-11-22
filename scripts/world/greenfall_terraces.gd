@@ -87,3 +87,7 @@ func _dress(parent: Node3D) -> void:
 		warning.material_override = Cel.glow(Color("e5b673"))
 		warning.position = Vector3(x + side * 2.77, bed + 10.15, channel)
 		parent.add_child(warning)
+
+
+func control_sites() -> Array[Vector2]:
+	return [Vector2(0, -97), Vector2(0, -22), Vector2(0, _spillway_z(0))]

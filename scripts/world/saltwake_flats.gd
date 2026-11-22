@@ -54,3 +54,7 @@ func _dress(parent: Node3D) -> void:
 			prop(parent, Vector2(side * (x + 13.0), 66.0), Vector3(4.0, 3.9, 14.0), Color("#a596af"), side * -0.24)
 		for z: float in [-186.0, 194.0]:
 			prop(parent, Vector2(side * 214.0, z), Vector3(6.0, 8.4, 5.3), Color("#748e9f"), side * 0.22)
+
+
+func control_sites() -> Array[Vector2]:
+	return [Vector2(0, -121), Vector2.ZERO, Vector2(0, 140)]

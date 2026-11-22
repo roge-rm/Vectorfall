@@ -34,6 +34,12 @@ const SOUND_TIME := 1.0
 const SKILLS: Array[float] = [0.0, 0.25, 0.5, 0.75, 1.0]
 const SKILL_NAMES: Array[String] = ["beginner", "easy", "normal", "hard", "expert"]
 const NORMAL := 2
+const CALLSIGNS: Array[String] = [
+	"Flint", "Slate", "Mica", "Shale", "Cinder", "Kiln", "Forge", "Tongs",
+	"Spoke", "Grit", "Brace", "Rivet", "Clutch", "Strut", "Sprocket", "Axle",
+	"Silt", "Shoal", "Brine", "Tern", "Rook", "Kestrel", "Petrel", "Skua",
+	"Relay", "Beacon", "Static", "Echo", "Sable", "Vesper", "Drift", "Switch",
+]
 ## Personalities handed out round a team, from a place picked by the seed.
 const PERSONALITY_ROUND: Array[int] = [BotBrain.Personality.DEFAULT, BotBrain.Personality.AGGRESSIVE, BotBrain.Personality.CAREFUL, BotBrain.Personality.SNIPER, BotBrain.Personality.DEFAULT, BotBrain.Personality.AGGRESSIVE, BotBrain.Personality.CAREFUL, BotBrain.Personality.DEFAULT]
 ## How far shots and blasts are heard, in metres.
@@ -57,6 +63,8 @@ var skill_levels: Array[int] = [NORMAL, NORMAL]
 ## Bots get personalities; off, they're all the default.
 var personalities := true
 var brains: Array[BotBrain] = []
+## Reserved by soldier id even while a player takes over the slot.
+var callsigns: Dictionary[int, String] = {}
 ## Recent sounds, each { seq, tick, position, source, range }. source is the
 ## shooter's id, or 0 for a blast.
 var sounds: Array[Dictionary] = []
@@ -165,7 +173,13 @@ func add_bot(team: int, spawn: Transform3D, skill := -1.0) -> BotBrain:
 	brain.think_offset = (brains.size() * 7) % THINK_TICKS
 	brain.work_parity = (brains.size() + 1) % BotBrain.WORK_TICKS
 	brain.soldier = game.add_soldier(team, spawn, brain)
-	brain.soldier.display_name = "Bot %d" % brain.soldier.entity_id
+	var id := brain.soldier.entity_id
+	var index := callsigns.size()
+	var callsign := "Bot %d" % id
+	if index < CALLSIGNS.size():
+		callsign = CALLSIGNS[(posmod(game.seed_value, CALLSIGNS.size()) + index) % CALLSIGNS.size()]
+	callsigns[id] = callsign
+	brain.soldier.display_name = callsign
 	brain.rng.seed = hash([game.seed_value, brain.soldier.entity_id])
 	brain.kit_rng.seed = hash([brain.rng.seed, "kit"])
 	brain.reset()

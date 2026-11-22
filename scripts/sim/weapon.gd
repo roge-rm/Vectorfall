@@ -255,7 +255,7 @@ static func make_all() -> Array[Weapon]:
 	list.append(mine)
 
 	# Plasma's look and sound with the turret's own numbers. Its short name
-	# reads in the kill feed as "Turret plasma Lime 3".
+	# reads in the kill feed as "Turret plasma Flint".
 	var turret := Weapon.new()
 	turret.slot = TURRET
 	turret.name = "Turret"

@@ -130,3 +130,7 @@ static func _details_view(parent: Node3D, parts: Array, material: Material) -> v
 	view.mesh = Cel.merged(parts)
 	view.material_override = material
 	parent.add_child(view)
+
+
+func control_sites() -> Array[Vector2]:
+	return [Vector2(0, -112), Vector2.ZERO, Vector2(0, 112)]

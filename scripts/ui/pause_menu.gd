@@ -14,9 +14,10 @@ var settings: SettingsScreen
 var how_to: HowToPlay
 ## Last input used, a LocalInput.Device, for the how to play tab.
 var device := 0
+var _home_focus: Control
 
 
-func _init(restart_title := "Restart") -> void:
+func _init(restart_title := "Restart", quit_title := "Quit to menu") -> void:
 	name = "PauseMenu"
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -36,7 +37,7 @@ func _init(restart_title := "Restart") -> void:
 	box.add_child(MenuKit.button("How to play", _show_how_to, 22))
 	if not restart_title.is_empty():
 		box.add_child(MenuKit.button(restart_title, restart_pressed.emit, 22))
-	box.add_child(MenuKit.button("Quit to menu", quit_pressed.emit, 22, true))
+	box.add_child(MenuKit.button(quit_title, quit_pressed.emit, 22, true))
 	settings = SettingsScreen.new()
 	settings.visible = false
 	settings.closed.connect(_show_home)
@@ -48,6 +49,7 @@ func _init(restart_title := "Restart") -> void:
 
 
 func open() -> void:
+	_home_focus = null
 	visible = true
 	_show_home()
 
@@ -61,16 +63,26 @@ func _show_home() -> void:
 	settings.visible = false
 	how_to.visible = false
 	home.visible = true
-	MenuKit.focus_first(home)
+	if _home_focus != null:
+		_home_focus.grab_focus()
+	else:
+		MenuKit.focus_first(home)
+
+
+func _hide_home() -> void:
+	var focused := get_viewport().gui_get_focus_owner()
+	if focused != null and home.is_ancestor_of(focused):
+		_home_focus = focused
+	home.visible = false
 
 
 func _show_settings() -> void:
-	home.visible = false
+	_hide_home()
 	settings.open()
 
 
 func _show_how_to() -> void:
-	home.visible = false
+	_hide_home()
 	how_to.open(device)
 
 

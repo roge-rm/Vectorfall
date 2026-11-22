@@ -8,7 +8,7 @@ Set `TEAM_SIZE=16` for a 16v16 match with up to 32 players and bots combined. Th
 
 Use the same Vectorfall build on the server and clients so their arena layouts match. In Vectorfall, choose **Online → Find LAN games** or enter the server address and UDP port. The server fills both teams with bots. A player takes over a slot on the team with fewer players, and a bot takes it back when they leave. The server starts a new round on the same arena after the results. The dashboard can start a round on another arena at once.
 
-Set `MODE=hold` for Capture and Hold. Use `MAP=nightline_foundry` or `MAP=gannet_reach`. The round runs for `MINUTES`, and the team with the most points wins. Set `MIDFIELD_RESUPPLY=1` to try the neutral ammo pad on either of those arenas in either mode.
+Set `MODE=hold` for Capture and Hold. All maps support this mode. The round runs for `MINUTES`, and the team with the most points wins. Set `MIDFIELD_RESUPPLY=1` to add the neutral ammo pad on Nightline Foundry and Gannet Reach in either mode.
 
 ## Ports
 
@@ -25,6 +25,8 @@ The default Compose file runs on x86-64 and uses Linux host networking so LAN br
 
 Install the Godot 4.7.2 Web export template and run `tools/build-web.sh` from the repo. It exports to `build/web`, which the web container serves at `/play/`. The dashboard shows **Play in browser** when the export is there. The Web preset runs without WebAssembly threads, so it does not need cross-origin isolation headers.
 
-For HTTPS, put a TLS reverse proxy in front of the dashboard and proxy `/match` to the game's WebSocket port with WebSocket upgrades enabled. Set `PUBLIC_WS` in `.env` if the public WebSocket address differs. Keep the dashboard behind HTTPS if you administer it over a network.
+A standalone export opens the main menu. A dashboard link with `?server=...` opens Online with the server address filled in.
+
+Browsers require HTTPS for play over the network. Localhost works over HTTP. Put a TLS reverse proxy in front of the dashboard and proxy `/match` to the game's WebSocket port with WebSocket upgrades enabled. Set `PUBLIC_WS` in `.env` if the public WebSocket address differs.
 
 Run `tools/check-online.sh` to check LAN discovery, native and WebSocket joins, movement, round changes and bot takeovers against a local test server.

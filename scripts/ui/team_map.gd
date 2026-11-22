@@ -174,19 +174,23 @@ class Chart extends Control:
 
 
 	func build_relief() -> void:
+		relief = ImageTexture.create_from_image(relief_image(game.arena, bounds))
+
+
+	static func relief_image(arena: GameMap, area: Rect2) -> Image:
 		var image := Image.create_empty(GRID, GRID, false, Image.FORMAT_RGB8)
-		var cell := bounds.size / float(GRID)
+		var cell := area.size / float(GRID)
 		for y in GRID:
 			for x in GRID:
-				var at := bounds.position + (Vector2(x, y) + Vector2(0.5, 0.5)) * cell
-				var height := game.arena.height_at(at.x, at.y)
-				var slope := game.arena.height_at(at.x + cell.x, at.y + cell.y) - height
+				var at := area.position + (Vector2(x, y) + Vector2(0.5, 0.5)) * cell
+				var height := arena.height_at(at.x, at.y)
+				var slope := arena.height_at(at.x + cell.x, at.y + cell.y) - height
 				var tone := clampf(0.43 + height / 360.0 - slope / 80.0, 0.12, 0.92)
 				var fill := Color("#3c3743").lerp(Color("#d6b39b"), tone)
 				if posmod(floori(height), 24) < 3:
 					fill = fill.darkened(0.14)
 				image.set_pixel(x, y, fill)
-		relief = ImageTexture.create_from_image(image)
+		return image
 
 
 	func world_ratio(at: Vector3) -> Vector2:

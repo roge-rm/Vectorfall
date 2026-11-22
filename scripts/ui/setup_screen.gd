@@ -14,7 +14,6 @@ const MAP_TITLES: Array[String] = [
 
 var setup: MatchSetup
 var _rows: VBoxContainer
-var _mode_row: Control
 var _supply_row: Control
 var _captures_row: Control
 
@@ -44,8 +43,7 @@ func close() -> void:
 
 
 func start() -> void:
-	if setup.map not in GameMap.CONTROL_ARENAS:
-		setup.hold = false
+	if setup.map not in GameMap.RESUPPLY_ARENAS:
 		setup.resupply = false
 	setup.save()
 	start_pressed.emit(setup)
@@ -73,10 +71,8 @@ func _row(words: String, choices: Array[String], index: int, key: String, values
 
 
 func _update_mode_rows() -> void:
-	var supported := setup.map in GameMap.CONTROL_ARENAS
-	_mode_row.visible = supported
-	_supply_row.visible = supported
-	_captures_row.visible = not (supported and setup.hold)
+	_supply_row.visible = setup.map in GameMap.RESUPPLY_ARENAS
+	_captures_row.visible = not setup.hold
 
 
 static func _numbers(top: int) -> Array[String]:
@@ -94,7 +90,7 @@ func _build() -> void:
 	for child in _rows.get_children():
 		child.free()
 	_row("Map", MAP_TITLES, maxi(GameMap.NAMES.find(setup.map), 0), "map", GameMap.NAMES)
-	_mode_row = _row("Mode", ["Capture the flag", "Capture and hold"], int(setup.hold), "hold", [false, true])
+	_row("Mode", ["Capture the flag", "Capture and hold"], int(setup.hold), "hold", [false, true])
 	_supply_row = _row("Midfield ammo", ["Off", "On"], int(setup.resupply), "resupply", [false, true])
 	var teams: Array[String] = []
 	for name_of: String in Soldier.TEAM_NAMES:

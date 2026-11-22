@@ -233,7 +233,7 @@ static func button_row(parent: Control) -> HBoxContainer:
 
 
 ## A scrolling list for rows, filling the space left on a screen.
-static func rows(parent: Control) -> VBoxContainer:
+static func rows(parent: Control, vertical_margin := 0) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -243,6 +243,8 @@ static func rows(parent: Control) -> VBoxContainer:
 	var room := MarginContainer.new()
 	room.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	room.add_theme_constant_override("margin_right", pxi(14))
+	room.add_theme_constant_override("margin_top", pxi(vertical_margin))
+	room.add_theme_constant_override("margin_bottom", pxi(vertical_margin))
 	scroll.add_child(room)
 	var list := VBoxContainer.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -344,6 +346,7 @@ class CoverButton:
 	var words := ""
 	var number := ""
 	var filled := false
+	var highlight_hover := true
 	var lit := false
 	var meter := -1.0
 	var arrow := 0
@@ -369,7 +372,7 @@ class CoverButton:
 		var on := filled or (toggle_mode and button_pressed)
 		var down := not toggle_mode and (mode == DRAW_PRESSED or mode == DRAW_HOVER_PRESSED)
 		var hovered := mode == DRAW_HOVER or mode == DRAW_HOVER_PRESSED
-		var inverted := on or has_focus() or hovered
+		var inverted := on or has_focus() or (highlight_hover and hovered)
 		var alpha := 0.4 if disabled else 1.0
 		var rect := Rect2(Vector2(0.0, line if down else 0.0), size)
 		if inverted:

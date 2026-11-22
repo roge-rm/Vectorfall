@@ -32,6 +32,8 @@ var loadout_screen: LoadoutScreen
 var replica: MatchReplica
 var team_map: TeamMap
 var results_board: ResultsBoard
+var ladder_round: int = BotLadder.Round.NONE
+var duo_panel: DuoPanel
 
 
 func _ready() -> void:
@@ -41,6 +43,10 @@ func _ready() -> void:
 	setup = MatchSetup.current
 	var connection := OnlineClient.active
 	var selected := GameMap.chosen_name(setup.map) if connection == null else connection.map_name
+	if connection == null and BotLadder.active in [BotLadder.Round.FLAG, BotLadder.Round.HOLD]:
+		ladder_round = BotLadder.active
+		setup = BotLadder.match_setup(ladder_round)
+		selected = setup.map
 	map = GameMap.make(selected)
 	add_child(map)
 	map.set_view_distance(Settings.view_distance)
@@ -86,7 +92,7 @@ func _ready() -> void:
 
 	var layer := CanvasLayer.new()
 	add_child(layer)
-	hud = Hud.new()
+	hud = Hud.new(ladder_round != BotLadder.Round.NONE)
 	hud.soldier = player
 	hud.watch(game)
 	hud.restart_requested.connect(restart)
@@ -135,11 +141,14 @@ func _ready() -> void:
 	results_board.closed.connect(_close_results)
 	layer.add_child(results_board)
 	hud.results_requested.connect(results_board.open)
+	if Engine.has_singleton(DuoPanel.PLUGIN):
+		duo_panel = DuoPanel.new(game, player)
 
 	var top := CanvasLayer.new()
 	top.layer = 2
 	add_child(top)
-	pause_menu = PauseMenu.new("Restart" if replica == null else "")
+	var quit_title := "Quit to ladder" if ladder_round != BotLadder.Round.NONE else "Quit to menu"
+	pause_menu = PauseMenu.new("Restart" if replica == null else "", quit_title)
 	top.add_child(pause_menu)
 	pause_menu.resumed.connect(_on_resumed)
 	pause_menu.restart_pressed.connect(restart)
@@ -213,6 +222,10 @@ func _input(event: InputEvent) -> void:
 		_close_results()
 	elif team_map.visible and (toggle or event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause")):
 		_close_team_map()
+	elif game.over and ladder_round != BotLadder.Round.NONE and event.is_action_pressed("ui_cancel"):
+		get_viewport().set_input_as_handled()
+		quit_to_menu()
+		return
 	elif toggle:
 		_open_team_map()
 	else:
@@ -252,6 +265,8 @@ func _process(delta: float) -> void:
 	if replica != null and is_instance_valid(replica.client):
 		replica.render(delta)
 		replica.events(_on_said)
+	if duo_panel != null:
+		duo_panel.update(delta)
 	# It closes once you're back to life off a station, or pushed off one.
 	if loadout_screen != null and loadout_screen.visible and (game.over or (not player.dead and game.station_under(player) == null)):
 		loadout_screen.close()
@@ -309,10 +324,12 @@ func _on_said(team: int, speaker_id: int, line: int, text: String) -> void:
 	BotVoice.play(line, speaker_id, team)
 
 
-func _on_match_over(_winner: int) -> void:
+func _on_match_over(winner: int) -> void:
 	if team_map != null and team_map.visible:
 		_close_team_map()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if ladder_round != BotLadder.Round.NONE and winner == player.team and BotLadder.record_clear(ladder_round):
+		hud.show_ladder_clear("Ladder complete" if ladder_round == BotLadder.Round.HOLD else "Capture and hold unlocked")
 
 
 ## Starts the match again from the beginning.
@@ -339,10 +356,17 @@ func _notification(what: int) -> void:
 			_close_results()
 		elif what == NOTIFICATION_WM_GO_BACK_REQUEST and team_map != null and team_map.visible:
 			_close_team_map()
+		elif what == NOTIFICATION_WM_GO_BACK_REQUEST and game != null and game.over and ladder_round != BotLadder.Round.NONE:
+			quit_to_menu()
 		elif pause_menu != null and not pause_menu.visible and not game.over:
 			pause()
 		elif what == NOTIFICATION_WM_GO_BACK_REQUEST and pause_menu != null and pause_menu.home.visible:
 			pause_menu.resume()
+
+
+func _exit_tree() -> void:
+	if duo_panel != null:
+		duo_panel.clear()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

@@ -50,6 +50,9 @@ var flag_events: Array[Dictionary] = []
 var destroyed := { "generator": 0, "turret": 0, "sensor": 0 }
 var repaired := { "generator": 0, "turret": 0, "sensor": 0 }
 var asset_events: Array[Dictionary] = []
+var generator_hits: Array[Dictionary] = []
+var runner_near_stand_seconds := [0, 0]
+var runner_with_support_seconds := [0, 0]
 var vehicle_boardings: Array[Dictionary] = []
 var vehicle_ticks := {}
 var _vehicle_report: VehicleReport
@@ -118,6 +121,7 @@ func _ready() -> void:
 		game.connect("flag_" + event, _on_flag_event.bind(event))
 	game.asset_destroyed.connect(_on_asset_event.bind("destroyed"))
 	game.asset_repaired.connect(_on_asset_event.bind("repaired"))
+	game.asset_damaged.connect(_on_asset_damaged)
 	var prepared := Time.get_ticks_usec()
 	game.prepare_terrain()
 	print("Terrain collision made for the start in %.0f ms" % ((Time.get_ticks_usec() - prepared) / 1000.0))
@@ -158,6 +162,26 @@ func _on_flag_event(team: int, soldier_id: int, event: String) -> void:
 		"speed": snappedf(s.velocity.length(), 0.1) if s != null else 0.0,
 		"near": _near_counts(s) if s != null else [0, 0],
 	})
+
+
+func _on_asset_damaged(asset_id: int, attacker_id: int, amount: float, _from: Vector3) -> void:
+	var machine := game.asset(asset_id)
+	if machine.kind == BaseAsset.Kind.GENERATOR:
+		generator_hits.append({"tick": game.tick, "team": machine.team, "attacker": attacker_id, "damage": amount})
+
+
+func _observe_runner_support() -> void:
+	for brain: BotBrain in director.brains:
+		var who := brain.soldier
+		var stand: Vector3 = game.stands[1 - who.team]
+		if not brain.is_flag_runner() or who.dead or who.vehicle_id != 0 or who.at().distance_squared_to(stand) > 60.0 * 60.0:
+			continue
+		runner_near_stand_seconds[who.team] += 1
+		for other: BotBrain in director.brains:
+			var mate := other.soldier
+			if mate != who and mate.team == who.team and not mate.dead and mate.vehicle_id == 0 and mate.at().distance_squared_to(who.at()) <= 60.0 * 60.0:
+				runner_with_support_seconds[who.team] += 1
+				break
 
 
 func _track_bots() -> void:
@@ -220,6 +244,8 @@ func _run() -> void:
 		await get_tree().physics_frame
 		if game.tick > 0:
 			_track_bots()
+			if game.tick % 60 == 0:
+				_observe_runner_support()
 			if _vehicle_report != null:
 				_vehicle_report.observe()
 		if profile:
@@ -380,6 +406,9 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		"flag_events": flag_events,
 		"carrier_deaths": carrier_deaths,
 		"generator_raids": generator_raids,
+		"generator_hits": generator_hits,
+		"runner_near_stand_seconds": runner_near_stand_seconds,
+		"runner_with_support_seconds": runner_with_support_seconds,
 		"vehicle_boardings": vehicle_boardings,
 		"vehicle_report": _vehicle_report.report() if _vehicle_report != null else {},
 		"vehicle_rider_seconds": vehicle_seconds,

@@ -43,6 +43,10 @@ export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$HOME/.android/debug.keystore"
 export GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey
 export GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android
 
+if [[ "$PRESET" == Android ]]; then
+	tools/prepare-android.sh . "$TEMPLATES"
+fi
+
 "$GODOT" --headless --path . --import > /dev/null 2>&1 || true
 "$GODOT" --headless --path . --export-debug "$PRESET" "$APK"
 ls -l "$APK"

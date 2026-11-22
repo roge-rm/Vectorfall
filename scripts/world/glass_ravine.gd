@@ -166,3 +166,7 @@ func _bridge_stub(parent: Node3D, x: float, side: float, details: Array) -> void
 
 static func _detail(parts: Array, size: Vector3, at: Vector3, colour: Color) -> void:
 	parts.append([Cel.box(size), Transform3D(Basis.IDENTITY, at), Color(colour, 0.0)])
+
+
+func control_sites() -> Array[Vector2]:
+	return [Vector2(0, -110), Vector2.ZERO, Vector2(0, 110)]

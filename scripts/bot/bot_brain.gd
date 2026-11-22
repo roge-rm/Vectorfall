@@ -632,7 +632,8 @@ func _choose_goal() -> Array:
 	var id := soldier.entity_id
 	var boss := director.commander(soldier.team)
 	if boss == null or not boss.order_locks.has(id):
-		if kind in [Goal.MIDFIELD, Goal.RALLY, Goal.TAKE_FLAG, Goal.RAID, Goal.ESCORT]:
+		var in_push := boss != null and boss.push_runner != 0 and (id == boss.push_runner or (role == Role.ESCORT and role_target == boss.push_runner))
+		if not in_push and role != Role.GENERATOR and kind in [Goal.MIDFIELD, Goal.RALLY, Goal.TAKE_FLAG, Goal.RAID, Goal.ESCORT]:
 			var delivery := director.vehicle_orders.foot_support(id)
 			if not delivery.is_empty():
 				var runner := game.soldier(delivery.target)
@@ -811,7 +812,19 @@ func _role_goal() -> Array:
 	if role == Role.ESCORT:
 		var runner := game.soldier(role_target)
 		if runner != null and not runner.dead:
+			if boss != null and role_target == boss.push_runner and not boss.order_locks.has(me):
+				if not boss.push_launched:
+					return [Goal.ESCORT, boss.push_point]
+				var stand: Vector3 = game.stands[1 - team]
+				var from := (boss.push_point - stand) * Vector3(1.0, 0.0, 1.0)
+				var forward := from.normalized()
+				var side := forward.cross(Vector3.UP) * (5.0 if role_slot % 2 == 0 else -5.0)
+				return [Goal.ESCORT, stand + forward * 10.0 + side]
 			return [Goal.ESCORT, _escort_spot(runner)]
+	if role == Role.GENERATOR:
+		var target_info := director.asset_info(role_target)
+		if not target_info.is_empty() and not target_info.destroyed and target_info.team != team:
+			return [Goal.RAID, _raid_spot(target_info)]
 	# Midfield backs off to defend when hurt, and careful light defence and
 	# escorts too. Offence keeps going, since health doesn't come back and
 	# turning round wastes the run.
@@ -826,10 +839,6 @@ func _role_goal() -> Array:
 			return [Goal.ESCORT, _escort_spot(carrier)]
 	if low:
 		return [Goal.RETREAT, _defence_spot(role_slot + 1)]
-	if role == Role.GENERATOR:
-		var target_info := director.asset_info(role_target)
-		if not target_info.is_empty() and not target_info.destroyed and target_info.team != team:
-			return [Goal.RAID, _raid_spot(target_info)]
 	if role == Role.REPAIR:
 		var fix := _fix_goal()
 		if not fix.is_empty():
@@ -838,7 +847,12 @@ func _role_goal() -> Array:
 		var at := theirs.at()
 		if theirs.mode == Flag.Mode.HOME:
 			at = game.stands[1 - team] + Vector3.DOWN * 0.5
-			if not _ready_to_attack():
+			if boss != null and me == boss.push_runner and not boss.order_locks.has(me):
+				if not boss.push_launched:
+					attacking = false
+					return [Goal.RALLY, boss.push_point]
+				attacking = true
+			elif not _ready_to_attack():
 				return [Goal.RALLY, _midfield_spot()]
 			# Their flag turret first, while it's up and powered.
 			var turret := director.asset_info(role_target)

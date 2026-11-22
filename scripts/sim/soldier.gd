@@ -10,7 +10,7 @@ extends CharacterBody3D
 const TEAM_COLOURS: Array[Color] = [Color("a0ff40"), Color("2f6bff")]
 const TEAM_NAMES: Array[String] = ["Lime", "Blue"]
 const PITCH_LIMIT := 1.45
-## Render layer for your own body, which your camera leaves out.
+## Render layer for your own body and shadow, which your camera leaves out.
 const OWN_BODY_LAYER := 2
 ## The gun's muzzle from the eye, in look space: right, down and ahead.
 const MUZZLE := Vector3(0.22, -0.2, -0.6)
@@ -257,9 +257,11 @@ func loaded(slot: int) -> bool:
 	return energy >= w.energy_per_shot if w.uses_energy() else ammo[k] > 0
 
 
-## Hides your own body from your camera.
+## Hides your own body and shadow from your camera.
 func set_first_person(on: bool) -> void:
-	body.set_render_layer(OWN_BODY_LAYER if on else 1)
+	var layer := OWN_BODY_LAYER if on else 1
+	body.set_render_layer(layer)
+	blob.layers = layer
 
 
 ## The middle of the body, where blasts push from.

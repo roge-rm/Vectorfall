@@ -40,7 +40,8 @@ const ROOM_GUARD := 6.0
 const FIELD_SIZE := Vector3(3.0, 1.0, 3.0)
 ## The map main.gd loads when nothing else is asked for.
 const DEFAULT := "ochre_fold"
-const CONTROL_ARENAS: Array[String] = ["nightline_foundry", "gannet_reach"]
+## Arenas with a neutral midfield ammo station.
+const RESUPPLY_ARENAS: Array[String] = ["nightline_foundry", "gannet_reach"]
 const NAMES: Array[String] = [
 	"ochre_fold", "test", "saltwake_flats", "nightline_foundry", "copper_steps",
 	"caldera_relay", "gannet_reach", "white_signal", "glass_ravine", "greenfall_terraces", "beacon_wreck",

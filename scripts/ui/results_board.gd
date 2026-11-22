@@ -3,12 +3,19 @@ extends Control
 
 signal closed
 
+const SCROLL_STEP := 25
+const PAD_SCROLL_DELAY := 0.3
+const PAD_SCROLL_INTERVAL := 0.07
+
 var game: Match
 var viewer: Soldier
 var rows: VBoxContainer
 var back: Button
 var scroll: ScrollContainer
 var columns: Array[int]
+var _pad_device := 0
+var _pad_direction := 0
+var _pad_repeat_left := 0.0
 
 
 func _ready() -> void:
@@ -20,10 +27,12 @@ func _ready() -> void:
 	scroll = rows.get_parent().get_parent()
 	scroll.focus_mode = FOCUS_ALL
 	scroll.gui_input.connect(_scroll_input)
+	scroll.focus_exited.connect(set_process.bind(false))
 	var footer := MenuKit.button_row(column)
 	back = MenuKit.button("Back", closed.emit, 22, true)
 	footer.add_child(back)
 	hide()
+	set_process(false)
 
 
 func open() -> void:
@@ -51,8 +60,25 @@ func open() -> void:
 func _scroll_input(event: InputEvent) -> void:
 	var direction := int(event.is_action_pressed("ui_down", true)) - int(event.is_action_pressed("ui_up", true))
 	if direction != 0:
-		scroll.scroll_vertical += direction * MenuKit.pxi(25)
+		scroll.scroll_vertical += direction * MenuKit.pxi(SCROLL_STEP)
 		scroll.accept_event()
+		# A held D-pad button does not echo like a key.
+		if event is InputEventJoypadButton and event.button_index in [JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN]:
+			_pad_device = event.device
+			_pad_direction = direction
+			_pad_repeat_left = PAD_SCROLL_DELAY
+			set_process(true)
+
+
+func _process(delta: float) -> void:
+	var button := JOY_BUTTON_DPAD_DOWN if _pad_direction > 0 else JOY_BUTTON_DPAD_UP
+	if not is_visible_in_tree() or not Input.is_joy_button_pressed(_pad_device, button):
+		set_process(false)
+		return
+	_pad_repeat_left -= delta
+	if _pad_repeat_left <= 0.0:
+		scroll.scroll_vertical += _pad_direction * MenuKit.pxi(SCROLL_STEP)
+		_pad_repeat_left = PAD_SCROLL_INTERVAL
 
 
 func _add_row(label: String, cells: Array, header := false) -> void:

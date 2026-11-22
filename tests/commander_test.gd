@@ -55,6 +55,7 @@ func _run() -> void:
 	root.add_child(map)
 	await _holds_roles()
 	await _learns_lanes()
+	await _escorts_bot_runner()
 	await _escorts_person()
 	await _person_defends()
 	await _chases_carrier()
@@ -213,6 +214,82 @@ func _learns_lanes() -> void:
 	flag.global_position = thief.global_position
 	thief.velocity = Vector3.ZERO
 	checks.check(not boss.chase_point(1, far)[1] and not boss.chase_point(2, far)[1], "a carrier waiting at home has every chaser go for it")
+	await _done(setup)
+
+
+## The foot runner stages with escorts while a separate squad raids the base.
+func _escorts_bot_runner() -> void:
+	var setup := _match(8, 0, 3, true)
+	var game: Match = setup.game
+	var director: BotDirector = setup.director
+	var boss := director.commander(0)
+	var reserved: BotBrain
+	var delivered: BotBrain
+	for brain in boss.brains():
+		if brain.is_flag_runner():
+			reserved = brain
+		elif brain.role == R.OFFENCE:
+			delivered = brain
+	checks.check(reserved != null and delivered != null, "the opening has infantry for vehicle jobs and a flag run")
+	if reserved == null or delivered == null:
+		await _done(setup)
+		return
+	var reserved_id := reserved.soldier.entity_id
+	var delivered_id := delivered.soldier.entity_id
+	director.vehicle_orders.jobs[reserved_id] = {}
+	director.vehicle_orders.delivered[delivered_id] = {}
+	boss.think(true)
+	checks.check(not reserved.is_flag_runner() and not delivered.is_flag_runner(), "ordinary runner selection leaves vehicle work in place")
+	await ticks(TeamCommander.PUSH_FIRST + 2)
+	var runner := director.brain_of(boss.push_runner)
+	var escorts: Array[BotBrain] = []
+	for brain in boss.brains():
+		if brain.role == R.ESCORT and brain.role_target == boss.push_runner:
+			escorts.append(brain)
+	checks.check(runner != null and runner.is_flag_runner() and escorts.size() == 2 and _role_count(director, 0, [R.DEFENCE]) == 1, "eight bots plan a foot runner with two escorts and a defender")
+	checks.check(reserved.role == R.OFFENCE and delivered.role == R.OFFENCE and not escorts.has(reserved) and not escorts.has(delivered), "the early push leaves pending crew and delivered ferry support in place")
+	if runner == null or escorts.is_empty():
+		await _done(setup)
+		return
+	var escort := escorts[0]
+	runner.soldier.global_position = boss.push_point + Vector3.UP
+	boss.think(true)
+	var approach_goal := runner._role_goal()
+	checks.check(not boss.push_launched and boss.push_deadline <= game.tick + TeamCommander.PUSH_WAIT and approach_goal == [BotBrain.Goal.RALLY, boss.push_point] and escort._role_goal() == [BotBrain.Goal.ESCORT, boss.push_point], "runner waits at the route approach for an escort")
+	escort.soldier.global_position = boss.push_point + Vector3(3.0, 1.0, 0.0)
+	boss.think(true)
+	var escort_goal := escort._role_goal()
+	checks.check(boss.push_launched and runner._role_goal()[0] == BotBrain.Goal.TAKE_FLAG and escort_goal[0] == BotBrain.Goal.ESCORT and escort_goal[1].distance_to(game.stands[1]) < 20.0, "arrival of an escort sends both ahead to the flag stand")
+	var reserved_at := reserved.soldier.global_position
+	var delivered_at := delivered.soldier.global_position
+	var generator := game.generator(1)
+	reserved.soldier.global_position = generator.global_position + Vector3.UP
+	delivered.soldier.global_position = generator.global_position + Vector3(1.0, 1.0, 0.0)
+	boss.next_raid = game.tick
+	boss.think(true)
+	checks.check(not boss.raiders.is_empty() and not boss.raiders.has(runner.soldier.entity_id) and not boss.raiders.has(escort.soldier.entity_id) and boss.raid_target == generator.entity_id, "separate infantry head for the generator during the push")
+	checks.check(not boss.raiders.has(reserved_id) and not boss.raiders.has(delivered_id), "the automatic raid leaves both vehicle assignments in place")
+	director.vehicle_orders.jobs.erase(reserved_id)
+	director.vehicle_orders.delivered.erase(delivered_id)
+	reserved.soldier.global_position = reserved_at
+	delivered.soldier.global_position = delivered_at
+	escort.soldier.global_position = map.spawn_point(0, 0).origin
+	boss.push_launched = false
+	boss.push_deadline = game.tick
+	boss.think(true)
+	checks.check(boss.push_launched, "the runner goes ahead after the wait expires")
+	var runner_id := runner.soldier.entity_id
+	for brain in boss.brains():
+		if brain != runner:
+			brain.soldier.dead = true
+	boss.think(true)
+	checks.check(boss.push_runner == 0 and runner.is_flag_runner(), "the last living runner stays on offence")
+	for brain in boss.brains():
+		brain.soldier.dead = false
+	boss.think(true)
+	game.waypoints[runner_id] = {"by": 0, "at": boss.push_point, "until": game.tick + Match.WAYPOINT_TICKS}
+	boss.think(true)
+	checks.check(boss.push_runner != runner_id and runner._choose_goal()[0] == BotBrain.Goal.WAYPOINT, "a team waypoint takes priority over the automatic flag run")
 	await _done(setup)
 
 

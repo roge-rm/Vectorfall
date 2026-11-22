@@ -44,8 +44,6 @@ func _ready() -> void:
 		map_name = wanted
 	hold = OS.get_environment("VECTORFALL_MODE") == "hold"
 	resupply = OS.get_environment("VECTORFALL_MIDFIELD_RESUPPLY") == "1"
-	if hold and map_name not in GameMap.CONTROL_ARENAS:
-		map_name = GameMap.CONTROL_ARENAS[0]
 	teams = _setting("TEAM_SIZE", 8, 1, MatchProtocol.MAX_TEAM_SIZE)
 	minutes = _setting("MINUTES", 20, 1, 60)
 	captures = _setting("CAPTURES", 5, 1, 20)
@@ -145,7 +143,7 @@ func _release(id: int) -> void:
 	var brain := assignments[id]
 	var who := brain.soldier
 	game.change_occupant(who)
-	who.display_name = "Bot %d" % who.entity_id
+	who.display_name = director.callsigns[who.entity_id]
 	game.sources[who.entity_id] = brain
 	brain.reset()
 	director.brains.append(brain)
@@ -256,9 +254,11 @@ func _team_snapshot(state: Dictionary, team: int) -> PackedByteArray:
 
 
 func _welcome(id: int) -> void:
+	var state := _state()
+	state["bot_names"] = director.callsigns
 	_send(id, {"kind": "welcome", "round": epoch, "map": map_name, "minutes": minutes,
 		"captures": captures, "player": assignments[id].soldier.entity_id, "name": server_name,
-		"state": _team_snapshot(_state(), assignments[id].soldier.team)}, 0, true)
+		"state": _team_snapshot(state, assignments[id].soldier.team)}, 0, true)
 
 
 func _send(id: int, message: Dictionary, channel: int, reliable := false) -> void:
@@ -325,7 +325,7 @@ func _write_status() -> void:
 		"game_port": game_port, "ws_port": web_port, "players": names, "bots": director.brains.size(),
 		"slots": teams * 2, "score": game.scores, "seconds": int(ceil(game.time_left)), "round": epoch,
 		"over": game.over, "mode": "hold" if hold else "ctf",
-		"maps": GameMap.CONTROL_ARENAS if hold else GameMap.NAMES}))
+		"maps": GameMap.NAMES}))
 	file.close()
 	DirAccess.rename_absolute(temporary, status_dir.path_join("status.json"))
 
@@ -339,7 +339,7 @@ func _read_control() -> void:
 		return
 	var request: Variant = JSON.parse_string(FileAccess.get_file_as_string(claimed))
 	DirAccess.remove_absolute(claimed)
-	if request is Dictionary and request.get("map") in (GameMap.CONTROL_ARENAS if hold else GameMap.NAMES):
+	if request is Dictionary and request.get("map") in GameMap.NAMES:
 		pending_map = request.map
 		_new_round()
 

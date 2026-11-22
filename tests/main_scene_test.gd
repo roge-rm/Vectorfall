@@ -32,6 +32,10 @@ func _run() -> void:
 	root.add_child(main)
 	await ticks(300)
 	var player: Soldier = main.player
+	var camera: FirstPersonCamera = main.camera
+	var enemy: Soldier = main.enemy
+	checks.check((camera.cull_mask & player.blob.layers) == 0 and (camera.cull_mask & enemy.blob.layers) != 0,
+		"the first-person camera hides your shadow and shows other soldiers' shadows")
 	checks.check(player.grounded, "the player is standing after five seconds")
 	var from_flag := Vector2(player.global_position.x - main.map.base_x(0), player.global_position.z).length()
 	checks.check(from_flag > 190.0 and from_flag < 215.0, "the player starts 190 to 215 m beside their flag (%.1f m)" % from_flag)

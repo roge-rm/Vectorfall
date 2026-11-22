@@ -8,7 +8,7 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	for map_name in GameMap.CONTROL_ARENAS:
+	for map_name in GameMap.NAMES:
 		var holder := Node.new()
 		root.add_child(holder)
 		var arena := GameMap.make(map_name)
@@ -17,6 +17,18 @@ func _run() -> void:
 		game.running = false
 		checks.check(game.flags.is_empty() and game.hold_points.size() == 3,
 			"%s starts with three control points and no flags" % arena.title)
+		await _check_sites(game, arena)
+		checks.check((game.neutral_station != null) == GameMap.RESUPPLY_ARENAS.has(map_name),
+			"%s only spawns an ammo pad if the map supports it" % arena.title)
+		var ctf := ArenaMatch.make(holder, arena, 5, 1)
+		ctf.running = false
+		checks.check(ctf.flags.size() == 2 and ctf.hold_points.is_empty(),
+			"%s can still play Capture the Flag" % arena.title)
+		ctf.free()
+		if map_name not in GameMap.RESUPPLY_ARENAS:
+			holder.queue_free()
+			await process_frame
+			continue
 		var director := BotDirector.new(game, arena.route_graph)
 		var lime := director.add_bot(0, arena.spawn_point(0, 0))
 		var blue := director.add_bot(1, arena.spawn_point(1, 0))
@@ -106,3 +118,33 @@ func _run() -> void:
 		holder.queue_free()
 		await process_frame
 	checks.finish(self)
+
+
+func _check_sites(game: Match, arena: GameMap) -> void:
+	if arena.terrain != null:
+		var sites := PackedVector3Array()
+		var speeds := PackedFloat32Array()
+		for point in game.hold_points:
+			sites.append(point.position)
+			speeds.append(0.0)
+		arena.terrain.keep_collision_near(sites, speeds, false)
+	await physics_frame
+	await physics_frame
+	var graph := arena.route_graph
+	var bounds := arena.tactical_bounds()
+	for point in game.hold_points:
+		var at := point.position
+		var hit := game.world_ray(at + Vector3.UP * 4.0, at + Vector3.DOWN * 2.0, Match.WORLD_LAYER)
+		var grounded: bool = not hit.is_empty() and absf(hit.position.y - at.y) < 0.1 and hit.normal.y >= 0.7
+		var target := graph.nearest(at)
+		var clear := bounds.has_point(Vector2(at.x, at.z)) and not arena.blocked_at(at.x, at.z)
+		var reachable := target >= 0 and graph.points[target].distance_to(at) < 36.0
+		for team in 2:
+			var start := graph.nearest(arena.spawn_point(team, 0).origin)
+			reachable = reachable and start >= 0 and graph.reachable(start, target)
+		checks.check(clear and grounded and reachable, "%s point %s has a clear, walkable site and bot routes from both bases" % [arena.title, point.letter])
+		for other in game.hold_points:
+			if other.letter > point.letter:
+				var separation := Vector2(other.position.x - at.x, other.position.z - at.z)
+				checks.check(separation.length() > HoldPoint.RADIUS * 2.0,
+					"%s points %s and %s have separate capture areas" % [arena.title, point.letter, other.letter])

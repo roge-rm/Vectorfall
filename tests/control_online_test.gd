@@ -23,7 +23,8 @@ func _run() -> void:
 	OS.set_environment("VECTORFALL_DISCOVERY", "0")
 	OS.set_environment("VECTORFALL_TEAM_SIZE", "1")
 	OS.set_environment("VECTORFALL_MODE", "hold")
-	OS.set_environment("VECTORFALL_MAP", "nightline_foundry")
+	var map_name := "copper_steps" if OS.get_cmdline_user_args().has("new-arena") else "nightline_foundry"
+	OS.set_environment("VECTORFALL_MAP", map_name)
 	OS.set_environment("VECTORFALL_MIDFIELD_RESUPPLY", "1")
 	OS.set_environment("VECTORFALL_STATUS_DIR", "")
 	var server: Node = load("res://scenes/server.tscn").instantiate()
@@ -48,8 +49,11 @@ func _run() -> void:
 	OnlineClient.active = native
 	var scene: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(scene)
-	checks.check(scene.game.hold_points.size() == 3 and scene.game.neutral_station != null,
-		"the normal client scene builds the points and neutral pad from the host")
+	checks.check(server.map_name == map_name and scene.map.title == server.map.title,
+		"the host and client use the requested Capture and Hold arena")
+	checks.check(scene.game.hold_points.size() == 3
+		and (scene.game.neutral_station != null) == GameMap.RESUPPLY_ARENAS.has(map_name),
+		"the normal client scene builds the host objectives and the map’s optional resupply pad")
 	var original: Match = server.game
 	var point := original.hold_points[1]
 	var lime := original.soldier(native.player_id)

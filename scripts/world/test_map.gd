@@ -202,3 +202,7 @@ func _build_props() -> void:
 		var tall := rng.randf_range(8.0, 18.0)
 		_pillar(props, Vector3(x, height_at(x, z) - 1.0 + tall * 0.5, z), 1.6, tall)
 		obstacles.append(Vector3(x, z, 1.6))
+
+
+func control_sites() -> Array[Vector2]:
+	return [Vector2(0, -60), Vector2.ZERO, Vector2(0, 72)]

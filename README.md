@@ -1,8 +1,8 @@
 # Vectorfall
 
-Vectorfall is a capture-the-flag shooter for Android and Linux. Ski down a hill, jet over the next ridge and bring the other team's flag home. Fly a gunship to cover your runner, or go in on foot and knock out the enemy generator.
+Vectorfall is a team shooter for Android, Linux and browsers. Ski down a hill, jet over the next ridge and bring the other team's flag home. Fly a gunship to cover your runner, or go in on foot and knock out the enemy generator.
 
-Two play on ten arenas, with up to eight soldiers a side locally or sixteen a side on a dedicated server. Bots can fill both teams, drive and fly vehicles, repair the base and take orders from you.
+Play Capture the Flag or Capture and Hold, with up to eight soldiers a side locally or sixteen a side on a dedicated server. Bots can fill both teams, drive and fly vehicles, repair the base and take orders from you.
 
 Let me know what works and what doesn't in the #vectorfall channel [on my discord](https://discord.gg/9Wun47jGC6), or open an issue here.
 
@@ -19,24 +19,24 @@ Dan
 
 <table>
   <tr>
-    <td align="center"><img src="docs/images/ski-run.png" width="400" alt="Approaching the jet gate in Ski Practice with the timer and speed readout" /><br>Ski Practice</td>
-    <td align="center"><img src="docs/images/bomber-and-ferry.png" width="400" alt="A Blue Cinder Kite and Morrow Ferry flying above Ochre Fold" /><br>Bomber and ferry</td>
+    <td align="center"><img src="docs/images/ski-jet.png" width="400" alt="A Lime soldier uses their jetpack on the downhill ski course" /><br>Ski Practice</td>
+    <td align="center"><img src="docs/images/flag-jet-escape.png" width="400" alt="A Lime soldier carries the Blue flag above a passing blaster bolt" /><br>White Signal flag escape</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/caldera-relay.png" width="400" alt="The two rim routes overlooking the crater floor on Caldera Relay" /><br>Caldera Relay</td>
-    <td align="center"><img src="docs/images/beacon-wreck.png" width="400" alt="Cargo bays of the wreck between the outer dunes on Beacon Wreck" /><br>Beacon Wreck</td>
+    <td align="center"><img src="docs/images/tank-ambush.png" width="400" alt="A Basalt Crawler takes a disc hit as a Blue soldier fires from across the flats" /><br>Tank ambush on Saltwake Flats</td>
+    <td align="center"><img src="docs/images/bomber-strike.png" width="400" alt="A Cinder Kite drops a bomb over the slope below the volcanic cone" /><br>Bombing run on Caldera Relay</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/greenfall-terraces.png" width="400" alt="Green hills and parallel switchbacks on Greenfall Terraces" /><br>Greenfall Terraces</td>
-    <td align="center"><img src="docs/images/copper-steps.png" width="400" alt="Red rock shelves and ramps below a flag deck on Copper Steps" /><br>Copper Steps</td>
+    <td align="center"><img src="docs/images/hold-point-contest.png" width="400" alt="A first-person fight over point B with a Blue defender beside the beacon" /><br>Contesting B on Gannet Reach</td>
+    <td align="center"><img src="docs/images/turret-defence.png" width="400" alt="A deployed Lime turret aims up as a jetting Blue soldier fires back" /><br>Turret defence on Beacon Wreck</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/armour-classes.png" width="400" alt="Lime and Blue soldiers in light, medium and heavy armour" /><br>Armour classes</td>
-    <td align="center"><img src="docs/images/ground-vehicles.png" width="400" alt="The Basalt Crawler and Tern Sled outside the Lime base" /><br>Tank and grav bike</td>
+    <td align="center"><img src="docs/images/disc-crossfire.png" width="400" alt="Two Lime soldiers exchange disc fire with Blue as an impact throws up a blast" /><br>Disc crossfire on Copper Steps</td>
+    <td align="center"><img src="docs/images/grenade-throw.png" width="400" alt="A grenade flies from a Lime heavy toward a retreating Blue soldier" /><br>Grenade throw on Glass Ravine</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/match-setup.png" width="400" alt="Match Setup with arena, team, bot skill and match limits" /><br>Match setup</td>
-    <td align="center"><img src="docs/images/loadout.png" width="400" alt="The loadout screen with armour, weapons and equipment choices" /><br>Loadout</td>
+    <td align="center"><img src="docs/images/first-person-assault.png" width="400" alt="A first-person view of the chaingun during a firefight and disc explosion" /><br>Chaingun assault on Nightline Foundry</td>
+    <td align="center"><img src="docs/images/gunship-run.png" width="400" alt="From the gunship pilot’s view, a shot travels ahead toward the valley" /><br>Needlewing attack on Ochre Fold</td>
   </tr>
 </table>
 
@@ -44,12 +44,14 @@ Dan
 
 ## Install
 
-Download the APK or Debian package from [Releases](https://github.com/roge-rm/Vectorfall/releases).
+Download the APK or Debian package from [Releases](https://github.com/roge-rm/Vectorfall/releases), or [play in your browser](https://hunke.ws/fdroid/play/vectorfall/).
 
-- Android 7.0 and up, on 32-bit or 64-bit ARM. Open `vectorfall-0.14.0.apk`. Follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
-- Debian 13 on 64-bit x86. Install `vectorfall_0.14.0_amd64.deb` with `sudo apt install ./vectorfall_0.14.0_amd64.deb` from the download folder. Open Vectorfall from the applications menu. The game needs OpenGL 3.3.
+- Android 7.0 and up, on 32-bit or 64-bit ARM. Add [my F-Droid repo](https://hunke.ws/fdroid/) or open `vectorfall-0.15.0.apk` and follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
+- Debian 13 on 64-bit x86. Add [my apt repo](https://hunke.ws/apt/) and run `sudo apt install vectorfall`, or run `sudo apt install ./vectorfall_0.15.0_amd64.deb` from the download folder. Open Vectorfall from the applications menu. The game needs OpenGL 3.3.
 
 Android supports touch, gyro aim and gamepads. Linux supports a mouse and keyboard or a gamepad.
+
+Choose Xbox or Nintendo under Gamepad layout in Settings. On the Retroid Pocket Duo, the bottom screen shows a different splash image on each launch, the live team map during a match and the results at the end of the round.
 
 ## Playing
 
@@ -65,11 +67,11 @@ Give bots orders to go for the flag, cover you or help at the base. Turn on `Com
 
 ### Capture and hold
 
-Choose Nightline Foundry or Gannet Reach in `Match setup`. Set `Mode` to `Capture and hold`.
+Choose any map in `Match setup` and set `Mode` to `Capture and hold`.
 
 Stay inside a control point for three seconds with no enemies inside to take it. Your team gets a point for every five seconds it holds. Enemies in the area stop the points. The team with the most points when time runs out wins.
 
-Turn on `Midfield ammo` to try a resupply pad on either arena. Both teams can use it. Wait 12 seconds after a refill. Step back onto the pad to use it again. Use a base station to change your loadout or replace grenades, mines and deployables.
+On Nightline Foundry and Gannet Reach, turn on `Midfield ammo` to add a resupply pad. Both teams can use it. Wait 12 seconds after a refill. Step back onto the pad to use it again. Use a base station to change your loadout or replace grenades, mines and deployables.
 
 ### Team map and results
 
@@ -118,8 +120,8 @@ Choose `Test map` in `Match setup` for a smaller arena.
 |---|---|---|---|
 | Move and look | WASD and mouse | Left and right sticks | Left stick and drag on the right |
 | Fire | Left click | Right trigger | FIRE, or drag from FIRE to aim while shooting |
-| Jump and ski | Space, hold to ski | A, hold to ski | JUMP, hold to ski |
-| Jet | Shift or right click | Left trigger or LB | JET |
+| Jump and ski | Space, hold to ski | A or LB, hold to ski | JUMP, hold to ski |
+| Jet | Shift or right click | Left trigger | JET |
 | Change weapon | 1 to 4, Q or wheel | Y or RB | Tap the weapon name |
 | Use pack or place equipment | E, or G to place | X | PACK or PLACE |
 | Grenade and mine | F and C | D-pad left and right | GREN and MINE |
@@ -130,6 +132,14 @@ Choose `Test map` in `Match setup` for a smaller arena.
 Open `Settings` to change look speed for each input, touch button size, gyro aim, aim assist or auto ski. Set the view distance, render scale and outlines there too. There are separate volume controls for effects, voices and music.
 
 ## What's new
+
+New in 0.15.0
+
+- Play Capture and Hold on any map.
+- Start with Ski Practice in the bot ladder, then unlock Capture the Flag and Capture and Hold.
+- Bots have callsigns. Flag runners get escorts and wait for them before going in.
+- Hold the left bumper to ski. Tap it to jump. Use the left trigger to jet.
+- On the Retroid Pocket Duo, the lower screen shows the team map, results and a splash shot that changes each launch.
 
 New in 0.14.0
 
@@ -152,6 +162,7 @@ Use the Godot 4.7.2 Linux editor at `tools/godot/Godot_v4.7.2-stable_linux.x86_6
 - `tools/build-linux.sh --release` exports a standalone 64-bit Linux executable.
 - `tools/package-deb.sh` builds the Debian amd64 package.
 - `tools/build-android.sh` builds a debug APK for ARM. Add `--emulator` for x86-64.
+- Run `tools/prepare-android.sh` before exporting a release with the Android preset. It installs the Gradle template and adds the native Duo panel.
 - `tools/run-tests.sh` runs the headless tests. Pass names such as `arena_map_test` or `ski_practice_test` to run selected tests.
 - `tools/bot-match.sh --map nightline_foundry --bots 8 --seed 1 --minutes 5` runs a bot match and writes the report to `build/bot-reports/`.
 

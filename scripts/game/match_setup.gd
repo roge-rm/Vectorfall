@@ -46,8 +46,8 @@ static func load_saved() -> MatchSetup:
 	made.enemy_skill = clampi(file.get_value("match", "enemy_skill", made.enemy_skill), 0, top)
 	made.time_limit = clampf(file.get_value("match", "time_limit", made.time_limit), 60.0, 3600.0)
 	made.capture_limit = clampi(file.get_value("match", "capture_limit", made.capture_limit), 1, 20)
-	if made.map in GameMap.CONTROL_ARENAS:
-		made.hold = file.get_value("match", "hold", false) == true
+	made.hold = file.get_value("match", "hold", false) == true
+	if made.map in GameMap.RESUPPLY_ARENAS:
 		made.resupply = file.get_value("match", "resupply", false) == true
 	return made
 

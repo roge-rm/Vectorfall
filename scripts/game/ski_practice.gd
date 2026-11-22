@@ -22,6 +22,9 @@ var _clock: Label
 var _energy: ProgressBar
 var _result: Control
 var _result_time: Label
+var _ladder_run := false
+var _ladder_status: Label
+var _ladder_button: Button
 
 
 class MovementInput:
@@ -37,6 +40,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 	get_tree().paused = false
 	Settings.load_file()
+	_ladder_run = BotLadder.active == BotLadder.Round.SKI
 	var file := ConfigFile.new()
 	if file.load(Settings.path) == OK:
 		best_ticks = maxi(0, int(file.get_value("practice", "best_ticks", 0)))
@@ -82,7 +86,7 @@ func _ready() -> void:
 	var top := CanvasLayer.new()
 	top.layer = 2
 	add_child(top)
-	pause_menu = PauseMenu.new("Reset run")
+	pause_menu = PauseMenu.new("Reset run", "Quit to ladder" if _ladder_run else "Quit to menu")
 	top.add_child(pause_menu)
 	pause_menu.resumed.connect(_resume)
 	pause_menu.restart_pressed.connect(reset_run)
@@ -139,8 +143,14 @@ func _build_hud(layer: CanvasLayer) -> void:
 	_result_time = MenuKit.heading("", 23)
 	_result_time.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	result.add_child(_result_time)
+	if _ladder_run:
+		_ladder_status = MenuKit.ink_label("Capture the flag unlocked", 15)
+		_ladder_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_ladder_status.hide()
+		result.add_child(_ladder_status)
 	result.add_child(MenuKit.button("Run again", reset_run, 22, false, true))
-	result.add_child(MenuKit.button("Main menu", _quit, 22, true))
+	_ladder_button = MenuKit.button("Bot ladder" if _ladder_run else "Main menu", _quit, 22, true)
+	result.add_child(_ladder_button)
 	_result.hide()
 
 
@@ -187,14 +197,14 @@ func _update_hint() -> void:
 			if input.device == LocalInput.Device.TOUCH:
 				button = "JUMP"
 			elif input.device == LocalInput.Device.GAMEPAD:
-				button = "A"
+				button = "the left bumper"
 			_hint.text = "Move forward and hold %s to ski" % button
 		Stage.CREST:
 			var button := "Shift"
 			if input.device == LocalInput.Device.TOUCH:
 				button = "JET"
 			elif input.device == LocalInput.Device.GAMEPAD:
-				button = "LT"
+				button = "the left trigger"
 			_hint.text = "Hold %s to jet over the crest" % button
 		Stage.FLAG:
 			_hint.text = "Release jet, land and touch the flag"
@@ -228,7 +238,11 @@ func _on_flag_taken(_team: int, soldier_id: int) -> void:
 	_energy.hide()
 	_result_time.text = "%s · Best %s" % [_time(elapsed_ticks), _time(best_ticks)]
 	_result.show()
-	MenuKit.focus_first(_result)
+	if _ladder_run and BotLadder.record_clear(BotLadder.Round.SKI):
+		_ladder_status.show()
+		_ladder_button.grab_focus()
+	else:
+		MenuKit.focus_first(_result)
 
 
 func reset_run() -> void:
@@ -244,6 +258,8 @@ func reset_run() -> void:
 	elapsed_ticks = 0
 	_climbed = false
 	_result.hide()
+	if _ladder_run:
+		_ladder_status.hide()
 	_energy.show()
 	_clock.text = _time(0)
 	input.held_off = false
@@ -316,9 +332,13 @@ func _notification(what: int) -> void:
 		_pause()
 
 
+func _input(event: InputEvent) -> void:
+	if _ladder_run and stage == Stage.FINISHED and event.is_action_pressed("ui_cancel"):
+		get_viewport().set_input_as_handled()
+		_quit()
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	var key := event as InputEventKey
-	var pad := event as InputEventJoypadButton
-	if (key != null and key.pressed and not key.echo and key.physical_keycode == KEY_R) or (pad != null and pad.pressed and pad.button_index == JOY_BUTTON_Y):
+	if event.is_action_pressed("practice_reset"):
 		get_viewport().set_input_as_handled()
 		reset_run()

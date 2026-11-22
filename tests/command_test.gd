@@ -30,7 +30,9 @@ func _run() -> void:
 	var kinds := {}
 	for event in InputMap.action_get_events("jet"):
 		kinds[event.get_class()] = true
-	checks.check(kinds.size() == 4, "jet is on the mouse, keyboard, gamepad trigger and shoulder")
+	checks.check(kinds.size() == 3 and kinds.has("InputEventMouseButton")
+		and kinds.has("InputEventKey") and kinds.has("InputEventJoypadMotion"),
+		"jet is on the mouse, keyboard and gamepad trigger")
 
 	var command := PlayerCommand.new()
 	command.move = Vector2(0.5, -0.25)

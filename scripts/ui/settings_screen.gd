@@ -88,6 +88,7 @@ func _build() -> void:
 	_choice("Look speed, touch", "look_touch", Settings.LOOK_SPEEDS, looks)
 	_choice("Look speed, mouse", "look_mouse", Settings.LOOK_SPEEDS, looks)
 	_choice("Look speed, gamepad", "look_pad", Settings.LOOK_SPEEDS, looks)
+	_choice("Gamepad layout", "pad_layout", [Settings.PadLayout.XBOX, Settings.PadLayout.NINTENDO], ["Xbox", "Nintendo"])
 	_toggle("Invert look", "invert_look")
 	_choice("Touch controls size", "touch_size", Settings.TOUCH_SIZES, MenuKit.percents(Settings.TOUCH_SIZES))
 	_choice("Jet", "touch_scheme", [0, 1], ["Button", "Stick and button"])

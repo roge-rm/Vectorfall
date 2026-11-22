@@ -15,6 +15,26 @@ const TOUCH_SIZES: Array[float] = [0.8, 0.9, 1.0, 1.15, 1.3]
 ## Gyro aim speeds, times the phone's own turn, with 0 for off.
 const GYRO_SPEEDS: Array[float] = [0.0, 0.5, 1.0, 1.5, 2.0]
 
+enum PadLayout { XBOX, NINTENDO }
+
+const FACE_ACTIONS: Array[StringName] = [
+	&"ui_accept", &"ui_cancel", &"jump", &"ski", &"board", &"use", &"next_weapon", &"practice_reset",
+]
+## Godot numbers face buttons by their position.
+const NINTENDO_BUTTONS := {
+	JOY_BUTTON_A: JOY_BUTTON_B, JOY_BUTTON_B: JOY_BUTTON_A,
+	JOY_BUTTON_X: JOY_BUTTON_Y, JOY_BUTTON_Y: JOY_BUTTON_X,
+}
+const RETROID_LETTERED_BUTTONS: Array[int] = [1, 0, 3, 2]
+const RETROID_POSITIONAL_BUTTONS: Array[int] = [0, 1, 2, 3]
+const RETROID_ANDROID_GUID := "526574726f696420506f636b65742043"
+## Keep the Retroid mapping's other bindings when normalising its face buttons.
+const RETROID_ANDROID_MAPPING := (
+	RETROID_ANDROID_GUID + ",Retroid Pocket,a:b%d,b:b%d,back:b4,dpdown:b12,dpleft:b13,dpright:b14,dpup:b11,"
+	+ "leftshoulder:b9,leftstick:b7,lefttrigger:a5,leftx:a0,lefty:a1,paddle1:b17,paddle2:b18,"
+	+ "rightshoulder:b10,rightstick:b8,righttrigger:a4,rightx:a2,righty:a3,start:b6,x:b%d,y:b%d,platform:Android,"
+)
+
 ## Graphics a slow device starts with, until the player picks their own.
 const WEAK_VIEW_DISTANCE := 900.0
 const WEAK_RENDER_SCALE := 0.5
@@ -30,6 +50,8 @@ static var render_scale := WEAK_RENDER_SCALE if weak_device() else 1.0
 static var look_touch := 1.0
 static var look_mouse := 1.0
 static var look_pad := 1.0
+static var pad_layout := PadLayout.XBOX
+static var _retroid_face_buttons: Array[int] = []
 static var invert_look := false
 ## Size of the touch controls, times the normal size.
 static var touch_size := 1.0
@@ -106,6 +128,7 @@ static func reset() -> void:
 	look_touch = 1.0
 	look_mouse = 1.0
 	look_pad = 1.0
+	pad_layout = PadLayout.XBOX
 	invert_look = false
 	touch_size = 1.0
 	touch_scheme = 0
@@ -138,6 +161,8 @@ static func value(setting: String) -> Variant:
 			return look_mouse
 		"look_pad":
 			return look_pad
+		"pad_layout":
+			return pad_layout
 		"invert_look":
 			return invert_look
 		"touch_size":
@@ -179,6 +204,8 @@ static func set_value(setting: String, to: Variant) -> void:
 			look_mouse = to
 		"look_pad":
 			look_pad = to
+		"pad_layout":
+			pad_layout = PadLayout.NINTENDO if to is int and to == PadLayout.NINTENDO else PadLayout.XBOX
 		"invert_look":
 			invert_look = to
 		"touch_size":
@@ -205,6 +232,7 @@ static func set_value(setting: String, to: Variant) -> void:
 
 static func load_file() -> void:
 	var file := ConfigFile.new()
+	pad_layout = PadLayout.XBOX
 	if file.load(path) == OK:
 		outlines = file.get_value("graphics", "outlines", outlines)
 		hatching = file.get_value("graphics", "hatching", hatching)
@@ -213,6 +241,7 @@ static func load_file() -> void:
 		look_touch = clampf(file.get_value("controls", "look_touch", look_touch), 0.1, 5.0)
 		look_mouse = clampf(file.get_value("controls", "look_mouse", look_mouse), 0.1, 5.0)
 		look_pad = clampf(file.get_value("controls", "look_pad", look_pad), 0.1, 5.0)
+		set_value("pad_layout", file.get_value("controls", "pad_layout", PadLayout.XBOX))
 		invert_look = file.get_value("controls", "invert_look", invert_look)
 		touch_size = clampf(file.get_value("controls", "touch_size", touch_size), 0.5, 2.0)
 		touch_scheme = clampi(file.get_value("controls", "touch_scheme", touch_scheme), 0, 1)
@@ -242,6 +271,7 @@ static func save_file() -> void:
 	file.set_value("controls", "look_touch", look_touch)
 	file.set_value("controls", "look_mouse", look_mouse)
 	file.set_value("controls", "look_pad", look_pad)
+	file.set_value("controls", "pad_layout", pad_layout)
 	file.set_value("controls", "invert_look", invert_look)
 	file.set_value("controls", "touch_size", touch_size)
 	file.set_value("controls", "touch_scheme", touch_scheme)
@@ -260,7 +290,7 @@ static func save_file() -> void:
 
 
 ## Sets what doesn't belong to a match: outlines, hatching, render scale and
-## the sound volumes.
+## the sound volumes, and the gamepad bindings.
 static func apply() -> void:
 	Cel.set_outlines(outlines)
 	Cel.set_hatching(hatching)
@@ -271,6 +301,33 @@ static func apply() -> void:
 		# MSAA with a scaled 3D buffer leaks memory every frame on Android GLES3.
 		tree.root.msaa_3d = Viewport.MSAA_2X if render_scale >= 1.0 else Viewport.MSAA_DISABLED
 	Sound.set_volumes(sound_volume, voice_volume, music_volume)
+	_apply_pad_layout()
+
+
+static func _apply_pad_layout() -> void:
+	if Engine.has_singleton(DuoPanel.PLUGIN):
+		var native := Engine.get_singleton(DuoPanel.PLUGIN)
+		if native.call(&"isDuo"):
+			var buttons := RETROID_LETTERED_BUTTONS if native.call(&"usesLetteredGamepad") else RETROID_POSITIONAL_BUTTONS
+			if buttons != _retroid_face_buttons:
+				# Godot uses the first mapping for a GUID on reconnect.
+				Input.remove_joy_mapping(RETROID_ANDROID_GUID)
+				Input.add_joy_mapping(RETROID_ANDROID_MAPPING % buttons, true)
+				_retroid_face_buttons = buttons
+	for action in FACE_ACTIONS:
+		var defaults: Dictionary = ProjectSettings.get_setting("input/" + String(action))
+		for event: InputEvent in defaults.events:
+			var xbox := event as InputEventJoypadButton
+			if xbox == null or not NINTENDO_BUTTONS.has(xbox.button_index):
+				continue
+			var nintendo := xbox.duplicate() as InputEventJoypadButton
+			nintendo.button_index = NINTENDO_BUTTONS[xbox.button_index]
+			var chosen := nintendo if pad_layout == PadLayout.NINTENDO else xbox
+			var other := xbox if pad_layout == PadLayout.NINTENDO else nintendo
+			if InputMap.action_has_event(action, other):
+				InputMap.action_erase_event(action, other)
+			if not InputMap.action_has_event(action, chosen):
+				InputMap.action_add_event(action, chosen)
 
 
 static func set_outlines(on: bool) -> void:

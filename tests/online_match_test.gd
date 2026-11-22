@@ -68,6 +68,13 @@ func _run() -> void:
 		"native and WebSocket clients fill distinct slots in the same 16v16 match")
 	checks.check(main.bots == null and not main.game.running and main.player.entity_id == native.player_id,
 		"the normal scene uses the server snapshot without simulating a second match")
+	var callsigns: Dictionary = native.initial.get("bot_names", {})
+	var names := callsigns.values()
+	names.sort()
+	var expected := BotDirector.CALLSIGNS.duplicate()
+	expected.sort()
+	checks.check(names == expected and callsigns == web.initial.get("bot_names", {}),
+		"both transports receive all 32 distinct callsigns for the round")
 
 	var before: Vector3 = main.player.position
 	Input.action_press("move_forward")
@@ -79,6 +86,10 @@ func _run() -> void:
 		"movement is predicted and acknowledged")
 	checks.check(not server_view.is_empty() and server_view.position.distance_to(before) > 3.0,
 		"the other client receives the authoritative movement")
+	var web_soldier: Soldier = main.game.soldier(web.player_id)
+	checks.check(main.player.display_name == "You" and web_soldier.display_name.begins_with("Player ")
+		and web_soldier.display_name == native.latest.get("humans", {}).get(web.player_id),
+		"human players take over the reserved callsigns with their own labels")
 	var old_tick: int = main.game.tick
 	main.pause()
 	for index in 30:
@@ -114,6 +125,7 @@ func _run() -> void:
 	checks.check(native.round_id > first_round and web.round_id == native.round_id and current_scene.get_instance_id() != scene_id,
 		"a new round reloads the match and keeps both connections")
 	var dropped_id := web.player_id
+	var restored_name: String = native.initial.get("bot_names", {}).get(dropped_id, "")
 	web.stop()
 	web = null
 	for index in 150:
@@ -122,6 +134,9 @@ func _run() -> void:
 		await physics_frame
 	checks.check(not native.latest.humans.has(dropped_id) and native.latest.entities.has(dropped_id),
 		"leaving hands the same soldier back to a bot")
+	await process_frame
+	checks.check(not restored_name.is_empty() and current_scene.game.soldier(dropped_id).display_name == restored_name,
+		"the bot gets its reserved callsign back in the client")
 	await _check_capacity(game_port, web_port)
 	_finish()
 

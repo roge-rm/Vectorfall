@@ -92,9 +92,80 @@ func _settings_row() -> void:
 	row = _row(screen, "Aim assist")
 	row.get_meta("step").call(1)
 	checks.check(Settings.aim_assist == 2, "the Aim assist row steps up to High")
+	_pad_layout(screen)
 	screen._reset()
 	checks.check(not Settings.invert_look and Settings.view_distance == 1200.0 and root.scaling_3d_scale == 1.0, "Defaults puts everything back and applies it")
+	checks.check(Settings.pad_layout == Settings.PadLayout.XBOX and _face_bindings(JOY_BUTTON_A, JOY_BUTTON_B, JOY_BUTTON_X, JOY_BUTTON_Y),
+		"Defaults restores the Xbox face buttons")
 	screen.free()
+
+
+func _pad_layout(screen: SettingsScreen) -> void:
+	var file := ConfigFile.new()
+	file.load(TEST_FILE)
+	file.erase_section_key("controls", "pad_layout")
+	file.save(TEST_FILE)
+	Settings.load_file()
+	checks.check(Settings.pad_layout == Settings.PadLayout.XBOX and _face_bindings(JOY_BUTTON_A, JOY_BUTTON_B, JOY_BUTTON_X, JOY_BUTTON_Y),
+		"settings saved before gamepad layouts still use the Xbox face buttons")
+	_row(screen, "Gamepad layout").get_meta("step").call(1)
+	file.load(TEST_FILE)
+	checks.check(file.get_value("controls", "pad_layout") == Settings.PadLayout.NINTENDO and _face_bindings(JOY_BUTTON_B, JOY_BUTTON_A, JOY_BUTTON_Y, JOY_BUTTON_X),
+		"the Gamepad layout row saves and applies Nintendo face buttons to menus and play")
+	var south := InputEventJoypadButton.new()
+	south.button_index = JOY_BUTTON_A
+	south.pressed = true
+	var east := south.duplicate() as InputEventJoypadButton
+	east.button_index = JOY_BUTTON_B
+	checks.check(east.is_action_pressed("ui_accept") and not east.is_action_pressed("ui_cancel")
+		and south.is_action_pressed("ui_cancel") and not south.is_action_pressed("ui_accept"),
+		"Nintendo A accepts on the right and B cancels at the bottom")
+	var bumper := south.duplicate() as InputEventJoypadButton
+	bumper.button_index = JOY_BUTTON_LEFT_SHOULDER
+	var trigger := InputEventJoypadMotion.new()
+	trigger.axis = JOY_AXIS_TRIGGER_LEFT
+	trigger.axis_value = 1.0
+	checks.check(bumper.is_action_pressed("ski") and not bumper.is_action_pressed("jet")
+		and bumper.is_action_pressed("jump") and trigger.is_action_pressed("jet")
+		and east.is_action_pressed("jump") and east.is_action_pressed("ski")
+		and not south.is_action_pressed("ski"),
+		"left bumper and Nintendo A both jump and ski, and left trigger jets")
+	var enter := InputEventKey.new()
+	enter.keycode = KEY_ENTER
+	enter.pressed = true
+	var reset_key := InputEventKey.new()
+	reset_key.physical_keycode = KEY_R
+	reset_key.pressed = true
+	var shoulder := south.duplicate() as InputEventJoypadButton
+	shoulder.button_index = JOY_BUTTON_RIGHT_SHOULDER
+	checks.check(enter.is_action_pressed("ui_accept") and reset_key.is_action_pressed("practice_reset") and shoulder.is_action_pressed("next_weapon"),
+		"changing gamepad layout leaves keyboard and shoulder bindings in place")
+	Settings.reset()
+	Settings.load_file()
+	Settings.apply()
+	checks.check(Settings.pad_layout == Settings.PadLayout.NINTENDO and _face_bindings(JOY_BUTTON_B, JOY_BUTTON_A, JOY_BUTTON_Y, JOY_BUTTON_X),
+		"loading reapplies the saved layout without duplicating bindings")
+
+
+func _face_bindings(a: JoyButton, b: JoyButton, x: JoyButton, y: JoyButton) -> bool:
+	return (
+		_only_face_button(a, [&"ui_accept", &"jump", &"ski"])
+		and _only_face_button(b, [&"ui_cancel", &"board"])
+		and _only_face_button(x, [&"use"])
+		and _only_face_button(y, [&"next_weapon", &"practice_reset"])
+	)
+
+
+func _only_face_button(button: JoyButton, actions: Array[StringName]) -> bool:
+	for action in actions:
+		var found: Array[JoyButton] = []
+		for event in InputMap.action_get_events(action):
+			var pad := event as InputEventJoypadButton
+			if pad != null and pad.button_index in Settings.NINTENDO_BUTTONS:
+				found.append(pad.button_index)
+		if found != [button]:
+			return false
+	return true
 
 
 func _row(screen: Node, words: String) -> HBoxContainer:
@@ -116,6 +187,15 @@ func _menu() -> void:
 	_row(menu.setup_screen, "Bots on their team").get_meta("step").call(-1)
 	_row(menu.setup_screen, "Your team").get_meta("step").call(1)
 	_row(menu.setup_screen, "Map").get_meta("step").call(1)
+	var mode := _row(menu.setup_screen, "Mode")
+	var captures := _row(menu.setup_screen, "Captures to win")
+	mode.get_meta("step").call(1)
+	checks.check(mode.visible and setup.hold and not captures.visible, "Test map can select Capture and Hold")
+	var hold_setup := setup.duplicate()
+	hold_setup.save()
+	checks.check(MatchSetup.load_saved().hold, "the selected mode reloads on Test map")
+	mode.get_meta("step").call(-1)
+	checks.check(not setup.hold and captures.visible, "switching back to Capture the Flag shows the capture limit")
 	var started: Array[MatchSetup] = []
 	menu.setup_screen.start_pressed.connect(func(chosen: MatchSetup) -> void: started.append(chosen))
 	menu.setup_screen.start()
@@ -134,6 +214,30 @@ func _menu() -> void:
 	menu.show_home()
 	checks.check(menu.home.footnote == "Test map · 8 against 7 · bots", "the cover's footnote shows the chosen map and teams (%s)" % menu.home.footnote)
 	checks.check(menu.get_viewport().gui_get_focus_owner() == menu.home.buttons[0], "Play has the focus on the home screen")
+	var play := menu.home.buttons[0]
+	var ladder := menu.home.buttons[1]
+	var down := InputEventJoypadButton.new()
+	down.button_index = JOY_BUTTON_DPAD_DOWN
+	down.pressed = true
+	root.push_input(down)
+	down.pressed = false
+	root.push_input(down)
+	checks.check(ladder.has_focus() and not play.has_focus() and not play.filled and not play.highlight_hover,
+		"moving down with the controller moves the highlight off Play")
+	var accept := InputEventJoypadButton.new()
+	accept.button_index = JOY_BUTTON_A
+	accept.pressed = true
+	root.push_input(accept)
+	accept.pressed = false
+	root.push_input(accept)
+	checks.check(menu.ladder.visible and not menu.home.visible, "controller confirm opens Bot ladder")
+	var back := InputEventJoypadButton.new()
+	back.button_index = JOY_BUTTON_B
+	back.pressed = true
+	root.push_input(back)
+	back.pressed = false
+	root.push_input(back)
+	checks.check(menu.home.visible and ladder.has_focus(), "controller Back restores focus to Bot ladder")
 	menu.free()
 
 
@@ -211,6 +315,14 @@ func _match() -> void:
 	checks.check(paused and main.pause_menu.visible, "pause opens the pause menu and pauses the tree")
 	checks.check(game.tick == tick, "the sim doesn't tick while paused (%d to %d)" % [tick, game.tick])
 	checks.check(main.audio._clock == audio_clock, "the sound clock stops while paused")
+	var pause_menu: PauseMenu = main.pause_menu
+	var resume_button := root.gui_get_focus_owner()
+	var settings_button := resume_button.find_next_valid_focus() as MenuKit.CoverButton
+	settings_button.grab_focus()
+	settings_button.pressed.emit()
+	pause_menu.settings.close()
+	checks.check(pause_menu.home.visible and settings_button.has_focus() and settings_button.words == "SETTINGS",
+		"closing pause settings restores focus to Settings")
 	Settings.view_distance = 600.0
 	Settings.touch_size = 0.8
 	main.pause_menu.settings.changed.emit()

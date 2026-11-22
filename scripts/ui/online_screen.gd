@@ -37,7 +37,7 @@ func _ready() -> void:
 	address.add_theme_color_override("caret_color", InkUi.INK)
 	address.max_length = 256
 	address.placeholder_text = "Server address or WebSocket URL"
-	address.text = _default_address()
+	address.text = linked_server()
 	address.text_submitted.connect(func(_text: String) -> void: _join())
 	box.add_child(address)
 	port = SpinBox.new()
@@ -60,12 +60,11 @@ func _ready() -> void:
 	box.add_child(MenuKit.button("Back", _back, MenuKit.BUTTON_SIZE))
 
 
-func _default_address() -> String:
+static func linked_server() -> String:
 	if not OS.has_feature("web"):
 		return ""
 	return str(JavaScriptBridge.eval(
-		"new URLSearchParams(location.search).get('server') || " +
-		"(location.protocol === 'https:' ? 'wss://' + location.host + '/match' : 'ws://' + location.hostname + ':27302')"))
+		"new URLSearchParams(location.search).get('server') || ''")).strip_edges()
 
 
 func open() -> void:

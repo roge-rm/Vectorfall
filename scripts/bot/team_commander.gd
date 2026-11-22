@@ -77,6 +77,14 @@ const RAID_TIME := 150.0
 const RAID_GAP := 45.0
 const RAID_SIZE := 2
 const RAID_TEAM := 5
+## A flag run sets out from an approach point with an escort, or after the wait
+## runs out. Distances are in metres and deadlines in simulation ticks.
+const PUSH_TEAM := 5
+const PUSH_NEAR := 24.0
+const PUSH_STANDOFF := BaseAsset.TURRET_RANGE + PUSH_NEAR
+const PUSH_FIRST := 5 * 60
+const PUSH_TRAVEL := 100 * 60
+const PUSH_WAIT := 9 * 60
 ## A repair bot gives up on an asset after REPAIR_TIME seconds. Picking one,
 ## metres added for a bot that has to respawn first or go by a station.
 const REPAIR_TIME := 90.0
@@ -138,6 +146,10 @@ var _history_tick := -1000000
 var order_locks := {}
 ## Offence goes for their flag without waiting for the others until this tick.
 var urgent_until := -1
+var push_runner := 0
+var push_point := Vector3.INF
+var push_deadline := -1
+var push_launched := false
 ## Lines said: the last report's tick, the tick each line and subject was last
 ## said, and the last CHAT_KEPT as { seconds, speaker, line, text }.
 var report_tick := -1000000
@@ -505,6 +517,8 @@ func _fitness(brain: BotBrain, role: int) -> float:
 			return penalty + at.distance_to(own.at())
 		BotBrain.Role.ESCORT:
 			var runner := escort_target()
+			if runner != 0 and runner == push_runner:
+				return penalty + at.distance_to(push_point)
 			return penalty + (at.distance_to(game.soldier(runner).at()) if runner != 0 else 0.0)
 		BotBrain.Role.OFFENCE:
 			return penalty + at.distance_to(game.stands[1 - team])
@@ -529,8 +543,8 @@ func _leaning(brain: BotBrain, role: int) -> float:
 	return 0.0
 
 
-## Who escorts go with: our carrier, or else a person heading for their flag,
-## or 0.
+## Who escorts go with: our carrier, a person heading for their flag or the
+## bot making the run.
 func escort_target() -> int:
 	var theirs: Flag = game.flags.get(1 - team)
 	if theirs != null and theirs.mode == Flag.Mode.CARRIED:
@@ -540,7 +554,99 @@ func escort_target() -> int:
 	for id: int in ids:
 		if people[id].role == BotBrain.Role.OFFENCE and not game.soldier(id).dead:
 			return id
-	return 0
+	return push_runner
+
+
+func _plan_push(team_brains: Array[BotBrain], situation: Dictionary, offence: int, size: int) -> int:
+	var theirs: Flag = game.flags.get(1 - team)
+	var own: Flag = game.flags.get(team)
+	var can_push := theirs != null and theirs.mode == Flag.Mode.HOME and own != null and own.mode == Flag.Mode.HOME
+	if not can_push or size < PUSH_TEAM or offence <= 2 or situation.get("runner", false) or game.tick < PUSH_FIRST:
+		push_runner = 0
+		return 0
+	var eligible := 0
+	for brain in team_brains:
+		if brain.role not in [BotBrain.Role.DEFENCE, BotBrain.Role.CHASE] and _push_escort_available(brain):
+			eligible += 1
+	var escort_count := mini(2 if size >= 8 else 1, mini(offence - 2, eligible - 1))
+	if escort_count <= 0:
+		push_runner = 0
+		return 0
+	var runner := director.brain_of(push_runner)
+	if not _push_candidate(runner):
+		runner = null
+		var stand: Vector3 = game.stands[1 - team]
+		var best := INF
+		for brain in team_brains:
+			if not _push_candidate(brain):
+				continue
+			var cost := brain.soldier.at().distance_to(stand)
+			if brain.is_flag_runner():
+				cost -= 35.0
+			if cost < best:
+				runner = brain
+				best = cost
+		if runner == null:
+			push_runner = 0
+			return 0
+		push_runner = runner.soldier.entity_id
+		var at := runner.soldier.at()
+		var approaches := director.graph.interest_points(RouteGraph.FLAG_APPROACH, 1 - team)
+		push_point = Vector3.INF
+		best = INF
+		for point in approaches:
+			var where := director.graph.points[point]
+			var cost := at.distance_to(where) + where.distance_to(stand)
+			if cost < best:
+				push_point = where
+				best = cost
+		if push_point == Vector3.INF:
+			push_runner = 0
+			return 0
+		# Some approach points are inside the flag turret's range.
+		var turret := game.asset(_flag_turret())
+		if turret != null and push_point.distance_to(turret.global_position) < PUSH_STANDOFF:
+			var back := (push_point - stand) * Vector3(1.0, 0.0, 1.0)
+			var farther := push_point + back.normalized() * 35.0
+			var point := director.graph.nearest(farther)
+			if point >= 0 and director.graph.points[point].distance_to(turret.global_position) >= PUSH_STANDOFF:
+				push_point = director.graph.points[point]
+		push_deadline = game.tick + PUSH_TRAVEL
+		push_launched = at.distance_to(stand) < 45.0
+		_decide("%s heads for the flag approach" % runner.soldier.display_name)
+	if not push_launched:
+		var near := runner.soldier.at().distance_squared_to(push_point) <= PUSH_NEAR * PUSH_NEAR
+		var supported := false
+		if near:
+			push_deadline = mini(push_deadline, game.tick + PUSH_WAIT)
+			for brain in team_brains:
+				if brain.role != BotBrain.Role.ESCORT or brain.role_target != push_runner or not _push_escort_available(brain):
+					continue
+				if brain.soldier.at().distance_squared_to(push_point) <= PUSH_NEAR * PUSH_NEAR:
+					supported = true
+					break
+		if supported or game.tick >= push_deadline or attack_now():
+			push_launched = true
+			_decide("%s goes for the flag%s" % [runner.soldier.display_name, " with an escort" if supported else ""])
+	return escort_count
+
+
+func _push_candidate(brain: BotBrain) -> bool:
+	return brain != null and brain.role == BotBrain.Role.OFFENCE and _push_escort_available(brain)
+
+
+func _push_escort_available(brain: BotBrain) -> bool:
+	var s := brain.soldier
+	var id := s.entity_id
+	return (
+		not s.dead and s.vehicle_id == 0 and not _has_vehicle_work(id)
+		and not order_locks.has(id) and not game.waypoints.has(id) and not raiders.has(id) and not repairers.has(id)
+	)
+
+
+func _has_vehicle_work(id: int) -> bool:
+	var vehicles := director.vehicle_orders
+	return vehicles.jobs.has(id) or vehicles.delivered.has(id)
 
 
 ## Hands out roles to the bots: works out the team's counts, takes off what
@@ -590,6 +696,15 @@ func _assign(force: bool) -> void:
 		if not lock.is_empty() and not next.has(brain):
 			next[brain] = lock.role
 			want[lock.role] = maxi(want[lock.role] - 1, 0)
+	var free_offence := mini(want[BotBrain.Role.OFFENCE], team_brains.size() - next.size())
+	var escorts := _plan_push(team_brains, situation, free_offence, size) if not game.flags.is_empty() else 0
+	if escorts > 0:
+		wants[BotBrain.Role.OFFENCE] -= escorts
+		wants[BotBrain.Role.ESCORT] += escorts
+		want[BotBrain.Role.OFFENCE] -= escorts
+		want[BotBrain.Role.ESCORT] += escorts
+		next[director.brain_of(push_runner)] = BotBrain.Role.OFFENCE
+		want[BotBrain.Role.OFFENCE] -= 1
 	# Raiders take offence places, and repair bots the places of the roles
 	# they came from.
 	for brain in team_brains:
@@ -611,6 +726,9 @@ func _assign(force: bool) -> void:
 		var in_role: Array[BotBrain] = []
 		for brain in team_brains:
 			if not next.has(brain) and brain.role == role:
+				if role == BotBrain.Role.ESCORT and escorts > 0 and not _push_escort_available(brain):
+					free.append(brain)
+					continue
 				in_role.append(brain)
 		in_role.sort_custom(func(a: BotBrain, b: BotBrain) -> bool: return _better(a, b, role))
 		var keep: int = want.get(role, 0)
@@ -625,15 +743,19 @@ func _assign(force: bool) -> void:
 		while want[role] > 0:
 			var pick: BotBrain = null
 			for brain in free:
+				if role == BotBrain.Role.ESCORT and escorts > 0 and not _push_escort_available(brain):
+					continue
 				if (force or _may_move(brain, role)) and (pick == null or _better(brain, pick, role)):
 					pick = brain
 			if pick == null and URGENT_ROLES.has(role):
 				# Pulled from a role it's in for now, but never the last defence.
 				for brain in team_brains:
 					var current: int = next.get(brain, -1)
-					if current == BotBrain.Role.OFFENCE and brain.soldier.entity_id == carrier:
+					if current == BotBrain.Role.OFFENCE and brain.soldier.entity_id in [carrier, push_runner]:
 						continue
 					if order_locks.has(brain.soldier.entity_id):
+						continue
+					if role == BotBrain.Role.ESCORT and escorts > 0 and not _push_escort_available(brain):
 						continue
 					if current in [BotBrain.Role.OFFENCE, BotBrain.Role.MIDFIELD, BotBrain.Role.LIGHT_DEFENCE] and (pick == null or _better(brain, pick, role)):
 						pick = brain
@@ -661,10 +783,19 @@ func _assign(force: bool) -> void:
 		if next[a] == BotBrain.Role.CHASE:
 			return _better(a, b, BotBrain.Role.CHASE)
 		if next[a] == BotBrain.Role.OFFENCE:
+			var a_runner := a.soldier.entity_id == push_runner
+			var b_runner := b.soldier.entity_id == push_runner
+			if a_runner != b_runner:
+				return a_runner
 			var a_on_foot := not a.soldier.dead and a.soldier.vehicle_id == 0
 			var b_on_foot := not b.soldier.dead and b.soldier.vehicle_id == 0
 			if a_on_foot != b_on_foot:
 				return a_on_foot
+			if a_on_foot and b_on_foot:
+				var a_reserved := _has_vehicle_work(a.soldier.entity_id)
+				var b_reserved := _has_vehicle_work(b.soldier.entity_id)
+				if a_reserved != b_reserved:
+					return not a_reserved
 		return a.soldier.entity_id < b.soldier.entity_id)
 	for brain: BotBrain in ordered:
 		var role: int = next[brain]
@@ -1074,6 +1205,10 @@ func get_state() -> Dictionary:
 		"history_tick": _history_tick,
 		"order_locks": order_locks.duplicate(true),
 		"urgent_until": urgent_until,
+		"push_runner": push_runner,
+		"push_point": push_point,
+		"push_deadline": push_deadline,
+		"push_launched": push_launched,
 		"report_tick": report_tick,
 		"said_ticks": said_ticks.duplicate(),
 		"chat": chat.duplicate(true),
@@ -1109,6 +1244,10 @@ func set_state(state: Dictionary) -> void:
 	_history_tick = state.history_tick
 	order_locks = state.order_locks.duplicate(true)
 	urgent_until = state.urgent_until
+	push_runner = state.get("push_runner", 0)
+	push_point = state.get("push_point", Vector3.INF)
+	push_deadline = state.get("push_deadline", -1)
+	push_launched = state.get("push_launched", false)
 	report_tick = state.report_tick
 	said_ticks = state.said_ticks.duplicate()
 	chat.assign(state.chat.duplicate(true))
@@ -1427,9 +1566,15 @@ func _raid_target() -> int:
 ## destroyed with nothing left to go for, its time is up or it stops making
 ## sense. A raid by order ends only with its target or its time.
 func _check_raid() -> void:
+	var active := not raiders.is_empty()
 	for id: int in raiders.keys():
-		if director.brain_of(id) == null:
+		var order: Dictionary = order_locks.get(id, {})
+		var redirected: bool = game.waypoints.has(id) if order.is_empty() else order.order != Orders.Kind.ATTACK_GENERATOR
+		if director.brain_of(id) == null or redirected:
 			raiders.erase(id)
+	if active and raiders.is_empty():
+		_end_raid()
+		return
 	if not raiders.is_empty():
 		var ordered := false
 		for id: int in raiders:
@@ -1455,10 +1600,11 @@ func _check_raid() -> void:
 	var picks: Array[BotBrain] = []
 	for brain in brains():
 		var id := brain.soldier.entity_id
-		if brain.soldier.vehicle_id != 0 or brain.role != BotBrain.Role.OFFENCE or brain.attacking or order_locks.has(id) or repairers.has(id) or game.carried_flag(id) != null:
+		if brain.soldier.vehicle_id != 0 or brain.role != BotBrain.Role.OFFENCE or brain.is_flag_runner() or _has_vehicle_work(id) or order_locks.has(id) or game.waypoints.has(id) or repairers.has(id) or game.carried_flag(id) != null:
 			continue
 		picks.append(brain)
-	if picks.size() < 2:
+	var attackers := mini(RAID_SIZE, picks.size() if push_runner != 0 else picks.size() - 1)
+	if attackers <= 0:
 		return
 	picks.sort_custom(func(a: BotBrain, b: BotBrain) -> bool:
 		var da := a.soldier.at().distance_to(at) + (500.0 if a.soldier.dead else 0.0)
@@ -1466,7 +1612,7 @@ func _check_raid() -> void:
 		return da < db or (da == db and a.soldier.entity_id < b.soldier.entity_id))
 	raid_target = target
 	raid_until = game.tick + int(RAID_TIME * 60.0)
-	for k in mini(RAID_SIZE, picks.size() - 1):
+	for k in attackers:
 		raiders[picks[k].soldier.entity_id] = true
 	var name_ := BaseAsset.NAMES[game.asset(target).kind].to_lower()
 	_decide("raid on their %s" % name_)

@@ -14,10 +14,12 @@ var setup_screen: SetupScreen
 var settings_screen: SettingsScreen
 var how_to: HowToPlay
 var online: OnlineScreen
+var ladder: LadderScreen
 ## Last input used, as a LocalInput.Device.
 var device := LocalInput.Device.KEYBOARD
 var _loading: Label
 var _starting := false
+var _home_focus: Control
 ## Frames shown, to make the sounds on the third.
 var _frames := 0
 
@@ -43,11 +45,12 @@ func _ready() -> void:
 	home = CoverPage.new()
 	home.name = "Home"
 	ui.add_child(home)
-	home.add_button("Play", show_setup, true)
+	home.add_button("Play", show_setup)
+	home.add_button("Bot ladder", show_ladder)
 	home.add_button("Online", show_online)
 	home.add_button("Settings", show_settings)
 	home.add_button("How to play", show_how_to)
-	if not OS.has_feature("android"):
+	if not OS.has_feature("android") and not OS.has_feature("web"):
 		home.add_button("Quit", func() -> void: get_tree().quit(), false, true)
 	setup_screen = SetupScreen.new()
 	setup_screen.visible = false
@@ -67,21 +70,30 @@ func _ready() -> void:
 	online.hide()
 	online.closed.connect(show_home)
 	ui.add_child(online)
+	ladder = LadderScreen.new()
+	ladder.closed.connect(show_home)
+	ladder.round_pressed.connect(start_ladder_round)
+	ui.add_child(ladder)
 	_loading = MenuKit.heading("Loading", 48)
 	_loading.set_anchors_preset(Control.PRESET_CENTER)
 	_loading.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_loading.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_loading.visible = false
 	ui.add_child(_loading)
-	if OnlineClient.last_error.is_empty() and not OS.has_feature("web"):
-		show_home()
-	else:
+	if BotLadder.active != BotLadder.Round.NONE:
+		BotLadder.active = BotLadder.Round.NONE
+		show_ladder()
+	elif not OnlineClient.last_error.is_empty() or not OnlineScreen.linked_server().is_empty():
 		show_online()
+	else:
+		show_home()
 
 
 func _process(_delta: float) -> void:
 	# The sounds are made once the menu has been on screen for two frames.
 	_frames += 1
+	if _frames == 2 and OS.has_feature("web"):
+		JavaScriptBridge.eval("window.vectorfallShown?.()")
 	if _frames == 3:
 		SoundBank.build()
 
@@ -93,7 +105,11 @@ static func footnote(setup: MatchSetup) -> String:
 
 
 func _hide_all() -> void:
-	for screen: Control in [home, setup_screen, settings_screen, how_to, online]:
+	if home.visible:
+		var focused := get_viewport().gui_get_focus_owner()
+		if focused in home.buttons:
+			_home_focus = focused
+	for screen: Control in [home, setup_screen, settings_screen, how_to, online, ladder]:
 		screen.visible = false
 
 
@@ -102,12 +118,20 @@ func show_home() -> void:
 	home.footnote = footnote(MatchSetup.load_saved())
 	home.visible = true
 	home.queue_redraw()
-	MenuKit.focus_first(home)
+	if _home_focus != null:
+		_home_focus.grab_focus()
+	else:
+		MenuKit.focus_first(home)
 
 
 func show_setup() -> void:
 	_hide_all()
 	setup_screen.open()
+
+
+func show_ladder() -> void:
+	_hide_all()
+	ladder.open()
 
 
 func show_online() -> void:
@@ -132,14 +156,28 @@ func start_practice() -> void:
 	get_tree().change_scene_to_file(PRACTICE_SCENE)
 
 
+func start_ladder_round(round_index: int) -> void:
+	if _starting or not BotLadder.unlocked(round_index, BotLadder.completed()):
+		return
+	BotLadder.active = round_index
+	if round_index == BotLadder.Round.SKI:
+		start_practice()
+	else:
+		_load_match(BotLadder.match_setup(round_index).map)
+
+
 ## Starts a match with these choices, after a frame showing Loading.
 func start_match(setup: MatchSetup) -> void:
 	if _starting:
 		return
-	_starting = true
 	MatchSetup.current = setup.duplicate()
+	_load_match(setup.map)
+
+
+func _load_match(map_name: String) -> void:
+	_starting = true
 	_hide_all()
-	_loading.text = ("Loading %s" % SetupScreen.MAP_TITLES[maxi(GameMap.NAMES.find(setup.map), 0)]).to_upper()
+	_loading.text = ("Loading %s" % SetupScreen.MAP_TITLES[maxi(GameMap.NAMES.find(map_name), 0)]).to_upper()
 	_loading.visible = true
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -154,12 +192,18 @@ func _notification(what: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	var previous := device
 	if event is InputEventScreenTouch:
 		device = LocalInput.Device.TOUCH
 	elif event is InputEventJoypadButton:
 		device = LocalInput.Device.GAMEPAD
-	elif event is InputEventKey or (event is InputEventMouseButton and event.device != InputEvent.DEVICE_ID_EMULATION):
+	elif event is InputEventKey or ((event is InputEventMouseButton or event is InputEventMouseMotion)
+			and event.device != InputEvent.DEVICE_ID_EMULATION):
 		device = LocalInput.Device.KEYBOARD
+	if device != previous and home != null:
+		for button in home.buttons:
+			button.highlight_hover = device != LocalInput.Device.GAMEPAD
+			button.queue_redraw()
 
 
 ## The home screen: the ink title band with the tagline, the stripes, a
@@ -220,11 +264,16 @@ class CoverPage:
 		var drop := _drop()
 		var tall := 54.0 if buttons.size() <= 3 else (39.0 if buttons.size() >= 5 else 46.0)
 		var gap := 6.0 if buttons.size() >= 5 else 8.0
+		var font_size := 32.0 if buttons.size() >= 5 else 36.0
+		if buttons.size() == 6:
+			tall = 34.0
+			gap = 5.0
+			font_size = 30.0
 		for k in buttons.size():
 			buttons[k].custom_minimum_size = Vector2(270.0, tall) * u
 			buttons[k].position = Vector2(28.0, 132.0 + drop + k * (tall + gap)) * u
 			buttons[k].size = buttons[k].custom_minimum_size
-			buttons[k].font_size = roundi(32.0 * u if buttons.size() >= 5 else 36.0 * u)
+			buttons[k].font_size = roundi(font_size * u)
 		var frame_width := minf(486.0, wide - 28.0 - 330.0)
 		var frame := Rect2(wide - 28.0 - frame_width, 130.0 + drop, frame_width, frame_width * 236.0 / 486.0)
 		picture.position = frame.position * u

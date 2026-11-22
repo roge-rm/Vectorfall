@@ -163,6 +163,10 @@ func height_at(x: float, z: float) -> float:
 	return terrain.height_at(x, z) if terrain != null else _shape(x, z)
 
 
+func control_sites() -> Array[Vector2]:
+	return [Vector2(0, spine_z(0)), Vector2.ZERO, Vector2(0, canyon_z(0))]
+
+
 func ground_height(x: float, z: float) -> float:
 	return terrain.height_at(x, z) if terrain != null else _shape(x, z)
 

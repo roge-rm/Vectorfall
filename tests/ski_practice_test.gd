@@ -80,6 +80,18 @@ func _run() -> void:
 	checks.check(menu != null and MatchSetup.load_saved().map == "gannet_reach", "leaving practice keeps the saved match")
 	practice = await _start_from_menu(menu)
 	checks.check(practice != null and practice.best_ticks == best and best > 0, "the best time reloads from disk")
+	if practice != null:
+		Settings.set_value("pad_layout", Settings.PadLayout.NINTENDO)
+		Settings.apply()
+		practice.stage = SkiPractice.Stage.CREST
+		var reset_pad := InputEventJoypadButton.new()
+		reset_pad.button_index = JOY_BUTTON_X
+		reset_pad.pressed = true
+		Input.parse_input_event(reset_pad)
+		await process_frame
+		reset_pad.pressed = false
+		Input.parse_input_event(reset_pad)
+		checks.check(practice.stage == SkiPractice.Stage.SKI, "the left face button resets practice in the Nintendo layout")
 	_finish()
 
 

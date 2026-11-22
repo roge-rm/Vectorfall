@@ -126,3 +126,7 @@ func _landing_marks(parent: Node3D, at: Vector2, pale: Color) -> void:
 	view.position = Vector3(at.x, ground_height(at.x, at.y) + 0.045, at.y)
 	view.visibility_range_end = 355.0
 	parent.add_child(view)
+
+
+func control_sites() -> Array[Vector2]:
+	return [Vector2(0, -104), Vector2.ZERO, Vector2(0, 104)]
