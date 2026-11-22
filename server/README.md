@@ -6,7 +6,7 @@ Run `docker compose up --build -d`, then open [the dashboard](http://localhost:2
 
 Set `TEAM_SIZE=16` for a 16v16 match with up to 32 players and bots combined. The server defaults to 8v8. Phones and tablets can join a 16v16 server from the Online menu. Local matches on those devices go up to 8v8.
 
-In Vectorfall, choose **Online → Find LAN games** or enter the server address and UDP port. The server fills both teams with bots. A player takes over a slot on the team with fewer players, and a bot takes it back when they leave. The server starts a new round on the same arena after the results. The dashboard can start a round on another arena at once.
+Use the same Vectorfall build on the server and clients so their arena layouts match. In Vectorfall, choose **Online → Find LAN games** or enter the server address and UDP port. The server fills both teams with bots. A player takes over a slot on the team with fewer players, and a bot takes it back when they leave. The server starts a new round on the same arena after the results. The dashboard can start a round on another arena at once.
 
 ## Ports
 

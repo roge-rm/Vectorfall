@@ -108,7 +108,7 @@ func _repair(brain: BotBrain, command: PlayerCommand, fighting: bool) -> bool:
 	if brain.goal == BotBrain.Goal.FIX and not brain.combat.aiming:
 		# The base asset it was sent to, once it's in reach.
 		var info := brain.director.asset_info(brain.role_target)
-		if not info.is_empty() and info.health < info.max:
+		if not info.is_empty() and info.health < info.max and (info.perches.is_empty() or BotCombat.in_room(s.at(), info)):
 			var eye := s.eye_transform().origin
 			var to: Vector3 = info.centre - eye
 			if Vector2(to.x, to.z).length() < info.radius + MATE_REACH:

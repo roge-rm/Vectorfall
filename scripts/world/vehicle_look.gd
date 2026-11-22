@@ -253,14 +253,21 @@ static func _needlewing(far: bool) -> Array:
 	return parts
 
 
-static func pad(parent: Node3D, kind: int, team: int) -> MeshInstance3D:
+static func pad(parent: VehiclePad, kind: int, team: int) -> MeshInstance3D:
 	var parts := []
-	var wide := Vehicle.SIZE[kind].x * 0.5 + 1.1
-	var deep := Vehicle.SIZE[kind].z * 0.5 + 1.0
+	var extent := VehiclePad.rail_extent(kind)
+	var wide := extent.x
+	var deep := extent.y
+	var terrain := (parent.get_parent() as Match).terrain
 	for side: float in [-1, 1]:
 		_box(parts, Vector3(0.47, 0.18, deep * 2.0), Vector3(side * wide, 0.02, 0), DARK)
 		for end: float in [-1, 1]:
-			_box(parts, Vector3(0.8, 0.27, 0.7), Vector3(side * wide, 0.05, end * deep), TEAM)
+			var foot := Vector3(side * wide, 0.05, end * deep)
+			_box(parts, Vector3(0.8, 0.27, 0.7), foot, TEAM)
+			if terrain != null:
+				var at := parent.to_global(foot)
+				var height := maxf(0.15, at.y - terrain.height_at(at.x, at.z) + 0.1)
+				_box(parts, Vector3(0.46, height, 0.44), foot - Vector3.UP * height * 0.5, DARK)
 	_box(parts, Vector3(wide * 1.8, 0.12, 0.35), Vector3(0, 0.04, deep), PLATE)
 	_view(parent, Cel.merged(parts), team)
 	var lamp := MeshInstance3D.new()

@@ -45,6 +45,7 @@ func _run() -> void:
 	checks.check(map.terrain.size() >= 1500.0, "the terrain is %.0f m across" % map.terrain.size())
 
 	for team in 2:
+		map.add_vehicle_pads(game, team)
 		var good := true
 		for point in map.spawn_points(team):
 			var o := point.origin
@@ -52,6 +53,15 @@ func _run() -> void:
 			good = good and away > 190.0 and away < 215.0 and not map.blocked_at(o.x, o.z)
 			good = good and absf(o.y - 0.3 - map.surface_at(o.x, o.z)) < 0.05 and absf(o.y - 0.3 - map.ground_height(o.x, o.z)) < 0.05
 		checks.check(good, "team %d's 8 spawn points are on the ground 190 to 215 m from its flag" % team)
+	var rails_clear := game.fleet.pads.size() == 10
+	for pad: VehiclePad in game.fleet.pads.values():
+		var extent := VehiclePad.rail_extent(pad.kind)
+		for side: float in [-1, 1]:
+			for sample in 17:
+				var along := lerpf(-extent.y, extent.y, sample / 16.0)
+				var bottom := pad.to_global(Vector3(side * extent.x, -0.07, along))
+				rails_clear = rails_clear and bottom.y >= map.surface_at(bottom.x, bottom.z)
+	checks.check(rails_clear, "the airfield pad rails clear the terrain along their full length")
 
 	var stands := [graph.interest_points(RouteGraph.FLAG_STAND, 0), graph.interest_points(RouteGraph.FLAG_STAND, 1)]
 	checks.check(stands[0].size() == 1 and stands[1].size() == 1, "each base has one flag stand point")

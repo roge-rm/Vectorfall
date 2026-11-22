@@ -7,12 +7,14 @@ extends Node3D
 ## can't pass, and the bots' route graph. A map script extends it and builds
 ## its ground, props and route graph.
 
-const BASE_SIZE := 24.0
+const BASE_SIZE := 30.0
 const STAND_HEIGHT := 0.5
 ## The ramp up the front of each base: its length along the ground and its
 ## slope, for 14 m at 12°.
 const RAMP_RUN := 13.69
 const RAMP_SLOPE := 0.2126
+## Ramp centre in z and width, in metres.
+const BASE_RAMPS: Array[Vector2] = [Vector2(0, 10), Vector2(-10.5, 6.5), Vector2(10.5, 6.5)]
 ## Grid cell size for looking up obstacles, in metres.
 const OBSTACLE_CELL := 10.0
 ## The generator room under the back of each base's deck. Places in it are
@@ -47,6 +49,7 @@ const NAMES: Array[String] = [
 ## Empty means the --map argument or DEFAULT.
 static var chosen := ""
 
+var _ramp_slopes: Array[PackedFloat32Array] = [PackedFloat32Array(), PackedFloat32Array()]
 var title := ""
 ## The map's colours and light.
 var palette: Palette
@@ -160,13 +163,9 @@ func stand_top(team: int) -> Vector3:
 	return Vector3(base_x(team), deck_height() + STAND_HEIGHT, 0.0)
 
 
-## Where a team's two inventory stations stand: on the deck between the flag
-## stand and the tower, one each side, clear of the route points on the deck,
-## the turret by the stand and the ways into the generator room. Maps with
-## other bases override it.
+## The inventory stations under the two service bay roofs.
 func station_points(team: int) -> Array[Vector3]:
-	var x := base_x(team) - front(team) * 2.5
-	return [Vector3(x, deck_height(), -5.5), Vector3(x, deck_height(), 5.5)]
+	return [base_place(team, 1.0, -10.5, deck_height()), base_place(team, 1.0, 10.5, deck_height())]
 
 
 ## The top of the generator room's floor.
@@ -273,7 +272,16 @@ func add_vehicle_pads(game: Match, team: int) -> void:
 			z = (i - 2) * 13.0
 		var pad := _vehicle_pad_at(team, lineup[i], Vector2(x, z))
 		var at := Vector3(pad.x, surface_at(pad.x, pad.y), pad.y)
-		game.fleet.add_pad(team, lineup[i], at, asset_facing(team))
+		var facing := asset_facing(team)
+		var basis := Basis(Vector3.UP, facing)
+		var extent := VehiclePad.rail_extent(lineup[i]) + Vector2(0.4, 0.35)
+		# Sample across the frame, including the end blocks and the ground under the hull.
+		for side: float in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+			for end: float in [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]:
+				var sample := at + basis * Vector3(side * extent.x, 0, end * extent.y)
+				at.y = maxf(at.y, surface_at(sample.x, sample.z))
+		at.y += VehiclePad.FRAME_CLEARANCE
+		game.fleet.add_pad(team, lineup[i], at, facing)
 
 
 func _vehicle_pad_at(_team: int, _kind: Vehicle.Kind, at: Vector2) -> Vector2:
@@ -301,8 +309,11 @@ func surface_at(x: float, z: float) -> float:
 		if absf(dx) <= BASE_SIZE * 0.5 and absf(z) <= BASE_SIZE * 0.5:
 			return room_floor() if in_opening(x, z) else deck
 		var along := dx * front(team) - BASE_SIZE * 0.5
-		if along > 0.0 and along < RAMP_RUN and absf(z) <= 5.0:
-			h = maxf(h, deck - along * RAMP_SLOPE)
+		if along > 0.0 and along < RAMP_RUN:
+			for index in BASE_RAMPS.size():
+				var ramp := BASE_RAMPS[index]
+				if absf(z - ramp.x) <= ramp.y * 0.5:
+					return maxf(h, deck - along * _ramp_slopes[team][index])
 	return h
 
 
@@ -363,12 +374,12 @@ func add_base_points(graph: RouteGraph) -> void:
 			graph.add_interest(RouteGraph.DEFENCE, team, graph.add_point(base_place(team, corner.x, corner.y, deck)))
 		for side in [-1.0, 1.0]:
 			graph.add_point(_beside_opening(team, side))
-		# The ramp up the front of the deck is the way in without a jet.
-		var ramp_top := graph.add_point(Vector3(x + ahead * 10.5, deck, 0.0))
-		var foot_x := x + ahead * 27.0
-		var ramp_foot := graph.add_point(Vector3(foot_x, surface_at(foot_x, 0.0), 0.0))
-		graph.add_interest(RouteGraph.WAY_IN, team, ramp_top)
-		graph.add_interest(RouteGraph.WAY_IN, team, ramp_foot)
+		for ramp in BASE_RAMPS:
+			var top := base_place(team, BASE_SIZE * 0.5 - 2.0, ramp.x, deck)
+			var foot := base_place(team, BASE_SIZE * 0.5 + RAMP_RUN + 1.5, ramp.x, 0.0)
+			foot.y = surface_at(foot.x, foot.z)
+			graph.add_interest(RouteGraph.WAY_IN, team, graph.add_point(top))
+			graph.add_interest(RouteGraph.WAY_IN, team, graph.add_point(foot))
 		for side in [-1.0, 1.0]:
 			var side_z: float = side * (BASE_SIZE * 0.5 + 6.0)
 			graph.add_interest(RouteGraph.WAY_IN, team, graph.add_point(Vector3(x, surface_at(x, side_z), side_z)))
@@ -381,7 +392,7 @@ func link_tower_tops(graph: RouteGraph) -> void:
 	for team in 2:
 		var back := base_x(team) - front(team) * (BASE_SIZE * 0.5 - 4.0)
 		var top := graph.add_point(Vector3(back, base_ground + 17.0, 3.75))
-		var foot := graph.add_point(base_place(team, -9.5, 9.5, deck))
+		var foot := graph.add_point(Vector3(back, deck, 9.5))
 		graph.add_interest(RouteGraph.HIGH_GROUND, team, top)
 		graph.add_interest(RouteGraph.DEFENCE, team, top)
 		graph.add_link(foot, top, RouteGraph.Kind.JET, true)
@@ -437,22 +448,53 @@ func _build_base(team: int) -> void:
 	var ground := base_ground
 	_build_deck(base, team)
 	var ahead := front(team)
-	# Its top meets the deck's edge, with no lip to catch on.
-	var tilt := deg_to_rad(12.0)
-	var ramp_basis := Basis(Vector3.FORWARD, ahead * tilt)
-	var ramp_centre := Vector3(x + ahead * (BASE_SIZE * 0.5 + 7.0 * cos(tilt) - 0.5 * sin(tilt)), ground + 2.0 - 7.0 * sin(tilt) - 0.5 * cos(tilt), 0.0)
-	_box(base, Vector3(14.0, 1.0, 10.0), Transform3D(ramp_basis, ramp_centre), Cel.material(palette.structure))
+	var structure := Cel.material(palette.structure)
+	var team_colour := Palette.team(team).lerp(palette.structure, 0.42).darkened(0.12)
+	var team_wall := Cel.team_material(team_colour)
+	for ramp in BASE_RAMPS:
+		# The top meets the deck and the bottom reaches the terrain across the lane.
+		var toe := base_place(team, BASE_SIZE * 0.5 + RAMP_RUN, ramp.x, 0.0)
+		var floor_y := ground_height(toe.x, toe.z)
+		for side: float in [-1.0, 1.0]:
+			floor_y = minf(floor_y, ground_height(toe.x, toe.z + side * ramp.y * 0.5))
+		var slope := maxf(RAMP_SLOPE, (deck_height() - floor_y + 0.05) / RAMP_RUN)
+		_ramp_slopes[team].append(slope)
+		var tilt := atan(slope)
+		var length := RAMP_RUN / cos(tilt)
+		var ramp_basis := Basis(Vector3.FORWARD, ahead * tilt)
+		var centre := base_place(team, BASE_SIZE * 0.5 + RAMP_RUN * 0.5 - 0.5 * sin(tilt),
+			ramp.x, deck_height() - RAMP_RUN * slope * 0.5 - 0.5 * cos(tilt))
+		var ramp_body := _box(base, Vector3(length, 1.0, ramp.y), Transform3D(ramp_basis, centre), structure)
+		var strip := MeshInstance3D.new()
+		strip.mesh = Cel.box(Vector3(12.0, 0.025, 0.28))
+		strip.position = Vector3(0.0, 0.51, ramp.y * 0.5 - 0.45)
+		strip.material_override = team_wall
+		strip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ramp_body.add_child(strip)
 	# A tower at the back with a deck on top, in a dark team colour so the
 	# flag in front stands out from it.
-	var team_wall := Cel.team_material(Palette.team(team).lerp(palette.structure, 0.42).darkened(0.12))
 	_build_stand(base, team)
 	var back := x - ahead * (BASE_SIZE * 0.5 - 4.0)
 	_box(base, Vector3(4.0, 14.0, 4.0), Transform3D(Basis.IDENTITY, Vector3(back, ground + 9.0, 0.0)), team_wall)
 	obstacles.append(Vector3(back, 0.0, 2.9))
-	_box(base, Vector3(10.0, 1.0, 10.0), Transform3D(Basis.IDENTITY, Vector3(back, ground + 16.5, 0.0)), Cel.material(palette.structure))
-	for side in [-1.0, 1.0]:
-		_box(base, Vector3(3.0, 4.0, 3.0), Transform3D(Basis.IDENTITY, Vector3(x, ground + 4.0, side * (BASE_SIZE * 0.5 - 2.0))), team_wall)
-		obstacles.append(Vector3(x, side * (BASE_SIZE * 0.5 - 2.0), 2.2))
+	_box(base, Vector3(10.0, 1.0, 10.0), Transform3D(Basis.IDENTITY, Vector3(back, ground + 16.5, 0.0)), structure)
+	_build_service_bays(base, team, structure, team_wall)
+
+
+func _build_service_bays(base: Node3D, team: int, structure: Material, trim: Material) -> void:
+	var deck := deck_height()
+	for side: float in [-1.0, 1.0]:
+		var roof := _box(base, Vector3(9.5, 0.65, 5.5),
+			Transform3D(Basis.IDENTITY, base_place(team, 1.0, side * 11.75, deck + 4.65)), structure)
+		var fascia := MeshInstance3D.new()
+		fascia.mesh = Cel.box(Vector3(9.55, 0.18, 5.55))
+		fascia.position.y = -0.12
+		fascia.material_override = trim
+		roof.add_child(fascia)
+		for along: float in [-2.75, 4.75]:
+			var pillar := base_place(team, along, side * 13.45, deck + 2.2)
+			_box(base, Vector3(1.3, 4.4, 1.3), Transform3D(Basis.IDENTITY, pillar), trim)
+			obstacles.append(Vector3(pillar.x, pillar.z, 0.92))
 
 
 ## The platform, a raised deck reaching deck_depth below the ground, or below

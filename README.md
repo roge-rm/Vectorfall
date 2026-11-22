@@ -2,12 +2,13 @@
 
 Vectorfall is a capture-the-flag shooter for Android and Linux. Ski down a hill, jet over the next ridge and bring the other team's flag home. Fly a gunship to cover your runner, or go in on foot and knock out the enemy generator.
 
-It's in the spirit of Tribes, with the look of a science fiction paperback. Lime and Blue play on ten arenas with up to eight soldiers a side. Bots can fill both teams, drive and fly vehicles, repair the base and take orders from you.
+It's in the spirit of Tribes, with the look of a science fiction paperback. Lime and Blue play on ten arenas, with up to eight soldiers a side locally or sixteen a side on a dedicated server. Bots can fill both teams, drive and fly vehicles, repair the base and take orders from you.
 
 New in 0.13.0
 
 - Join an online match by address or find servers on your LAN. Bots fill the rest of the team.
-- Run a dedicated server with Docker Compose and check the match from its browser dashboard.
+- Run up to 16v16 on a dedicated server with Docker Compose. Follow the match from the web dashboard or join from a browser.
+- Both teams have wider bases with three ramps and covered inventory bays.
 
 Added in 0.12.0
 
@@ -29,7 +30,7 @@ Dan
 
 ## Gameplay
 
-![Ski down the marked course, jet over the crest and grab the flag in Ski Practice](docs/images/ski-run.gif)
+![Skiing for the flag, flying a Needlewing over Ochre Fold and fighting on Greenfall Terraces](docs/images/gameplay.gif)
 
 ## Screenshots
 
@@ -62,14 +63,14 @@ Dan
 
 Download the APK or Debian package from [the releases page](https://github.com/roge-rm/Vectorfall/releases).
 
-- Android 7.0 and up, on 32-bit or 64-bit ARM. Open `vectorfall-0.12.0.apk` and follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
-- Debian 13 on 64-bit x86. Install `vectorfall_0.12.0_amd64.deb` with `sudo apt install ./vectorfall_0.12.0_amd64.deb` from the download folder, then open Vectorfall from the applications menu. The game needs OpenGL 3.3.
+- Android 7.0 and up, on 32-bit or 64-bit ARM. Open `vectorfall-0.13.0.apk` and follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
+- Debian 13 on 64-bit x86. Install `vectorfall_0.13.0_amd64.deb` with `sudo apt install ./vectorfall_0.13.0_amd64.deb` from the download folder, then open Vectorfall from the applications menu. The game needs OpenGL 3.3.
 
 Android supports touch, gyro aim and gamepads. Linux supports a mouse and keyboard or a gamepad.
 
 ## Playing
 
-The 0.12.0 downloads play offline. In a build with online play, choose **Online** to find a LAN match or enter a server address. Bots fill empty slots. See [Dedicated server](server/README.md) to host matches with Docker Compose, open the dashboard or serve the browser build.
+Choose **Online** to find a LAN match or enter a server address. Bots fill empty slots. See [Dedicated server](server/README.md) to host matches with Docker Compose, open the dashboard or serve the browser build.
 
 Choose **How to Play → Ski Practice** for a timed run with a reset button and a saved best time. Hold jump as you go downhill to ski and pick up speed. Jet over the next rise, then let go of jet to refill your energy before the next climb.
 

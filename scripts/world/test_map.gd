@@ -10,6 +10,8 @@ const WIDTH := 200.0
 const CELL := 3.0
 const BASE_X := 200.0
 const BASE_HEIGHT := 6.0
+const BASE_FLAT_RADIUS := 21.6
+const BASE_BLEND_RADIUS := 52.8
 const MAP_SEED := 7
 ## Three rolling hills between the bases, each about HILL_HEIGHT from ridge
 ## to valley and a third of the way across, with the bases on the ridge tops
@@ -63,7 +65,7 @@ func height_at(x: float, z: float) -> float:
 	var h := BASE_HEIGHT + (ridge - 1.0) * depth + noise.get_noise_2d(x, z) * 3.0
 	for team in 2:
 		var d := Vector2(x - base_x(team), z).length()
-		var t := smoothstep(BASE_SIZE * 0.9, BASE_SIZE * 2.2, d)
+		var t := smoothstep(BASE_FLAT_RADIUS, BASE_BLEND_RADIUS, d)
 		h = lerpf(BASE_HEIGHT, h, t)
 	var edge_x := absf(x) / (LENGTH * 0.5)
 	var edge_z := absf(z) / (WIDTH * 0.5)

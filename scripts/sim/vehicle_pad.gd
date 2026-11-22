@@ -2,6 +2,7 @@ class_name VehiclePad
 extends Node3D
 
 const RESPAWN := 20.0
+const FRAME_CLEARANCE := 0.1
 
 var entity_id := 0
 var team := 0
@@ -11,6 +12,11 @@ var hull_id := 0
 var remaining := 0.0
 var lamp: MeshInstance3D
 var _on := true
+
+
+static func rail_extent(of_kind: int) -> Vector2:
+	var size := Vehicle.SIZE[of_kind]
+	return Vector2(size.x * 0.5 + 1.1, size.z * 0.5 + 1.0)
 
 
 func _ready() -> void:
