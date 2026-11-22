@@ -4,12 +4,6 @@ Vectorfall is a capture-the-flag shooter for Android and Linux. Ski down a hill,
 
 Two play on ten arenas, with up to eight soldiers a side locally or sixteen a side on a dedicated server. Bots can fill both teams, drive and fly vehicles, repair the base and take orders from you.
 
-New in 0.13.0
-
-- Join an online match by address or find servers on your LAN. Bots fill the rest of the team.
-- Run up to 16v16 on a dedicated server with Docker Compose. Follow the match from the web dashboard or join from a browser.
-- Both teams have wider bases with three ramps and covered inventory bays.
-
 Let me know what works and what doesn't in the #vectorfall channel [on my discord](https://discord.gg/9Wun47jGC6), or open an issue here.
 
 Enjoy,<br>
@@ -50,28 +44,30 @@ Dan
 
 ## Install
 
-Download the APK or Debian package from [the releases page](https://github.com/roge-rm/Vectorfall/releases).
+Download the APK or Debian package from [Releases](https://github.com/roge-rm/Vectorfall/releases).
 
-- Android 7.0 and up, on 32-bit or 64-bit ARM. Open `vectorfall-0.13.0.apk` and follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
-- Debian 13 on 64-bit x86. Install `vectorfall_0.13.0_amd64.deb` with `sudo apt install ./vectorfall_0.13.0_amd64.deb` from the download folder, then open Vectorfall from the applications menu. The game needs OpenGL 3.3.
+- Android 7.0 and up, on 32-bit or 64-bit ARM. Open `vectorfall-0.13.0.apk`. Follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
+- Debian 13 on 64-bit x86. Install `vectorfall_0.13.0_amd64.deb` with `sudo apt install ./vectorfall_0.13.0_amd64.deb` from the download folder. Open Vectorfall from the applications menu. The game needs OpenGL 3.3.
 
 Android supports touch, gyro aim and gamepads. Linux supports a mouse and keyboard or a gamepad.
 
 ## Playing
 
-Choose **Online** to find a LAN match or enter a server address. Bots fill empty slots. See [Dedicated server](server/README.md) to host matches with Docker Compose, open the dashboard or serve the browser build.
+Open `Online`. Pick a game on your LAN or enter a server address. Bots fill the empty slots. A dedicated server can run 16v16. See the [dedicated server guide](server/README.md) for Docker Compose, the dashboard and the browser build.
 
-Choose **How to Play → Ski Practice** for a timed run with a reset button and a saved best time. Hold jump as you go downhill to ski and pick up speed. Jet over the next rise, then let go of jet to refill your energy before the next climb.
+Open `How to play` and choose `Ski practice`. Hold jump on the way down a hill. Jet over the next rise. Let go of jet to refill your energy. You can reset the run. The game saves your best time.
 
-Choose **Play** to pick an arena, team, bot count and skill for each side, time limit and capture limit. Touch the enemy flag to take it, then bring it to your stand while your own flag is home. Touch your dropped flag to return it, or wait 30 seconds for it to return on its own.
+Open `Play` to set up a local match. Pick one of ten arenas. Pick Lime or Blue. Set the number of bots and their skill for each side. Set the time and capture limits. Local matches go up to 8v8.
 
-Use Orders to send bots after the flag, call for cover or get help with the base. Commander mode in Settings gives you more control of team assignments.
+Touch the enemy flag to take it. Bring it back to your stand when your own flag is home. Touch your dropped flag to return it. It returns on its own after 30 seconds.
+
+Give bots orders to go for the flag, cover you or help at the base. Turn on `Commander mode` in `Settings` to assign roles. Bots can drive and fly vehicles and repair the base.
 
 ### Loadouts and base equipment
 
-Light armour carries up to two weapons, medium carries three and heavy carries four. Armour determines which weapons you can take and how many grenades and mines you can carry. There are seven weapons, including the disc launcher, chaingun, sniper rifle and mortar. Save a loadout and change it while dead or at a friendly inventory station.
+Light armour carries up to two weapons, medium carries three and heavy carries four. Armour determines which weapons you can take and how many grenades and mines you can carry. There are seven weapons, including the disc launcher, chaingun, sniper rifle and mortar. Change your loadout while dead or at a friendly inventory station. You can save loadouts.
 
-Take a repair pack to bring a generator back online. The generator powers the base turrets, sensors, inventory station and vehicle pads. A deployable pack lets you place a field turret, sensor or inventory station on clear ground. Field equipment has its own power.
+Knock out the enemy generator to cut power to their base. The generator powers the turrets, sensors, inventory station and vehicle pads. Use a repair pack to bring it back online. Use a deployable pack to put a field turret, sensor or inventory station on clear ground. Field equipment has its own power.
 
 ### Vehicles
 
@@ -83,7 +79,7 @@ Take a repair pack to bring a generator back online. The generator powers the ba
 | Cinder Kite | A bomber that drops shells on targets below. |
 | Morrow Ferry | A troop transport. Passengers can fire their own weapons. |
 
-Walk up to a stopped or slow-moving friendly vehicle with an open seat and press Board. Look to steer and use the normal move controls to drive. When piloting an aircraft, jet climbs and jump descends. On touch those buttons read UP and DOWN. Keep your generator running so the pads can replace lost vehicles.
+Walk up to a stopped or slow-moving friendly vehicle with a free seat. Press `Board`. Use the move controls to drive. Look where you want to turn. In an aircraft, press jet to climb and jump to descend. On touch those buttons read UP and DOWN. Keep your generator running so the pads can replace lost vehicles.
 
 ## Arenas
 
@@ -100,7 +96,7 @@ Walk up to a stopped or slow-moving friendly vehicle with an open seat and press
 | Greenfall Terraces | Switchbacks through green terraces, with routes along both banks. |
 | Beacon Wreck | Cargo bays through a wreck, with dune routes on either side. |
 
-Match Setup also has a small Test map.
+Choose `Test map` in `Match setup` for a smaller arena.
 
 ## Controls
 
@@ -117,7 +113,15 @@ Match Setup also has a small Test map.
 | Board or exit | R | B | BOARD or EXIT |
 | Orders and pause | V then a number, Esc to pause | D-pad up and Start | ORDERS and the pause button |
 
-Settings has look speed for each input, touch button size, gyro aim, aim assist and auto ski. You can also change render scale, view distance and outlines, and set separate volumes for effects, voices and music.
+Open `Settings` to change look speed for each input, touch button size, gyro aim, aim assist or auto ski. Set the view distance, render scale and outlines there too. There are separate volume controls for effects, voices and music.
+
+## What's new
+
+New in 0.13.0
+
+- Join an online match by address or find servers on your LAN. Bots fill the rest of the team.
+- Run up to 16v16 on a dedicated server with Docker Compose. Follow the match from the web dashboard or join from a browser.
+- Both teams have wider bases with three ramps and covered inventory bays.
 
 ## Building
 
