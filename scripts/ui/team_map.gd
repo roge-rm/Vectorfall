@@ -4,12 +4,20 @@ extends Control
 signal closed
 signal waypoint_requested(recipient: int, point: Vector2)
 
+const SIDEBAR_WIDTH := 228.0
+
 var game: Match
 var viewer: Soldier
 var chart: Chart
 var recipients: OptionButton
 var send: Button
-var orders: RichTextLabel
+var calls_text: Label
+var overview: VBoxContainer
+var order_page: VBoxContainer
+var order_slots: Array[VBoxContainer] = []
+var no_orders: Label
+var overview_tab: Button
+var orders_tab: Button
 var objective_status: Label
 var back: Button
 var roster := {}
@@ -25,54 +33,126 @@ func _ready() -> void:
 	body.size_flags_vertical = SIZE_EXPAND_FILL
 	body.add_theme_constant_override("separation", MenuKit.pxi(14))
 	column.add_child(body)
+	var map_column := VBoxContainer.new()
+	map_column.size_flags_horizontal = SIZE_EXPAND_FILL
+	body.add_child(map_column)
 	chart = Chart.new()
 	chart.game = game
 	chart.viewer = viewer
 	chart.bounds = game.arena.tactical_bounds()
-	chart.size_flags_horizontal = SIZE_EXPAND_FILL
+	chart.size_flags_vertical = SIZE_EXPAND_FILL
 	chart.focus_mode = FOCUS_ALL
 	chart.clip_contents = true
 	chart.picked.connect(_sync_send)
-	body.add_child(chart)
+	map_column.add_child(chart)
+	var objective := "Flag diamonds" if game.hold_points.is_empty() else "Control points A–C"
+	map_column.add_child(MenuKit.ink_label("Teammate dots · Contact rings · " + objective, 13))
 
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size.x = MenuKit.px(206)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.follow_focus = true
-	body.add_child(scroll)
 	var sidebar := VBoxContainer.new()
-	sidebar.size_flags_horizontal = SIZE_EXPAND_FILL
-	scroll.add_child(sidebar)
-	sidebar.add_child(MenuKit.heading("Waypoint", 22))
+	sidebar.custom_minimum_size.x = MenuKit.px(SIDEBAR_WIDTH)
+	sidebar.add_theme_constant_override("separation", MenuKit.pxi(6))
+	body.add_child(sidebar)
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", MenuKit.pxi(5))
+	sidebar.add_child(tabs)
+	var tab_group := ButtonGroup.new()
+	overview_tab = _tab("Overview", false, tab_group)
+	orders_tab = _tab("Orders", true, tab_group)
+	tabs.add_child(overview_tab)
+	tabs.add_child(orders_tab)
+	_build_overview(sidebar)
+	_build_orders(sidebar)
+	_show_orders(false)
+
+	var footer := HBoxContainer.new()
+	footer.add_theme_constant_override("separation", MenuKit.pxi(8))
+	column.add_child(footer)
 	recipients = OptionButton.new()
 	_style_recipient_picker()
 	recipients.tooltip_text = "Waypoint recipient"
 	recipients.fit_to_longest_item = false
-	recipients.add_item("Choose teammate", 0)
+	recipients.add_item("Waypoint to…", 0)
+	recipients.custom_minimum_size.x = MenuKit.px(192)
 	recipients.item_selected.connect(func(_index: int) -> void: _sync_send())
-	sidebar.add_child(recipients)
-	send = MenuKit.button("Send waypoint", _send, 20, false, true)
-	sidebar.add_child(send)
-	if not game.hold_points.is_empty():
-		sidebar.add_child(MenuKit.heading("Control points", 22))
-		objective_status = MenuKit.ink_label("", 14)
-		sidebar.add_child(objective_status)
-	sidebar.add_child(MenuKit.heading("Active orders", 22))
-	orders = RichTextLabel.new()
-	orders.fit_content = true
-	orders.scroll_active = false
-	orders.mouse_filter = MOUSE_FILTER_IGNORE
-	orders.add_theme_color_override("default_color", InkUi.INK)
-	sidebar.add_child(orders)
-
-	var objective := "Diamonds for flags" if game.hold_points.is_empty() else "A–C for control points"
-	var legend := MenuKit.ink_label("Dots for teammates · Rings for sensor contacts · " + objective, 16)
-	legend.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	column.add_child(legend)
-	var footer := MenuKit.button_row(column)
+	footer.add_child(recipients)
+	send = MenuKit.button("Send waypoint", _send, 22, false, true)
+	footer.add_child(send)
+	var space := Control.new()
+	space.size_flags_horizontal = SIZE_EXPAND_FILL
+	footer.add_child(space)
 	back = MenuKit.button("Back", closed.emit, 22, true)
 	footer.add_child(back)
+	chart.focus_neighbor_right = chart.get_path_to(overview_tab)
+	chart.focus_neighbor_bottom = chart.get_path_to(recipients)
+	overview_tab.focus_neighbor_left = overview_tab.get_path_to(chart)
+	overview_tab.focus_neighbor_bottom = overview_tab.get_path_to(recipients)
+	orders_tab.focus_neighbor_bottom = orders_tab.get_path_to(back)
+	recipients.focus_neighbor_top = recipients.get_path_to(chart)
+	send.focus_neighbor_top = send.get_path_to(chart)
+	back.focus_neighbor_top = back.get_path_to(orders_tab)
 	hide()
+
+
+func _tab(label: String, show_orders: bool, group: ButtonGroup) -> Button:
+	var tab := MenuKit.button(label, _show_orders.bind(show_orders), 17)
+	tab.custom_minimum_size.x = 0
+	tab.size_flags_horizontal = SIZE_EXPAND_FILL
+	tab.toggle_mode = true
+	tab.button_group = group
+	return tab
+
+
+func _build_overview(sidebar: VBoxContainer) -> void:
+	overview = VBoxContainer.new()
+	overview.add_theme_constant_override("separation", MenuKit.pxi(6))
+	sidebar.add_child(overview)
+	if not game.hold_points.is_empty():
+		overview.add_child(_section("Control points"))
+		objective_status = MenuKit.ink_label("", 14)
+		overview.add_child(objective_status)
+	overview.add_child(_section("Team calls"))
+	calls_text = MenuKit.ink_label("", 14)
+	calls_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	calls_text.max_lines_visible = 6
+	calls_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	overview.add_child(calls_text)
+
+
+func _build_orders(sidebar: VBoxContainer) -> void:
+	order_page = VBoxContainer.new()
+	sidebar.add_child(order_page)
+	no_orders = MenuKit.ink_label("No active orders", 14)
+	order_page.add_child(no_orders)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", MenuKit.pxi(6))
+	grid.add_theme_constant_override("v_separation", 1)
+	order_page.add_child(grid)
+	for index in MatchProtocol.MAX_TEAM_SIZE:
+		var slot := VBoxContainer.new()
+		slot.size_flags_horizontal = SIZE_EXPAND_FILL
+		slot.add_theme_constant_override("separation", -2)
+		var name := MenuKit.ink_label("", 11, InkUi.Face.BOLD)
+		var order := MenuKit.ink_label("", 10)
+		for label in [name, order]:
+			label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			slot.add_child(label)
+		grid.add_child(slot)
+		order_slots.append(slot)
+		slot.hide()
+
+
+func _section(title: String) -> Label:
+	var section := MenuKit.heading(title, 19)
+	section.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	return section
+
+
+func _show_orders(enabled: bool) -> void:
+	overview.visible = not enabled
+	order_page.visible = enabled
+	overview_tab.set_pressed_no_signal(not enabled)
+	orders_tab.set_pressed_no_signal(enabled)
 
 
 func _style_recipient_picker() -> void:
@@ -99,6 +179,7 @@ func open() -> void:
 		chart.build_relief()
 	chart.has_pick = false
 	chart.cursor = chart.world_ratio(viewer.at()).clamp(Vector2.ZERO, Vector2.ONE * 0.999)
+	_show_orders(false)
 	show()
 	_refresh()
 	chart.grab_focus()
@@ -117,7 +198,7 @@ func _refresh() -> void:
 	refresh_in = 0.2
 	var active := game.tactical_orders(viewer.team)
 	var available := {}
-	var lines: PackedStringArray = []
+	var lines: Array[Vector2i] = []
 	for mate: Soldier in game.entities.values():
 		if mate.team != viewer.team:
 			continue
@@ -125,27 +206,42 @@ func _refresh() -> void:
 		if mate != viewer and not mate.dead and game.carried_flag(id) == null:
 			available[id] = mate.display_name
 		if game.waypoints.has(id):
-			lines.append("%s · Waypoint" % mate.display_name)
+			lines.append(Vector2i(id, Orders.Kind.WAYPOINT))
 		elif active.has(id):
 			var order: Dictionary = active[id]
 			if order.until < 0 or order.until > game.tick:
-				lines.append("%s · %s" % [mate.display_name, Orders.NAMES[order.order]])
+				lines.append(Vector2i(id, order.order))
 	if roster != available:
 		var selected := recipients.get_selected_id()
 		recipients.clear()
-		recipients.add_item("Choose teammate", 0)
+		recipients.add_item("Waypoint to…", 0)
 		for id: int in available:
 			recipients.add_item(available[id], id)
 		recipients.select(maxi(0, recipients.get_item_index(selected)))
 		roster = available
-	var current := "\n".join(lines) if not lines.is_empty() else "No active orders"
 	if objective_status != null:
 		var statuses: PackedStringArray = []
 		for point in game.hold_points:
 			statuses.append("%s · %s" % [point.letter, point.status()])
 		objective_status.text = "\n".join(statuses)
-	if orders.text != current:
-		orders.text = current
+	no_orders.visible = lines.is_empty()
+	for index in order_slots.size():
+		var slot := order_slots[index]
+		slot.visible = index < lines.size()
+		if slot.visible:
+			var line := lines[index]
+			slot.get_child(0).text = game.soldier(line.x).display_name
+			slot.get_child(1).text = Orders.NAMES[line.y]
+	var calls: PackedStringArray = []
+	for call: Dictionary in game.team_calls.active(viewer.team).values():
+		var caller := game.soldier(call.by)
+		if caller != null:
+			var name := "You" if caller == viewer else caller.display_name
+			var line := "%s · %s: %s" % [Orders.CALL_ICONS[call.kind], name, Orders.CALL_MARKERS[call.kind]]
+			if not call.acks.is_empty():
+				line += " (%d ack)" % call.acks.size()
+			calls.append(line)
+	calls_text.text = "\n".join(calls) if not calls.is_empty() else "No team calls"
 	_sync_send()
 
 
@@ -272,8 +368,19 @@ class Chart extends Control:
 			_mark(at, point.colour())
 			InkUi.centred(self, at, point.letter, InkUi.Face.BLACK, 13, InkUi.INK)
 		if game.neutral_station != null:
-			var at := _at(game.neutral_station.position, rect)
-			InkUi.centred(self, at + Vector2(0, 14), "Ammo", InkUi.Face.BOLD, 15, HoldPoint.NEUTRAL, 3)
+			var supply := game.neutral_station
+			var at := _at(supply.position, rect)
+			var owner := game.station_team(supply)
+			var tint := HoldPoint.NEUTRAL if owner < 0 else Palette.team(owner)
+			var label := "Ammo"
+			if supply.control_index >= 0 and supply.control_index < game.hold_points.size():
+				label = "%s ammo" % game.hold_points[supply.control_index].letter
+			InkUi.centred(self, at + Vector2(0, 14), label, InkUi.Face.BOLD, 15, tint, 3)
+		for call: Dictionary in game.team_calls.active(viewer.team).values():
+			var at := _at(call.at, rect) + Vector2(0, -13)
+			draw_circle(at, 9.0, InkUi.INK, true, -1.0, true)
+			draw_circle(at, 7.0, InkUi.AMBER, true, -1.0, true)
+			InkUi.centred(self, at, Orders.CALL_ICONS[call.kind], InkUi.Face.BLACK, 12, InkUi.INK)
 		if has_pick or has_focus():
 			var at := rect.position + cursor * rect.size
 			draw_line(at - Vector2(10, 0), at + Vector2(10, 0), InkUi.CREAM, 2.0)

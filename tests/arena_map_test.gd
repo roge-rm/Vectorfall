@@ -58,6 +58,16 @@ func _run() -> void:
 			_check_coastal_routes(map)
 		if map is CopperSteps:
 			_check_ferry_pads(map, game)
+		if map is CopperSteps or map is NightlineFoundry:
+			_check_reworked_base(map, game)
+			var defender: BotBrain = match_scene.bots.brains[0]
+			defender.role = BotBrain.Role.DEFENCE
+			defender.role_slot = 0
+			var flag_post: Vector3 = defender._role_goal()[1]
+			defender.role_slot = 1
+			var reactor_post: Vector3 = defender._role_goal()[1]
+			checks.check(flag_post.distance_to(reactor_post) > 20.0 and reactor_post.distance_to(game.generator(defender.soldier.team).position) <= 5.0,
+				"%s gives the second defender a separate reactor post" % map.title)
 		var player: Soldier = match_scene.player
 		player.global_position = game.stands[1 - player.team]
 		player.velocity = Vector3.ZERO
@@ -104,6 +114,69 @@ func _check_centre_lane(map: ArenaMap) -> void:
 			clear = graph.link_between(previous, point) != null and graph.link_between(point, previous) != null
 		previous = point
 	checks.check(clear, "%s has an unbroken bot route through its sheltered middle" % map.title)
+
+
+func _check_reworked_base(map: ArenaMap, game: Match) -> void:
+	var graph := map.route_graph
+	var clear := true
+	var exits := true
+	var mirrored := true
+	var clear_spawns := true
+	for team in 2:
+		var gen := game.generator(team)
+		var centre := gen.centre()
+		for end: float in [-1.0, 1.0]:
+			var from := centre + Vector3.RIGHT * end * 18.0
+			clear = clear and game.world_ray(from, centre, Match.WORLD_LAYER).is_empty()
+		var stand := map.stand_point(team)
+		var deck := stand - Vector3.UP * (GameMap.STAND_HEIGHT + 0.5)
+		var roof := game.world_ray(deck + Vector3.UP * 14.0, deck + Vector3.UP * 3.0, Match.WORLD_LAYER)
+		clear = clear and roof.is_empty() == (map is CopperSteps)
+		var start := graph.interest_points(RouteGraph.FLAG_STAND, team)[0]
+		exits = exits and graph.interest_points(RouteGraph.FLAG_EXIT, team).size() == 2
+		for side: float in [-1.0, 1.0]:
+			var inner := 14.0 if map is CopperSteps else 12.0
+			var outer := 35.0 if map is CopperSteps else 19.0
+			var a := graph.nearest(Vector3(deck.x, deck.y, side * inner))
+			var b := graph.nearest(Vector3(deck.x, map.surface_at(deck.x, side * outer), side * outer))
+			exits = exits and graph.link_between(start, a) != null and graph.link_between(a, b) != null
+			var z := side * 27.0
+			var y := map.surface_at(deck.x, z)
+			var surface := game.world_ray(Vector3(deck.x, y + 1, z), Vector3(deck.x, y - 1, z), Match.WORLD_LAYER)
+			exits = exits and not surface.is_empty() and absf(surface.position.y - y) < 0.08
+	var lime_reinforcements := map.ctf_respawn_points(0, 16)
+	var blue_reinforcements := map.ctf_respawn_points(1, 16)
+	for row in 16:
+		var lime := map.spawn_point(0, row).origin
+		var blue := map.spawn_point(1, row).origin
+		mirrored = mirrored and is_equal_approx(lime.x, -blue.x) and is_equal_approx(lime.z, blue.z)
+		var left := lime_reinforcements[row].origin
+		var right := blue_reinforcements[row].origin
+		mirrored = mirrored and is_equal_approx(left.x, -right.x) and is_equal_approx(left.z, right.z)
+		for at: Vector3 in [left, right]:
+			clear_spawns = clear_spawns and not map.blocked_at(at.x, at.z) and map.terrain.normal_at(at.x, at.z).y > 0.7
+	checks.check(clear_spawns, "%s has 16 open respawn spots on each side" % map.title)
+	checks.check(mirrored, "%s mirrors all 16 starts across the map" % map.title)
+	checks.check(clear and game.fields.is_empty(), "%s separates the reactor with two firing angles and the intended flag cover" % map.title)
+	checks.check(exits, "%s has two connected flag exits with walkable surfaces" % map.title)
+	var brain: BotBrain = game.bots.brains[0]
+	var runner := brain.soldier
+	var old_at := runner.global_position
+	var stolen: Flag = game.flags[1 - runner.team]
+	runner.global_position = game.stands[stolen.team]
+	game._take_flag(stolen, runner)
+	brain.goal = BotBrain.Goal.TAKE_FLAG
+	var breakout := brain._role_goal()
+	checks.check(breakout[0] == BotBrain.Goal.BREAKOUT and graph.interest_points(RouteGraph.FLAG_EXIT, stolen.team).any(
+		func(id: int) -> bool: return graph.points[id] == breakout[1]), "%s's runner heads to a mapped exit after grabbing" % map.title)
+	brain.goal = BotBrain.Goal.BREAKOUT
+	brain.goal_target = breakout[1]
+	brain.goal_started = game.tick
+	runner.global_position = breakout[1]
+	checks.check(brain._role_goal()[0] == BotBrain.Goal.CAPTURE, "%s's runner turns for home after reaching the exit" % map.title)
+	stolen.send_home()
+	runner.global_position = old_at
+
 
 
 func _check_bridge_routes(map: ArenaMap) -> void:

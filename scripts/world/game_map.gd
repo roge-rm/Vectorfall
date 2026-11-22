@@ -123,6 +123,10 @@ func midfield_supply() -> Vector2:
 	return Vector2.INF
 
 
+func controlled_supply_site() -> int:
+	return -1
+
+
 func control_sites() -> Array[Vector2]:
 	return []
 
@@ -163,7 +167,12 @@ func deck_height() -> float:
 func spawn_point(team: int, slot := 0) -> Transform3D:
 	var side := 1.0 if slot % 2 == 0 else -1.0
 	var row := slot / 2
-	var x := base_x(team) + (row - 1.5) * 4.0 - front(team) * spawn_back
+	var offset := (row - 1.5) * 4.0
+	# Extra rows for larger teams extend evenly on either side.
+	if row >= 4:
+		var spread := 10.0 + ((row - 4) / 2) * 4.0
+		offset = -spread if row % 2 == 0 else spread
+	var x := base_x(team) + front(team) * (offset - spawn_back)
 	var z := side * (spawn_side + (row % 2) * 3.0)
 	var facing := -PI * 0.5 if team == 0 else PI * 0.5
 	return Transform3D(Basis(Vector3.UP, facing), Vector3(x, surface_at(x, z) + 0.3, z))
@@ -174,6 +183,24 @@ func spawn_points(team: int, count := 8) -> Array[Transform3D]:
 	var points: Array[Transform3D] = []
 	for slot in count:
 		points.append(spawn_point(team, slot))
+	return points
+
+
+## Some CTF arenas bring reinforcements in from the flanks.
+func ctf_respawn_points(team: int, count: int) -> Array[Transform3D]:
+	return spawn_points(team, count)
+
+
+func flank_spawns(team: int, count: int, along: float, side: float) -> Array[Transform3D]:
+	var points: Array[Transform3D] = []
+	var facing := -PI * 0.5 if team == 0 else PI * 0.5
+	var row_centre := (ceili(count / 2.0) - 1) * 0.5
+	for slot in count:
+		var row := slot / 2
+		var flank := side + float(row % 2) * 6.0
+		var at := base_place(team, along + (float(row) - row_centre) * 4.0, flank if slot % 2 == 0 else -flank, 0.0)
+		at.y = surface_at(at.x, at.z) + 0.3
+		points.append(Transform3D(Basis(Vector3.UP, facing), at))
 	return points
 
 
@@ -192,6 +219,11 @@ func room_floor() -> float:
 	return deck_height() - ROOM_DEPTH
 
 
+## A generator outside the deck at (along, side), or the standard room.
+func generator_offset() -> Vector2:
+	return Vector2.INF
+
+
 ## A place in a team's base, given as (along, side) from its middle, at a
 ## height.
 func base_place(team: int, along: float, side: float, y: float) -> Vector3:
@@ -201,11 +233,18 @@ func base_place(team: int, along: float, side: float, y: float) -> Vector3:
 ## Where a team's generator stands: on the floor of its room, in the middle
 ## of its back half.
 func generator_point(team: int) -> Vector3:
+	var offset := generator_offset()
+	if offset.is_finite():
+		var at := base_place(team, offset.x, offset.y, 0.0)
+		at.y = surface_at(at.x, at.z)
+		return at
 	return base_place(team, -4.5, 0.0, room_floor())
 
 
 ## The middles of a team's generator room openings, on the deck.
 func opening_points(team: int) -> Array[Vector3]:
+	if generator_offset().is_finite():
+		return []
 	var y := deck_height()
 	return [base_place(team, OPENING_AT.x, -OPENING_AT.y, y), base_place(team, OPENING_AT.x, OPENING_AT.y, y)]
 
@@ -213,6 +252,8 @@ func opening_points(team: int) -> Array[Vector3]:
 ## The middle of each of a team's two force fields, filling the openings
 ## into its generator room.
 func field_points(team: int) -> Array[Vector3]:
+	if generator_offset().is_finite():
+		return []
 	var y := deck_height() - FIELD_SIZE.y * 0.5
 	return [base_place(team, OPENING_AT.x, -OPENING_AT.y, y), base_place(team, OPENING_AT.x, OPENING_AT.y, y)]
 
@@ -220,7 +261,7 @@ func field_points(team: int) -> Array[Vector3]:
 ## True over either base's generator room, its footprint grown by margin
 ## metres each way.
 func under_room(x: float, z: float, margin := 0.0) -> bool:
-	if absf(z) > ROOM_HALF + margin:
+	if absf(z) > ROOM_HALF + margin or generator_offset().is_finite():
 		return false
 	for team in 2:
 		var along := (x - base_x(team)) * front(team)
@@ -232,7 +273,7 @@ func under_room(x: float, z: float, margin := 0.0) -> bool:
 ## True over one of the openings into a generator room.
 func in_opening(x: float, z: float) -> bool:
 	var half := OPENING * 0.5
-	if absf(absf(z) - OPENING_AT.y) > half:
+	if absf(absf(z) - OPENING_AT.y) > half or generator_offset().is_finite():
 		return false
 	for team in 2:
 		var along := (x - base_x(team)) * front(team)
@@ -272,7 +313,11 @@ func add_base_power(game: Match, team: int) -> void:
 		var turret := game.add_asset(team, BaseAsset.Kind.TURRET, turrets[k], facing)
 		if k == 1:
 			turret.guard_points = opening_points(team)
-			turret.guard_radius = ROOM_GUARD
+			if turret.guard_points.is_empty():
+				turret.guard_points.append(generator_point(team))
+				turret.guard_radius = 16.0
+			else:
+				turret.guard_radius = ROOM_GUARD
 	game.add_asset(team, BaseAsset.Kind.SENSOR, sensor_point(team), facing)
 	for at in field_points(team):
 		game.add_field(team, at, FIELD_SIZE)
@@ -380,10 +425,12 @@ func _sort_obstacles() -> void:
 ## link_generator_rooms() after.
 func add_base_points(graph: RouteGraph) -> void:
 	var deck := deck_height()
+	var outside := generator_offset().is_finite()
 	for team in 2:
 		var x := base_x(team)
 		var ahead := front(team)
-		graph.add_interest(RouteGraph.FLAG_STAND, team, graph.add_point(Vector3(x, deck, 0.0)))
+		var stand := stand_top(team)
+		graph.add_interest(RouteGraph.FLAG_STAND, team, graph.add_point(stand - Vector3.UP * STAND_HEIGHT))
 		for side in [-1.0, 1.0]:
 			var spawn_x := x - ahead * spawn_back
 			var spawn_z: float = side * spawn_side
@@ -391,8 +438,14 @@ func add_base_points(graph: RouteGraph) -> void:
 		# The back corners sit behind the openings into the generator room.
 		for corner in [Vector2(7.0, 7.0), Vector2(7.0, -7.0), Vector2(-10.0, 6.5), Vector2(-10.0, -6.5)]:
 			graph.add_interest(RouteGraph.DEFENCE, team, graph.add_point(base_place(team, corner.x, corner.y, deck)))
-		for side in [-1.0, 1.0]:
-			graph.add_point(_beside_opening(team, side))
+		if outside:
+			var gen := generator_point(team)
+			var at := gen + Vector3(ahead * 4.0, 0, 0)
+			at.y = surface_at(at.x, at.z)
+			graph.add_interest(RouteGraph.GENERATOR, team, graph.add_point(at))
+		else:
+			for side in [-1.0, 1.0]:
+				graph.add_point(_beside_opening(team, side))
 		for ramp in BASE_RAMPS:
 			var top := base_place(team, BASE_SIZE * 0.5 - 2.0, ramp.x, deck)
 			var foot := base_place(team, BASE_SIZE * 0.5 + RAMP_RUN + 1.5, ramp.x, 0.0)
@@ -434,6 +487,8 @@ func _beside_opening(team: int, side: float) -> Vector3:
 ## links, which enemy bots don't take while its field is on. Call it after
 ## auto_link(), since the deck above the room would fool it.
 func link_generator_rooms(graph: RouteGraph) -> void:
+	if generator_offset().is_finite():
+		return
 	var floor_y := room_floor()
 	for team in 2:
 		var middle := graph.add_point(base_place(team, -1.5, 0.0, floor_y))
@@ -523,6 +578,10 @@ func _build_service_bays(base: Node3D, team: int, structure: Material, trim: Mat
 ## box given as along and side ranges from the base's middle.
 func _build_deck(base: Node3D, team: int) -> void:
 	var deck := deck_height()
+	if generator_offset().is_finite():
+		var extent := Rect2(-BASE_SIZE * 0.5, -BASE_SIZE * 0.5, BASE_SIZE, BASE_SIZE)
+		_deck_box(base, team, extent, base_ground - deck_depth, deck, Cel.material(palette.structure))
+		return
 	var floor_y := room_floor()
 	var ceiling := deck - 1.0
 	var bottom := minf(base_ground - deck_depth, floor_y - 1.0)

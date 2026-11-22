@@ -1,13 +1,13 @@
 extends Node
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall/m13"
+const FOLDER := "/srv/downloads/temp/debug/skifrei/m13"
 const MAPS: Array[String] = ["saltwake_flats", "nightline_foundry", "copper_steps"]
 
 
 func _ready() -> void:
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	DisplayServer.window_set_size(Vector2i(1280, 720))
-	var folder := OS.get_environment("VECTORFALL_SHOT_DIR")
+	var folder := OS.get_environment("SKIFREI_SHOT_DIR")
 	if folder.is_empty():
 		folder = FOLDER
 	DirAccess.make_dir_recursive_absolute(folder)

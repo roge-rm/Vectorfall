@@ -89,6 +89,8 @@ func _use_pack(brain: BotBrain, command: PlayerCommand) -> void:
 		Pack.JAMMER:
 			if brain.game.carried_flag(s.entity_id) != null:
 				want = s.energy > 5.0
+			elif brain.goal == BotBrain.Goal.TAKE_FLAG and s.at().distance_squared_to(brain.goal_target) < 65.0 * 65.0:
+				want = s.energy > PACK_RESERVE
 			elif s.weapons.has(Weapon.SNIPER):
 				want = not fighting and s.energy > (JAM_OFF if s.pack_on else JAM_ON)
 	if p.use == Pack.Use.HOLD:

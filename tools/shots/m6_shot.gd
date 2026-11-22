@@ -2,12 +2,12 @@ extends Node
 
 ## Pictures of Ochre Fold, and quits. It needs a screen:
 ##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/m6_shot.tscn
-## Saves in /srv/downloads/temp/debug/vectorfall: m6-overview.png (the whole
+## Saves in /srv/downloads/temp/debug/skifrei: m6-overview.png (the whole
 ## map from high up), m6-base.png (team 0's base), m6-skiline.png (in game,
 ## down the ski line from team 0's base) and m6-far.png (a long view at the
 ## full view distance, with the fog). The match is paused for each.
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall"
+const FOLDER := "/srv/downloads/temp/debug/skifrei"
 
 
 func _ready() -> void:

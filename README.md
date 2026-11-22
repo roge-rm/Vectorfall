@@ -44,7 +44,7 @@ Dan
 
 ## Install
 
-Skifrei 0.16.0 is available for Android, Debian and Raspberry Pi OS. You can also play in a browser. The Windows, macOS and AppImage downloads on GitHub are from 0.15.0, when the game was called Vectorfall.
+Skifrei is available for Android, Linux, Raspberry Pi OS, Windows and macOS. You can also play in a browser.
 
 [F-Droid](https://hunke.ws/fdroid/) · [apt repo](https://hunke.ws/apt/) · [Play in browser](https://hunke.ws/fdroid/play/skifrei/) · [GitHub releases](https://github.com/roge-rm/Skifrei/releases)
 

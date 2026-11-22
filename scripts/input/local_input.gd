@@ -96,7 +96,7 @@ func _input(event: InputEvent) -> void:
 		set_device(used)
 
 
-## Sends an order to your team's bots with the next command.
+## Sends an order or team call with the next command.
 func queue_order(order: int, arg: int, point := Vector2.ZERO) -> void:
 	_order = order
 	_order_arg = arg
@@ -112,7 +112,7 @@ func want_loadout(loadout: Loadout) -> void:
 ## V and the D-pad up open the menu; while it's open the number keys pick from
 ## it and the D-pad moves through it. True if the event was the menu's.
 func _menu_input(event: InputEvent) -> bool:
-	if menu == null or (soldier != null and soldier.game != null and not soldier.game.hold_points.is_empty()):
+	if menu == null:
 		return false
 	var pad := event as InputEventJoypadButton
 	if pad != null and pad.pressed:

@@ -4,7 +4,7 @@ extends "res://tools/shots/style_shot.gd"
 ## its own light, shade, ground, sky and lines, then quits. It needs a
 ## screen:
 ##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/direction_shot.tscn
-## Saves dir-1.png to dir-5.png in /srv/downloads/temp/debug/vectorfall:
+## Saves dir-1.png to dir-5.png in /srv/downloads/temp/debug/skifrei:
 ## 1 warm sun and cool shade, 2 retro sci-fi paperback, 3 lush painterly,
 ## 4 flat travel poster, 5 neon frontier at dusk. Add numbers after -- to
 ## take only those, like -- 2 5.

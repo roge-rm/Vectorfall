@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Exports the release Linux build and packs it into
-# build/desktop/vectorfall_V_ARCH.deb, for Debian Trixie. V is
-# version/name in export_presets.cfg. The game goes in /usr/lib/vectorfall,
+# build/desktop/skifrei_V_ARCH.deb, for Debian Trixie. V is
+# version/name in export_presets.cfg. The game goes in /usr/lib/skifrei,
 # a launcher in /usr/games, with a menu entry and the icon.
 #
 #   tools/package-deb.sh [--arch amd64|arm64]
@@ -28,24 +28,17 @@ BUILD=$PWD/build/desktop
 stage=$(mktemp -d "$BUILD/deb-$DEB_ARCH.XXXXXX")
 trap 'rm -r -- "$stage"' EXIT
 chmod 755 "$stage"
-install -d -m 755 "$stage/usr/lib/vectorfall" "$stage/usr/games" "$stage/usr/share/applications" \
-	"$stage/usr/share/icons/hicolor/scalable/apps" "$stage/usr/share/icons/hicolor/256x256/apps" \
-	"$stage/usr/share/doc/vectorfall" "$stage/DEBIAN"
-install -m 755 "$BUILD/release/vectorfall.$BINARY_ARCH" "$stage/usr/lib/vectorfall/vectorfall"
-sed "s/@RENDERING_DRIVER@/$RENDERING_DRIVER/" "$SRC/launcher" > "$stage/usr/games/vectorfall"
-chmod 755 "$stage/usr/games/vectorfall"
-install -m 644 $SRC/vectorfall.desktop "$stage/usr/share/applications/vectorfall.desktop"
-install -m 644 art/icon.svg "$stage/usr/share/icons/hicolor/scalable/apps/vectorfall.svg"
-icon="$stage/usr/share/icons/hicolor/256x256/apps/vectorfall.png"
-if command -v rsvg-convert >/dev/null; then
-	rsvg-convert --width 256 --height 256 --output "$icon" art/icon.svg
-else
-	convert -background none art/icon.svg -resize 256x256 "$icon"
-fi
-chmod 644 "$icon"
-install -m 644 LICENSE "$stage/usr/share/doc/vectorfall/copyright"
+install -d -m 755 "$stage/usr/lib/skifrei" "$stage/usr/games" "$stage/usr/share/applications" \
+	"$stage/usr/share/icons/hicolor/512x512/apps" \
+	"$stage/usr/share/doc/skifrei" "$stage/DEBIAN"
+install -m 755 "$BUILD/release/skifrei.$BINARY_ARCH" "$stage/usr/lib/skifrei/skifrei"
+sed "s/@RENDERING_DRIVER@/$RENDERING_DRIVER/" "$SRC/launcher" > "$stage/usr/games/skifrei"
+chmod 755 "$stage/usr/games/skifrei"
+install -m 644 $SRC/skifrei.desktop "$stage/usr/share/applications/skifrei.desktop"
+install -m 644 art/icon.png "$stage/usr/share/icons/hicolor/512x512/apps/skifrei.png"
+install -m 644 LICENSE "$stage/usr/share/doc/skifrei/copyright"
 kb=$(du -sk --exclude=DEBIAN "$stage" | cut -f1)
 sed "s/@VERSION@/$V/; s/@SIZE@/$kb/; s/@ARCH@/$DEB_ARCH/; s/@EXTRA_DEPS@/$EXTRA_DEPS/" "$SRC/control" > "$stage/DEBIAN/control"
-DEB="$BUILD/vectorfall_${V}_$DEB_ARCH.deb"
+DEB="$BUILD/skifrei_${V}_$DEB_ARCH.deb"
 dpkg-deb --root-owner-group -Zxz --build "$stage" "$DEB" > /dev/null
 ls -l "$DEB"

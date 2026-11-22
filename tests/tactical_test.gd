@@ -66,11 +66,15 @@ func _run() -> void:
 	own_flag.carrier_id = foe.entity_id
 	checks.check(not game.tactical_soldier_visible(viewer, foe) and not game.tactical_flag_visible(viewer, own_flag),
 		"a jammer hides a stale sensor contact and the flag they carry")
+	own_flag._update_beam()
+	checks.check(not own_flag._beam.visible, "the jammed flag beam is hidden from the opposing player")
 	var hidden: Array = DuoPanel.map_snapshot(game, viewer, bounds).markers
 	checks.check(not hidden.any(func(mark: Dictionary) -> bool:
 		return mark.kind == "contact" or (mark.kind == "flag" and mark.team == viewer.team)),
 		"the Duo map hides the same jamming enemy and carried flag")
 	own_flag.send_home()
+	own_flag._update_beam()
+	checks.check(own_flag._beam.visible, "the beam comes back when the flag returns")
 	foe.pack_on = false
 	main.team_map.chart.cursor = Vector2(0.6, 0.5)
 	main.team_map.chart.has_pick = true
@@ -110,6 +114,8 @@ func _run() -> void:
 	mate.global_position = previous
 	game._step_waypoints()
 	checks.check(not game.waypoints.has(mate.entity_id), "arrival clears a waypoint")
+	await _check_team_calls(main, mate, foe)
+	await _check_full_team_map(main)
 
 	var held: Flag = game.flags[viewer.team]
 	game._take_flag(held, foe)
@@ -152,6 +158,123 @@ func _run() -> void:
 	main.queue_free()
 	await process_frame
 	checks.finish(self)
+
+
+func _check_team_calls(main: Node, mate: Soldier, foe: Soldier) -> void:
+	var game: Match = main.game
+	var viewer: Soldier = main.player
+	var menu: OrderMenu = main.menu
+	_press_key(KEY_V)
+	_press_key(KEY_7)
+	await process_frame
+	checks.check(menu.title() == "Team calls" and "I'll run the flag" in menu.entries(),
+		"the keyboard opens team calls from the normal Orders menu")
+	_press_key(KEY_1)
+	await process_frame
+	var cmd: PlayerCommand = main.input.make_command(OnlineClient.STEP)
+	game._apply_order(viewer.entity_id, cmd)
+	var calls := game.team_calls.active(viewer.team)
+	var run_call: Dictionary = calls.get(Orders.Kind.FLAG_RUN, {})
+	checks.check(cmd.order == Orders.Kind.FLAG_RUN and run_call.get("at") == game.stands[foe.team]
+		and game.team_calls.active(foe.team).is_empty(), "a flag run marks the other stand for teammates only")
+
+	cmd.order = Orders.Kind.REPAIR_GENERATOR
+	game._apply_order(viewer.entity_id, cmd)
+	game._apply_order(mate.entity_id, cmd)
+	checks.check(calls.size() == 1, "a caller has a cooldown and bots cannot send team calls")
+	var bot_source: CommandSource = game.sources[mate.entity_id]
+	game.sources[mate.entity_id] = CommandSource.new()
+	game._apply_order(mate.entity_id, cmd)
+	var repair_call: Dictionary = calls.get(Orders.Kind.REPAIR_GENERATOR, {})
+	checks.check(repair_call.get("at") == game.generator(viewer.team).centre(), "a repair call marks the team's generator")
+	if repair_call.is_empty():
+		game.sources[mate.entity_id] = bot_source
+		return
+	cmd.order = Orders.Kind.ACK_CALL
+	cmd.order_arg = repair_call.id
+	game._apply_order(mate.entity_id, cmd)
+	var foe_source: CommandSource = game.sources[foe.entity_id]
+	game.sources[foe.entity_id] = CommandSource.new()
+	game._apply_order(foe.entity_id, cmd)
+	game.sources[foe.entity_id] = foe_source
+	checks.check(repair_call.acks.is_empty(), "callers and opponents cannot acknowledge a call")
+	_press_key(KEY_V)
+	await process_frame
+	checks.check(menu.entries().back() == "Acknowledge repair generator", "an incoming call adds a shortcut to Orders")
+	_press_key(KEY_1 + menu.entries().size() - 1)
+	await process_frame
+	cmd = MatchProtocol.command(main.input.make_command(OnlineClient.STEP).to_dict())
+	if cmd != null:
+		game._apply_order(viewer.entity_id, cmd)
+		game._apply_order(viewer.entity_id, cmd)
+	checks.check(repair_call.acks == PackedInt32Array([viewer.entity_id]), "the same teammate can acknowledge a specific call once")
+	game.sources[mate.entity_id] = bot_source
+	await process_frame
+	checks.check(main.hud.feed_text().any(func(line: String) -> bool: return line.ends_with("Generator needs repair")),
+		"the match HUD shows the teammate's call")
+	main._open_team_map()
+	checks.check(main.team_map.calls_text.text.contains("Repair generator (1 ack)"), "the chart shows the call and acknowledgement")
+	var bottom: Dictionary = DuoPanel.map_snapshot(game, viewer, main.team_map.chart.bounds)
+	checks.check(bottom.markers.any(func(marker: Dictionary) -> bool: return marker.kind == "call" and marker.label == "G"),
+		"the Duo chart includes calls for the viewer's team")
+	main._close_team_map()
+	game.team_calls.expire(game.tick + TeamCalls.LIFETIME, false)
+	checks.check(game.team_calls.active(viewer.team).is_empty(), "calls expire after a short window")
+
+
+func _check_full_team_map(main: Node) -> void:
+	var game: Match = main.game
+	var viewer: Soldier = main.player
+	var team_map: TeamMap = main.team_map
+	var roster := game.bots.commander(viewer.team).members()
+	var added: Array[Soldier] = []
+	for index in range(roster.size(), MatchProtocol.MAX_TEAM_SIZE):
+		var who := game.add_soldier(viewer.team, main.map.spawn_point(viewer.team, index))
+		who.display_name = "Player %d" % (index + 1)
+		added.append(who)
+		roster.append(who)
+	var active := game.tactical_orders(viewer.team)
+	var prior := active.duplicate()
+	for who in roster:
+		active[who.entity_id] = {"order": Orders.Kind.ATTACK_GENERATOR, "until": -1}
+	var previous_aspect := root.content_scale_aspect
+	root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
+	main._open_team_map()
+	team_map.orders_tab.pressed.emit()
+	await process_frame
+	await process_frame
+	var body := team_map.order_page.get_global_rect()
+	var last := team_map.order_slots.back() as Control
+	var footer := team_map.back.get_global_rect()
+	checks.check(team_map.recipients.item_count == MatchProtocol.MAX_TEAM_SIZE and team_map.order_slots.all(
+		func(slot: Control) -> bool: return slot.is_visible_in_tree()),
+		"the full 16-player team fits the recipient picker and orders view")
+	checks.check(last.get_global_rect().end.y <= footer.position.y and body.end.y <= footer.position.y
+		and team_map.get_global_rect().encloses(footer),
+		"every order and the footer fit without scrolling (last %s, footer %s, page %s)" % [
+			last.get_global_rect(), footer, team_map.get_global_rect()])
+	team_map.overview_tab.pressed.emit()
+	checks.check(team_map.overview.visible and not team_map.order_page.visible
+		and team_map.chart.is_visible_in_tree() and team_map.recipients.is_visible_in_tree(),
+		"switching panels keeps the map and waypoint controls visible")
+	main._close_team_map()
+	root.content_scale_aspect = previous_aspect
+	active.clear()
+	active.merge(prior)
+	for who in added:
+		game.entities.erase(who.entity_id)
+		game.sources.erase(who.entity_id)
+		who.queue_free()
+
+
+func _press_key(code: int) -> void:
+	var event := InputEventKey.new()
+	event.physical_keycode = code
+	event.pressed = true
+	Input.parse_input_event(event)
+	event = event.duplicate() as InputEventKey
+	event.pressed = false
+	Input.parse_input_event(event)
 
 
 func _check_pad_scroll(board: ResultsBoard) -> void:

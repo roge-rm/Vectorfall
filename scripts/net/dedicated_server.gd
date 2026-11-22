@@ -6,6 +6,7 @@ const BETWEEN_ROUNDS := 12.0
 const HUMAN_NAME := "Player"
 const EVENT_LIMIT := 64
 const LOAD_TIMEOUT_MS := 60000
+const BROWSE_GRACE_MS := 1000
 
 var link := MatchTransport.new()
 var discovery := PacketPeerUDP.new()
@@ -20,7 +21,7 @@ var waiting: Dictionary[int, int] = {}
 var events: Array = []
 var epoch := 0
 var rounds_wait := 0.0
-var server_name := "Vectorfall"
+var server_name := "Skifrei"
 var map_name := GameMap.DEFAULT
 var teams := 8
 var minutes := 20
@@ -33,30 +34,42 @@ var web_port := MatchProtocol.WEB_PORT
 var status_dir := ""
 var status_ticks := 0
 var pending_map := ""
+var rotation: ServerRotation
+var listing: HTTPRequest
+var directory_url := ""
+var directory_token := ""
+var public_host := ""
+var public_ws := ""
+var public_port := 0
+var next_listing := 0
+var last_listing_error := ""
 
 
 func _ready() -> void:
-	server_name = OS.get_environment("VECTORFALL_NAME").strip_edges().left(48)
+	server_name = OS.get_environment("SKIFREI_NAME").strip_edges().left(48)
 	if server_name.is_empty():
-		server_name = "Vectorfall"
-	var wanted := OS.get_environment("VECTORFALL_MAP")
+		server_name = "Skifrei"
+	var wanted := OS.get_environment("SKIFREI_MAP")
 	if GameMap.NAMES.has(wanted):
 		map_name = wanted
-	hold = OS.get_environment("VECTORFALL_MODE") == "hold"
-	resupply = OS.get_environment("VECTORFALL_MIDFIELD_RESUPPLY") == "1"
+	hold = OS.get_environment("SKIFREI_MODE") == "hold"
+	rotation = ServerRotation.new(OS.get_environment("SKIFREI_ROTATION"), map_name, hold)
+	_apply_rotation(rotation.current())
+	resupply = OS.get_environment("SKIFREI_MIDFIELD_RESUPPLY") == "1"
 	teams = _setting("TEAM_SIZE", 8, 1, MatchProtocol.MAX_TEAM_SIZE)
 	minutes = _setting("MINUTES", 20, 1, 60)
 	captures = _setting("CAPTURES", 5, 1, 20)
 	game_port = _setting("GAME_PORT", MatchProtocol.GAME_PORT, 1, 65535)
 	discovery_port = _setting("DISCOVERY_PORT", MatchProtocol.DISCOVERY_PORT, 1, 65535)
 	web_port = _setting("WS_PORT", MatchProtocol.WEB_PORT, 1, 65535)
-	status_dir = OS.get_environment("VECTORFALL_STATUS_DIR")
+	status_dir = OS.get_environment("SKIFREI_STATUS_DIR")
+	_setup_listing()
 	var result := link.listen(game_port, web_port)
 	if result != OK:
 		push_error("Could not open game ports: " + error_string(result))
 		get_tree().quit(1)
 		return
-	if OS.get_environment("VECTORFALL_DISCOVERY") != "0":
+	if OS.get_environment("SKIFREI_DISCOVERY") != "0":
 		result = discovery.bind(discovery_port)
 		if result != OK:
 			push_error("Could not open LAN discovery: " + error_string(result))
@@ -70,7 +83,7 @@ func _ready() -> void:
 
 
 func _setting(name: String, fallback: int, low: int, high: int) -> int:
-	var value := OS.get_environment("VECTORFALL_" + name)
+	var value := OS.get_environment("SKIFREI_" + name)
 	return clampi(value.to_int(), low, high) if value.is_valid_int() else fallback
 
 
@@ -93,6 +106,7 @@ func _new_round() -> void:
 	if not pending_map.is_empty():
 		map_name = pending_map
 		pending_map = ""
+		rotation.align(map_name, hold)
 	map = GameMap.make(map_name)
 	add_child(map)
 	game = ArenaMatch.make(self, map, minutes, captures, epoch, maxi(8, teams), hold, resupply)
@@ -107,6 +121,13 @@ func _new_round() -> void:
 	for id: int in roster:
 		_assign(id, roster[id])
 	_write_status()
+	next_listing = 0
+
+
+func _apply_rotation(entry: Dictionary) -> void:
+	if not entry.is_empty():
+		map_name = entry.map
+		hold = entry.hold
 
 
 func _assign(id: int, preference: int) -> void:
@@ -156,6 +177,12 @@ func _release(id: int) -> void:
 
 func _receive(id: int, packet: PackedByteArray) -> void:
 	var message := MatchProtocol.decode(packet, MatchProtocol.INPUT_MAX)
+	if message.get("kind") == "browse" and waiting.has(id):
+		var cutoff := Time.get_ticks_msec() - MatchTransport.TIMEOUT_MS + BROWSE_GRACE_MS
+		if waiting[id] > cutoff:
+			waiting[id] = cutoff
+			_send(id, {"kind": "browse", "server": _browser_status()}, 0, true)
+		return
 	if message.get("kind") == "join" and waiting.has(id):
 		if hold and message.get("hold") != true:
 			_send(id, {"kind": "reject", "reason": "This match needs a client with Capture and hold."}, 0, true)
@@ -203,12 +230,14 @@ func _physics_process(delta: float) -> void:
 	if game.tick % SNAPSHOT_TICKS == 0:
 		_snapshot()
 	if rounds_wait >= BETWEEN_ROUNDS:
+		_apply_rotation(rotation.advance())
 		_new_round()
 	status_ticks += 1
 	if status_ticks >= 60:
 		status_ticks = 0
 		_read_control()
 		_write_status()
+		_publish_listing()
 
 
 func _snapshot() -> void:
@@ -245,6 +274,7 @@ func _team_snapshot(state: Dictionary, team: int) -> PackedByteArray:
 	contacts[team] = game.sensed[team]
 	view["sensed"] = contacts
 	view["tactical_orders"] = {team: game.tactical_orders(team)}
+	view["team_calls"] = {"teams": {team: game.team_calls.active(team)}}
 	var markers := {}
 	for recipient: int in game.waypoints:
 		if game.soldier(recipient).team == team:
@@ -307,8 +337,60 @@ func _discover() -> void:
 		if packet.get_string_from_ascii() != MatchProtocol.DISCOVERY_QUERY:
 			continue
 		discovery.set_dest_address(discovery.get_packet_ip(), discovery.get_packet_port())
-		discovery.put_packet(JSON.stringify({"name": server_name, "port": game_port,
-			"map": map.title, "players": assignments.size(), "slots": teams * 2}).to_utf8_buffer())
+		discovery.put_packet(JSON.stringify(_browser_status()).to_utf8_buffer())
+
+
+func _browser_status() -> Dictionary:
+	return {"name": server_name, "port": game_port, "map": map.title, "mode": "hold" if hold else "ctf",
+		"players": assignments.size(), "slots": teams * 2}
+
+
+func _setup_listing() -> void:
+	var configured_url := OS.get_environment("SKIFREI_DIRECTORY_URL").strip_edges()
+	if configured_url.is_empty():
+		return
+	directory_url = ServerDirectory.url(configured_url)
+	directory_token = OS.get_environment("SKIFREI_DIRECTORY_TOKEN")
+	public_host = OS.get_environment("SKIFREI_PUBLIC_HOST").strip_edges()
+	public_ws = OS.get_environment("SKIFREI_PUBLIC_WS").strip_edges()
+	public_port = _setting("PUBLIC_GAME_PORT", game_port, 1, 65535)
+	if directory_url.is_empty() or directory_token.is_empty() or (public_host.is_empty() and public_ws.is_empty()):
+		push_warning("Set an HTTPS directory URL, a directory token and a public game address to list this server.")
+		return
+	listing = HTTPRequest.new()
+	listing.timeout = 8.0
+	listing.max_redirects = 0
+	listing.body_size_limit = 2048
+	listing.request_completed.connect(_listing_reply)
+	add_child(listing)
+
+
+func _publish_listing() -> void:
+	if listing == null or listing.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED or Time.get_ticks_msec() < next_listing:
+		return
+	next_listing = Time.get_ticks_msec() + 30000
+	var data := _browser_status()
+	data.merge({"host": public_host, "ws": public_ws, "v": MatchProtocol.VERSION}, true)
+	data.port = public_port
+	var error := listing.request(directory_url, ["Content-Type: application/json", "Authorization: Bearer " + directory_token],
+		HTTPClient.METHOD_POST, JSON.stringify(data))
+	if error != OK:
+		_listing_error(error_string(error))
+
+
+func _listing_reply(result: int, code: int, _headers: PackedStringArray, _body: PackedByteArray) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		_listing_error("request failed (%d)" % result)
+	elif code != 204:
+		_listing_error("HTTP %d" % code)
+	else:
+		last_listing_error = ""
+
+
+func _listing_error(error: String) -> void:
+	if error != last_listing_error:
+		push_warning("Could not list this server: " + error)
+		last_listing_error = error
 
 
 func _write_status() -> void:
@@ -325,7 +407,7 @@ func _write_status() -> void:
 		"game_port": game_port, "ws_port": web_port, "players": names, "bots": director.brains.size(),
 		"slots": teams * 2, "score": game.scores, "seconds": int(ceil(game.time_left)), "round": epoch,
 		"over": game.over, "mode": "hold" if hold else "ctf",
-		"maps": GameMap.NAMES}))
+		"maps": GameMap.NAMES, "rotation": rotation.entries}))
 	file.close()
 	DirAccess.rename_absolute(temporary, status_dir.path_join("status.json"))
 

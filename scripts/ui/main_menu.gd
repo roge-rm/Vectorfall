@@ -7,6 +7,7 @@ extends Node
 
 const MATCH_SCENE := "res://scenes/main.tscn"
 const PRACTICE_SCENE := "res://scenes/ski_practice.tscn"
+const DRILL_SCENE := "res://scenes/training_drill.tscn"
 
 var ui: Control
 var home: CoverPage
@@ -15,6 +16,7 @@ var settings_screen: SettingsScreen
 var how_to: HowToPlay
 var online: OnlineScreen
 var ladder: LadderScreen
+var drills: DrillsScreen
 ## Last input used, as a LocalInput.Device.
 var device := LocalInput.Device.KEYBOARD
 var _loading: Label
@@ -65,6 +67,7 @@ func _ready() -> void:
 	how_to.visible = false
 	how_to.closed.connect(show_home)
 	how_to.practice_pressed.connect(start_practice)
+	how_to.drills_pressed.connect(show_drills)
 	ui.add_child(how_to)
 	online = OnlineScreen.new()
 	online.hide()
@@ -74,6 +77,10 @@ func _ready() -> void:
 	ladder.closed.connect(show_home)
 	ladder.round_pressed.connect(start_ladder_round)
 	ui.add_child(ladder)
+	drills = DrillsScreen.new()
+	drills.closed.connect(_return_to_how_to)
+	drills.drill_pressed.connect(start_drill)
+	ui.add_child(drills)
 	_loading = MenuKit.heading("Loading", 48)
 	_loading.set_anchors_preset(Control.PRESET_CENTER)
 	_loading.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -83,6 +90,9 @@ func _ready() -> void:
 	if BotLadder.active != BotLadder.Round.NONE:
 		BotLadder.active = BotLadder.Round.NONE
 		show_ladder()
+	elif TrainingDrill.returning:
+		TrainingDrill.returning = false
+		show_drills()
 	elif not OnlineClient.last_error.is_empty() or not OnlineScreen.linked_server().is_empty():
 		show_online()
 	else:
@@ -93,7 +103,7 @@ func _process(_delta: float) -> void:
 	# The sounds are made once the menu has been on screen for two frames.
 	_frames += 1
 	if _frames == 2 and OS.has_feature("web"):
-		JavaScriptBridge.eval("window.vectorfallShown?.()")
+		JavaScriptBridge.eval("window.skifreiShown?.()")
 	if _frames == 3:
 		SoundBank.build()
 
@@ -109,7 +119,7 @@ func _hide_all() -> void:
 		var focused := get_viewport().gui_get_focus_owner()
 		if focused in home.buttons:
 			_home_focus = focused
-	for screen: Control in [home, setup_screen, settings_screen, how_to, online, ladder]:
+	for screen: Control in [home, setup_screen, settings_screen, how_to, online, ladder, drills]:
 		screen.visible = false
 
 
@@ -147,6 +157,24 @@ func show_settings() -> void:
 func show_how_to() -> void:
 	_hide_all()
 	how_to.open(device)
+
+
+func _return_to_how_to() -> void:
+	show_how_to()
+	how_to.drills_button.grab_focus()
+
+
+func show_drills() -> void:
+	_hide_all()
+	drills.open(TrainingDrill.selected)
+
+
+func start_drill(index: int) -> void:
+	if _starting:
+		return
+	_starting = true
+	TrainingDrill.selected = index as TrainingDrill.Kind
+	get_tree().change_scene_to_file(DRILL_SCENE)
 
 
 func start_practice() -> void:
@@ -214,7 +242,7 @@ func _input(event: InputEvent) -> void:
 class CoverPage:
 	extends Control
 
-	const TAGLINE: Array[String] = ["Sixteen soldiers.", "Two flags.", "One long fall."]
+	const TAGLINE: Array[String] = ["Capture the flag", "Up to 32 players"]
 
 	var footnote := ""
 	var buttons: Array[MenuKit.CoverButton] = []
@@ -293,7 +321,7 @@ class CoverPage:
 		draw_rect(Rect2(0.0, 0.0, wide, band), InkUi.INK)
 		InkUi.stripes(self, Rect2(0.0, band, wide, 18.0 * u))
 		var title_size := roundi(84.0 * u)
-		_title_font.draw_string(get_canvas_item(), Vector2(28.0 * u, band - 12.0 * u), "VECTORFALL", HORIZONTAL_ALIGNMENT_LEFT, -1.0, title_size, InkUi.CREAM)
+		_title_font.draw_string(get_canvas_item(), Vector2(28.0 * u, band - 12.0 * u), "SKIFREI", HORIZONTAL_ALIGNMENT_LEFT, -1.0, title_size, InkUi.CREAM)
 		var tag_size := roundi(13.0 * u)
 		for k in TAGLINE.size():
 			var baseline := band - (14.0 + (TAGLINE.size() - 1 - k) * 17.0) * u

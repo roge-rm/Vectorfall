@@ -45,6 +45,7 @@ var game: Match
 var touch: TouchControls
 ## Feed lines, oldest first: {parts: [[words, InkUi.Face]], team, left}.
 var _lines: Array[Dictionary] = []
+var _heard_calls := {}
 ## Seconds left on the hit marker, and whether the hit killed.
 var _hit_left := 0.0
 var _hit_killed := false
@@ -294,7 +295,7 @@ func _on_killed(victim_id: int, killer_id: int, weapon_slot: int) -> void:
 	_add_line(parts, by.team if by != null else 0, FEED_TIME)
 
 
-## A line a bot on your team said, with the bot's name in bold and its team
+## A line from your team, with the speaker's name in bold and their team
 ## colour along the line's left edge.
 func add_chat(speaker: Soldier, text: String) -> void:
 	_add_line([[_name(speaker), InkUi.Face.SERIF_BOLD], [" " + text, InkUi.Face.ITALIC]], speaker.team if speaker != null else 0, CHAT_TIME)
@@ -328,6 +329,8 @@ func _name(who: Soldier) -> String:
 func _process(delta: float) -> void:
 	if soldier == null:
 		return
+	if game != null and not game.over:
+		_hear_team_calls()
 	# Counted down and dropped in place, with no new arrays each frame.
 	for k in range(_lines.size() - 1, -1, -1):
 		_lines[k].left -= delta
@@ -363,6 +366,19 @@ func _process(delta: float) -> void:
 		loadout_button.size = loadout_button.get_combined_minimum_size()
 		loadout_button.position = Vector2((size.x - loadout_button.size.x) * 0.5, size.y * 0.38 + 30.0 * _u())
 	queue_redraw()
+
+
+func _hear_team_calls() -> void:
+	var calls := game.team_calls.active(soldier.team)
+	for kind: int in calls:
+		var call: Dictionary = calls[kind]
+		var seen: Vector2i = _heard_calls.get(kind, Vector2i.ZERO)
+		var acknowledgements: PackedInt32Array = call.acks
+		if seen.x != call.id:
+			add_chat(game.soldier(call.by), Orders.CALL_NAMES[kind])
+		if not acknowledgements.is_empty() and (seen.x != call.id or seen.y == 0) and call.by == soldier.entity_id:
+			add_chat(game.soldier(acknowledgements[0]), "Acknowledged %s" % String(Orders.CALL_MARKERS[kind]).to_lower())
+		_heard_calls[kind] = Vector2i(call.id, acknowledgements.size())
 
 
 func _u() -> float:
@@ -455,6 +471,7 @@ func _draw() -> void:
 		_draw_flag_markers(u)
 		_draw_control_markers(u)
 		_draw_waypoint(u)
+		_draw_team_call(u)
 	var words := notice()
 	if not words.is_empty():
 		var alpha := 1.0 if words == WAIT_FOR_FLAG else clampf(_message_left, 0.0, 1.0)
@@ -790,6 +807,34 @@ func _draw_waypoint(u: float) -> void:
 	if order.is_empty() or soldier.dead or game.over or camera == null:
 		return
 	var point: Vector3 = order.at
+	var at := _tactical_pin(camera, point, u)
+	var distance := int(soldier.at().distance_to(point))
+	_diamond(at, 7.0 * u, InkUi.CREAM, false)
+	InkUi.centred(self, at + Vector2(0, 16.0 * u), "WAYPOINT · %d m" % distance,
+		InkUi.Face.BOLD, _px(13), InkUi.CREAM, 3)
+
+
+func _draw_team_call(u: float) -> void:
+	var camera := get_viewport().get_camera_3d()
+	if soldier.dead or game.over or camera == null:
+		return
+	var call := game.team_calls.latest(soldier, true)
+	if call.is_empty():
+		call = game.team_calls.latest(soldier)
+	if call.is_empty():
+		return
+	var point: Vector3 = call.at
+	var at := _tactical_pin(camera, point + Vector3.UP * 7.0, u)
+	at = _clear_of_touch(at, 18.0 * u)
+	var label := "%s · %d m" % [String(Orders.CALL_MARKERS[call.kind]).to_upper(), int(soldier.at().distance_to(point))]
+	if not call.acks.is_empty():
+		label += " · %d ACK" % call.acks.size()
+	draw_circle(at, 8.0 * u, InkUi.INK, true, -1.0, true)
+	draw_circle(at, 6.0 * u, InkUi.AMBER, true, -1.0, true)
+	InkUi.centred(self, at + Vector2(0, 16.0 * u), label, InkUi.Face.BOLD, _px(13), InkUi.AMBER, 3)
+
+
+func _tactical_pin(camera: Camera3D, point: Vector3, u: float) -> Vector2:
 	var local := camera.to_local(point)
 	var at := camera.unproject_position(point)
 	if local.z >= -0.05:
@@ -797,11 +842,7 @@ func _draw_waypoint(u: float) -> void:
 		if direction.is_zero_approx():
 			direction = Vector2.DOWN
 		at = size * 0.5 + direction.normalized() * size.length()
-	at = at.clamp(Vector2(85.0 * u, _top_edge + 18.0 * u), Vector2(size.x - 85.0 * u, size.y * 0.76))
-	var distance := int(soldier.at().distance_to(point))
-	_diamond(at, 7.0 * u, InkUi.CREAM, false)
-	InkUi.centred(self, at + Vector2(0, 16.0 * u), "WAYPOINT · %d m" % distance,
-		InkUi.Face.BOLD, _px(13), InkUi.CREAM, 3)
+	return at.clamp(Vector2(85.0 * u, _top_edge + 18.0 * u), Vector2(size.x - 85.0 * u, size.y * 0.76))
 
 
 func _draw_flag_markers(u: float) -> void:

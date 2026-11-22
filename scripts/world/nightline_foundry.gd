@@ -57,6 +57,81 @@ func _lane_offsets() -> Vector3:
 	return Vector3(-78.0, 0.0, 78.0)
 
 
+func ctf_respawn_points(team: int, count: int) -> Array[Transform3D]:
+	return flank_spawns(team, count, 100.0, 84.0)
+
+
+func stand_top(team: int) -> Vector3:
+	return base_place(team, -1.0, 0.0, deck_height() + STAND_HEIGHT)
+
+
+func generator_offset() -> Vector2:
+	return Vector2(-19, -48)
+
+
+func turret_points(team: int) -> Array[Vector3]:
+	var guard := base_place(team, -6, -43, 0)
+	guard.y = surface_at(guard.x, guard.z)
+	var front_post := base_place(team, 28, 19, 0)
+	front_post.y = surface_at(front_post.x, front_post.z)
+	return [front_post, guard]
+
+
+func _build_service_bays(base: Node3D, team: int, structure: Material, trim: Material) -> void:
+	var deck := deck_height()
+	var frame := Cel.material(FRAME)
+	var cladding := Cel.material(CLADDING)
+	var stripe := Cel.material(SAFETY)
+	var glow := Cel.glow(LAMP)
+	# Three loading aisles cross the covered stand.
+	for along: float in [-8.0, 8.0]:
+		base_piece(base, team, Vector3(along, deck + 7.15, 0), Vector3(2.4, 1.0, 29.0), frame)
+		for side: float in [-1.0, 1.0]:
+			base_piece(base, team, Vector3(along, deck + 3.4, side * 12.8), Vector3(1.6, 6.8, 1.9), trim, true)
+			base_piece(base, team, Vector3(along, deck + 1.55, side * 12.8), Vector3(1.66, 0.22, 1.96), stripe)
+		base_piece(base, team, Vector3(along, deck + 6.60, 0), Vector3(0.24, 0.11, 23.0), glow)
+	base_piece(base, team, Vector3(0, deck + 7.8, 0), Vector3(18.5, 0.6, 28.5), cladding)
+	for side: float in [-1.0, 1.0]:
+		base_piece(base, team, Vector3(0, deck + 7.4, side * 14.1), Vector3(18.6, 0.22, 0.2), stripe)
+	for side: float in [-1.0, 1.0]:
+		base_piece(base, team, Vector3(10.0, deck + 1.25, side * 7.0), Vector3(1.7, 2.5, 4.5), structure, true)
+		# The yard can't fire straight down the side exit.
+		base_piece(base, team, Vector3(9.0, base_ground + 1.85, side * 25.0), Vector3(2.0, 3.7, 16.0), frame, true)
+		base_piece(base, team, Vector3(9.0, base_ground + 3.75, side * 25.0), Vector3(2.1, 0.12, 16.0), stripe)
+
+	# The service road reaches the reactor without crossing the flag stand.
+	var gen := generator_offset()
+	base_piece(base, team, Vector3(gen.x, base_ground + 7.0, gen.y), Vector3(29.0, 0.85, 20.0), cladding)
+	for side: float in [-1.0, 1.0]:
+		var z := gen.y + side * 8.8
+		base_piece(base, team, Vector3(gen.x, base_ground + 6.35, z), Vector3(29.5, 0.48, 1.4), frame)
+		for end: float in [-1.0, 1.0]:
+			var x := gen.x + end * 12.0
+			base_piece(base, team, Vector3(x, base_ground + 3.15, z), Vector3(1.7, 6.3, 1.8), trim, true)
+			base_piece(base, team, Vector3(x, base_ground + 1.55, z), Vector3(1.75, 0.22, 1.85), stripe)
+		base_piece(base, team, Vector3(gen.x, base_ground + 6.55, z - side), Vector3(25.0, 0.12, 0.18), glow)
+	base_piece(base, team, Vector3(gen.x, base_ground + 2.2, gen.y + 8.8), Vector3(13.0, 4.4, 1.1), frame, true)
+	base_piece(base, team, Vector3(gen.x - 5, base_ground + 1.65, gen.y - 8.8), Vector3(7.0, 3.3, 1.1), structure, true)
+
+
+func add_base_points(graph: RouteGraph) -> void:
+	super(graph)
+	for team in 2:
+		# The side exits open under the roof and between its corner pillars.
+		for side: float in [-1.0, 1.0]:
+			for edge: float in [12.0, 19.0, 33.0]:
+				var at := base_place(team, -1.0, side * edge, 0)
+				var point := _point(graph, at.x, at.z)
+				graph.add_interest(RouteGraph.WAY_IN, team, point)
+				if edge == 12.0:
+					graph.add_interest(RouteGraph.FLAG_ENTRY, team, point)
+				if edge == 19.0:
+					graph.add_interest(RouteGraph.FLAG_EXIT, team, point)
+		for along: float in [-37.0, -4.0, 10.0]:
+			var at := base_place(team, along, generator_offset().y, 0)
+			graph.add_interest(RouteGraph.WAY_IN, team, _point(graph, at.x, at.z))
+
+
 func _dress(parent: Node3D) -> void:
 	var finishes := []
 	var lights := []
@@ -140,6 +215,10 @@ static func _add_details(parent: Node3D, parts: Array, material: Material) -> vo
 
 func midfield_supply() -> Vector2:
 	return Vector2(0, 30)
+
+
+func controlled_supply_site() -> int:
+	return 1
 
 
 func control_sites() -> Array[Vector2]:

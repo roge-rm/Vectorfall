@@ -4,12 +4,12 @@ config_version=5
 
 [application]
 
-config/name="Vectorfall"
+config/name="Skifrei"
 config/description="Team capture the flag with jetpacks."
 run/main_scene="res://scenes/menu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
-config/icon="res://art/icon.svg"
-config/version="0.15.0"
+config/icon="res://art/icon.png"
+config/version="0.16.0"
 boot_splash/bg_color=Color(0.1, 0.12, 0.2, 1)
 boot_splash/show_image=false
 config/quit_on_go_back=false

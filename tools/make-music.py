@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the ten Vectorfall tracks into art/music with NumPy and FFmpeg."""
+"""Render the ten Skifrei tracks into art/music with NumPy and FFmpeg."""
 
 from dataclasses import dataclass
 from functools import lru_cache

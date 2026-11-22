@@ -19,6 +19,7 @@ var carrier_id := 0
 var return_in := 0.0
 ## Where its stand holds it.
 var home := Vector3.ZERO
+var observer: Soldier
 
 ## The position at the start of the tick, for bot threads. See Soldier.at().
 var _seen_pos := Vector3.ZERO
@@ -107,6 +108,9 @@ static func _look_mesh(cloth_at: Vector3, pale: Color, team_part: Color) -> Arra
 ## A thin faint beam while it's home, a wide bright one when it's away, so it
 ## can be found from across the map.
 func _update_beam() -> void:
+	_beam.visible = not is_instance_valid(observer) or observer.game.tactical_flag_visible(observer, self)
+	if not _beam.visible:
+		return
 	var away := mode != Mode.HOME
 	var radius := 0.9 if away else 0.35
 	var height := 400.0 if away else 70.0

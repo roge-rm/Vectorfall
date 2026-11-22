@@ -2,7 +2,7 @@ extends Node
 
 ## Captures field equipment on Ochre Fold with the normal match HUD.
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall/m11"
+const FOLDER := "/srv/downloads/temp/debug/skifrei/m11"
 
 var main: Node
 

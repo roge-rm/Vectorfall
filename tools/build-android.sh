@@ -12,12 +12,12 @@ GODOT="tools/godot/Godot_v${VERSION}-stable_linux.x86_64"
 TEMPLATES="tools/godot/editor_data/export_templates/${VERSION}.stable"
 BUILD="$PWD/build"
 PRESET="Android"
-APK="$BUILD/vectorfall-debug.apk"
+APK="$BUILD/skifrei-debug.apk"
 if [ "${1:-}" = "--emulator" ]; then
 	PRESET="Android emulator"
-	APK="$BUILD/vectorfall-emulator-debug.apk"
+	APK="$BUILD/skifrei-emulator-debug.apk"
 fi
-DROP=/srv/downloads/temp/debug/vectorfall
+DROP=/srv/downloads/temp/debug/skifrei
 ADB="${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools/adb"
 # Our own adb server (see ~/.claude/resources.md), so the Godot export never
 # starts or stops the shared one on 5037. It's left running, so start it

@@ -20,6 +20,15 @@ func _ready() -> void:
 	set_audible(_audible)
 
 
+func _exit_tree() -> void:
+	var had_playback := has_stream_playback()
+	stop()
+	stream = null
+	if had_playback and not OS.has_feature("web"):
+		# Let the audio thread finish the stop fade before the driver shuts down.
+		OS.delay_msec(70)
+
+
 static func track_path(index: int) -> String:
 	return "res://art/music/%s.ogg" % TRACKS[index]
 

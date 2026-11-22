@@ -6,7 +6,8 @@ extends RefCounted
 ## match reads the rest when the settings screen says they changed.
 
 ## Tests point this somewhere else so they don't touch your settings.
-static var path := "user://settings.cfg"
+const SAVE_PATH := "user://settings.cfg"
+static var path := SAVE_PATH
 
 const VIEW_DISTANCES: Array[float] = [600.0, 900.0, 1200.0, 1800.0, 2400.0]
 const RENDER_SCALES: Array[float] = [0.5, 0.67, 0.8, 1.0]
@@ -231,6 +232,10 @@ static func set_value(setting: String, to: Variant) -> void:
 
 
 static func load_file() -> void:
+	if path == SAVE_PATH and OS.has_feature("pc") and not FileAccess.file_exists(path):
+		var previous := OS.get_user_data_dir().get_base_dir().path_join("Vectorfall/settings.cfg")
+		if FileAccess.file_exists(previous):
+			DirAccess.copy_absolute(previous, ProjectSettings.globalize_path(path))
 	var file := ConfigFile.new()
 	pad_layout = PadLayout.XBOX
 	if file.load(path) == OK:

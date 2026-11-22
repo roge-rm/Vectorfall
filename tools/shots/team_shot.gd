@@ -4,7 +4,7 @@ extends "res://tools/shots/direction_shot.gd"
 ## the same camera, then quits. It needs a screen:
 ##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/team_shot.tscn
 ## Saves dir-2a.png, dir-2b.png and dir-2c.png in
-## /srv/downloads/temp/debug/vectorfall, plus dir-2-far.png with each pair's
+## /srv/downloads/temp/debug/skifrei, plus dir-2-far.png with each pair's
 ## six soldiers at 50 m, stacked a, b, c. Add letters after -- to take only
 ## those, or a letter with two colours to try a pair, like -- x=ffd020,2040e0.
 

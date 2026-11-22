@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=Vectorfall
+Name=Skifrei
 GenericName=Team shooter
 Comment=Capture the flag with jetpacks and skiing
-Exec=vectorfall
-Icon=vectorfall
+Exec=skifrei
+Icon=skifrei
 Terminal=false
 Categories=Game;ActionGame;
 Keywords=shooter;jetpack;ski;capture the flag;
-StartupWMClass=Vectorfall
+StartupWMClass=Skifrei

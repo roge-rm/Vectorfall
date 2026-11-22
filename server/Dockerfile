@@ -24,15 +24,15 @@ COPY . .
 RUN mkdir /out \
     && godot --headless --import > /tmp/import.log 2>&1 \
     && ! grep -q 'SCRIPT ERROR' /tmp/import.log \
-    && godot --headless --export-pack Linux /out/vectorfall.pck > /tmp/export.log 2>&1 \
-    && test -s /out/vectorfall.pck \
+    && godot --headless --export-pack Linux /out/skifrei.pck > /tmp/export.log 2>&1 \
+    && test -s /out/skifrei.pck \
     && cp /usr/local/bin/godot /out/godot \
     || (cat /tmp/import.log /tmp/export.log; exit 1)
 
 FROM debian:trixie-slim
-RUN install -d -o 10003 -g 10003 /state /opt/vectorfall
-COPY --from=build /out/ /opt/vectorfall/
-ENV XDG_DATA_HOME=/state XDG_CONFIG_HOME=/state XDG_CACHE_HOME=/state VECTORFALL_STATUS_DIR=/state GODOT_SILENCE_ROOT_WARNING=1
+RUN install -d -o 10003 -g 10003 /state /opt/skifrei
+COPY --from=build /out/ /opt/skifrei/
+ENV XDG_DATA_HOME=/state XDG_CONFIG_HOME=/state XDG_CACHE_HOME=/state SKIFREI_STATUS_DIR=/state GODOT_SILENCE_ROOT_WARNING=1
 USER 10003:10003
 EXPOSE 27300/udp 27301/udp 27302/tcp
-ENTRYPOINT ["/opt/vectorfall/godot", "--headless", "--main-pack", "/opt/vectorfall/vectorfall.pck", "res://scenes/server.tscn"]
+ENTRYPOINT ["/opt/skifrei/godot", "--headless", "--main-pack", "/opt/skifrei/skifrei.pck", "res://scenes/server.tscn"]

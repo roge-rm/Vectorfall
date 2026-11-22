@@ -21,7 +21,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-read -r VECTORFALL_GAME_PORT VECTORFALL_DISCOVERY_PORT VECTORFALL_WS_PORT < <(
+read -r SKIFREI_GAME_PORT SKIFREI_DISCOVERY_PORT SKIFREI_WS_PORT < <(
 	python3 - <<'PY'
 import socket
 
@@ -32,9 +32,9 @@ for port in ports:
 print(*(port.getsockname()[1] for port in ports))
 PY
 )
-export VECTORFALL_GAME_PORT VECTORFALL_DISCOVERY_PORT VECTORFALL_WS_PORT
-export VECTORFALL_TEAM_SIZE=16 VECTORFALL_MAP=test VECTORFALL_STATUS_DIR="$check_dir"
-export VECTORFALL_DISCOVERY=1
+export SKIFREI_GAME_PORT SKIFREI_DISCOVERY_PORT SKIFREI_WS_PORT
+export SKIFREI_TEAM_SIZE=16 SKIFREI_MAP=test SKIFREI_STATUS_DIR="$check_dir"
+export SKIFREI_DISCOVERY=1
 export XDG_DATA_HOME="$check_dir/data"
 
 "$godot" --headless --path . --import > "$check_dir/import.log" 2>&1

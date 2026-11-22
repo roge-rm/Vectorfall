@@ -6,16 +6,17 @@ extends Control
 
 signal closed
 signal practice_pressed
+signal drills_pressed
 
 enum Scheme { TOUCH, KEYBOARD, GAMEPAD }
 
 const TABS: Array[String] = ["Touch", "Keyboard", "Gamepad"]
 const CONTROLS: Array[String] = [
-	"Drag on the left side to move and on the right side to look.\nHold JUMP to ski and JET to fly. With Jet set to Stick and button, double-tap and hold the stick, or push it past its ring, to jet too. One thumb can slide between JUMP, JET and FIRE.\nDrag from FIRE to aim while firing. The button with your weapon's name changes weapon.\nPACK uses your pack. PLACE sets down a turret, sensor or station on level ground. GREN throws a hand grenade and MINE places a mine.\nStep onto a friendly station, or tap LOADOUT while dead, to change your loadout.\nTap BOARD beside a friendly vehicle, or EXIT to leave it. Drag to steer, use the stick to drive and UP or DOWN to fly.\nORDERS gives your bots orders, II pauses.\nTurn on Gyro aim in Settings to aim by turning the phone.\nAim assist slows your aim over an enemy and turns it gently toward them.",
-	"WASD to move, the mouse to look, left click to fire.\nHold space to jump and ski, right click or shift to jet.\n1 to 4 pick a weapon, Q or the wheel changes weapon.\nE uses your pack. E or G places turret, sensor and station packs on level ground. F throws a hand grenade, C places a mine.\nI or B changes your loadout on a friendly station or while dead.\nR boards or exits a vehicle. Look to steer, use movement keys to drive, and hold right click or Shift to climb or Space to descend in the air.\nV then a number gives your bots orders, Esc pauses.",
-	"Left stick to move, right stick to look.\nRight trigger fires, left trigger jets. Tap the left bumper or A to jump. Hold either to ski.\nY or right shoulder changes weapon. Y resets Ski Practice.\nX uses your pack or places it on level ground if it carries a turret, sensor or station. D-pad left throws a hand grenade, D-pad right places a mine.\nSelect (Back or −) changes your loadout on a friendly station or while dead.\nB boards or exits a vehicle. Look to steer, use the left stick to drive and hold the jet or jump button to climb or descend in the air.\nD-pad up gives your bots orders. Click the right stick for the team map. Start (+) pauses.\nA confirms and B goes back in menus. Choose Xbox or Nintendo under Gamepad layout in Settings.\nAim assist slows your aim over an enemy and turns it gently toward them.",
+	"Drag on the left side to move and on the right side to look.\nHold JUMP to ski and JET to fly. With Jet set to Stick and button, double-tap and hold the stick, or push it past its ring, to jet too. One thumb can slide between JUMP, JET and FIRE.\nDrag from FIRE to aim while firing. The button with your weapon's name changes weapon.\nPACK uses your pack. PLACE sets down a turret, sensor or station on level ground. GREN throws a hand grenade and MINE places a mine.\nStep onto a friendly station, or tap LOADOUT while dead, to change your loadout.\nTap BOARD beside a friendly vehicle, or EXIT to leave it. Drag to steer, use the stick to drive and UP or DOWN to fly.\nORDERS opens bot orders and team calls, II pauses.\nTurn on Gyro aim in Settings to aim by turning the phone.\nAim assist slows your aim over an enemy and turns it gently toward them.",
+	"WASD to move, the mouse to look, left click to fire.\nHold space to jump and ski, right click or shift to jet.\n1 to 4 pick a weapon, Q or the wheel changes weapon.\nE uses your pack. E or G places turret, sensor and station packs on level ground. F throws a hand grenade, C places a mine.\nI or B changes your loadout on a friendly station or while dead.\nR boards or exits a vehicle. Look to steer, use movement keys to drive, and hold right click or Shift to climb or Space to descend in the air.\nV then a number picks a bot order or team call, Esc pauses.",
+	"Left stick to move, right stick to look.\nRight trigger fires, left trigger jets. Tap the left bumper or A to jump. Hold either to ski.\nY or right shoulder changes weapon. Y resets Ski Practice.\nX uses your pack or places it on level ground if it carries a turret, sensor or station. D-pad left throws a hand grenade, D-pad right places a mine.\nSelect (Back or −) changes your loadout on a friendly station or while dead.\nB boards or exits a vehicle. Look to steer, use the left stick to drive and hold the jet or jump button to climb or descend in the air.\nD-pad up opens bot orders and team calls. Click the right stick for the team map. Start (+) pauses.\nA confirms and B goes back in menus. Choose Xbox or Nintendo under Gamepad layout in Settings.\nAim assist slows your aim over an enemy and turns it gently toward them.",
 ]
-const RULES := "Take the other team's flag from their base and bring it to your flag stand. You can only score while your own flag is home.\nTouch your own flag when it's dropped to send it home, or it goes home by itself after 30 s.\nThe first team to the capture limit wins, or the one with most captures when time runs out.\nHold the ski control going downhill: you slide with no friction and pick up speed. Jet over the next rise to keep it. Jet energy comes back when you stop jetting."
+const RULES := "Take the other team's flag from their base and bring it to your flag stand. You can only score while your own flag is home.\nTouch your own flag when it's dropped to send it home, or it goes home by itself after 30 s.\nAfter at least four seconds, you respawn with the next team wave. Waves are eight seconds apart.\nThe first team to the capture limit wins, or the one with most captures when time runs out.\nHold the ski control going downhill: you slide with no friction and pick up speed. Jet over the next rise to keep it. Jet energy comes back when you stop jetting."
 
 const FONTS := "Big Shoulders Display, copyright 2019 The Big Shoulders Project Authors (https://github.com/xotypeco/big_shoulders).\nIBM Plex Serif, copyright 2017 IBM Corp. with Reserved Font Name \"Plex\".\nBoth are licensed under the SIL Open Font License, Version 1.1:"
 const LICENCE_FILE := "res://art/fonts/IBMPlexSerif-OFL.txt"
@@ -23,6 +24,7 @@ const LICENCE_FILE := "res://art/fonts/IBMPlexSerif-OFL.txt"
 var scheme := Scheme.KEYBOARD
 var _tabs: Array[MenuKit.CoverButton] = []
 var _controls: Label
+var drills_button: MenuKit.CoverButton
 
 
 func _init(allow_practice := false) -> void:
@@ -55,7 +57,9 @@ func _init(allow_practice := false) -> void:
 	var buttons := MenuKit.button_row(box)
 	buttons.add_child(MenuKit.button("Back", close, MenuKit.BUTTON_SIZE, true))
 	if allow_practice:
-		buttons.add_child(MenuKit.button("Ski practice", practice_pressed.emit, MenuKit.BUTTON_SIZE, false, true))
+		buttons.add_child(MenuKit.button("Ski practice", practice_pressed.emit))
+		drills_button = MenuKit.button("Drills", drills_pressed.emit, MenuKit.BUTTON_SIZE, false, true)
+		buttons.add_child(drills_button)
 	show_scheme(scheme)
 
 

@@ -10,8 +10,8 @@ const R := BotBrain.Role
 const P := BotBrain.Personality
 
 ## Kits, as indexes into KITS.
-enum Kit { RUNNER_BLASTER, RUNNER_GRENADES, MEDIUM_SHIELD, MEDIUM_AMMO, MEDIUM_REPAIR, HEAVY_SHIELD, HEAVY_REPAIR, LIGHT_CHASER, SNIPER }
-const KIT_NAMES: Array[String] = ["runner", "runner grenades", "medium shield", "medium ammo", "medium repair", "heavy shield", "heavy repair", "chaser", "sniper"]
+enum Kit { RUNNER_BLASTER, RUNNER_GRENADES, MEDIUM_SHIELD, MEDIUM_AMMO, MEDIUM_REPAIR, HEAVY_SHIELD, HEAVY_REPAIR, LIGHT_CHASER, SNIPER, RUNNER_JAMMER }
+const KIT_NAMES: Array[String] = ["runner", "runner grenades", "medium shield", "medium ammo", "medium repair", "heavy shield", "heavy repair", "chaser", "sniper", "runner jammer"]
 ## Each kit as [armour, weapons in carry order, pack].
 const KITS: Array = [
 	[A.LIGHT, [Weapon.DISC, Weapon.BLASTER], Pack.ENERGY],
@@ -23,11 +23,12 @@ const KITS: Array = [
 	[A.HEAVY, [Weapon.DISC, Weapon.CHAINGUN, Weapon.MORTAR, Weapon.GRENADE_LAUNCHER], Pack.REPAIR],
 	[A.LIGHT, [Weapon.DISC, Weapon.CHAINGUN], Pack.ENERGY],
 	[A.LIGHT, [Weapon.DISC, Weapon.SNIPER], Pack.JAMMER],
+	[A.LIGHT, [Weapon.DISC, Weapon.CHAINGUN], Pack.JAMMER],
 ]
 
 
 ## The kits a bot in a role with a personality chooses between.
-static func choices(role: int, personality: int) -> Array[int]:
+static func choices(role: int, personality: int, ctf := false) -> Array[int]:
 	match role:
 		R.OFFENCE:
 			# Runners are light for speed; careful ones go medium.
@@ -35,6 +36,8 @@ static func choices(role: int, personality: int) -> Array[int]:
 				return [Kit.MEDIUM_SHIELD, Kit.MEDIUM_AMMO]
 			if personality == P.AGGRESSIVE:
 				return [Kit.RUNNER_BLASTER, Kit.RUNNER_GRENADES]
+			if ctf:
+				return [Kit.RUNNER_BLASTER, Kit.RUNNER_GRENADES, Kit.RUNNER_JAMMER, Kit.MEDIUM_SHIELD]
 			return [Kit.RUNNER_BLASTER, Kit.RUNNER_GRENADES, Kit.MEDIUM_SHIELD]
 		R.ESCORT:
 			return [Kit.MEDIUM_SHIELD, Kit.MEDIUM_AMMO]
@@ -76,8 +79,8 @@ static func loadout(kit: int) -> Loadout:
 
 
 ## Picks one of the choices with rng.
-static func pick(role: int, personality: int, rng: RandomNumberGenerator) -> int:
-	var options := choices(role, personality)
+static func pick(role: int, personality: int, rng: RandomNumberGenerator, ctf := false) -> int:
+	var options := choices(role, personality, ctf)
 	return options[rng.randi_range(0, options.size() - 1)] if options.size() > 1 else options[0]
 
 

@@ -20,6 +20,8 @@ const HIGH_GROUND := "high_ground"
 ## deployables.
 const SNIPER := "sniper"
 const FLAG_APPROACH := "flag_approach"
+const FLAG_EXIT := "flag_exit"
+const FLAG_ENTRY := "flag_entry"
 const VEHICLE_PAD := "vehicle_pad"
 const DEPLOY := "deploy"
 ## The spot in a team's generator room to stand at to reach its generator.

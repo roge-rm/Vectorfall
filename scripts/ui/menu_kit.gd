@@ -143,6 +143,23 @@ static func ink_label(words: String, font_size := 15, face := InkUi.Face.SERIF, 
 	return label
 
 
+static func line_edit(placeholder: String) -> LineEdit:
+	var edit := LineEdit.new()
+	edit.custom_minimum_size.y = px(40)
+	var frame := StyleBoxFlat.new()
+	frame.bg_color = InkUi.CREAM
+	frame.border_color = InkUi.INK
+	frame.set_border_width_all(pxi(2))
+	frame.set_content_margin_all(px(6))
+	edit.add_theme_stylebox_override("normal", frame)
+	edit.add_theme_color_override("font_color", InkUi.INK)
+	edit.add_theme_color_override("font_placeholder_color", InkUi.BROWN_GREY)
+	edit.add_theme_color_override("caret_color", InkUi.INK)
+	edit.max_length = 256
+	edit.placeholder_text = placeholder
+	return edit
+
+
 ## A menu button that clicks and calls back when pressed. filled is the ink
 ## primary look, otherwise it's outlined. number shows as "No. n" before the
 ## words when above 0. font_size is in design pixels.

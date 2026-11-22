@@ -67,6 +67,8 @@ func _ready() -> void:
 		player = replica.player
 	player.display_name = "You"
 	player.set_first_person(true)
+	for flag: Flag in game.flags.values():
+		flag.observer = player
 	input.soldier = player
 	input.source.yaw = player.yaw
 	input.source.pitch = player.pitch
@@ -99,6 +101,7 @@ func _ready() -> void:
 	hud.menu_requested.connect(quit_to_menu)
 	layer.add_child(hud)
 	menu = OrderMenu.new()
+	menu.game = game
 	menu.director = bots
 	menu.soldier = player
 	menu.commander_mode = replica == null and Settings.commander_mode

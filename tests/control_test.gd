@@ -80,6 +80,12 @@ func _run() -> void:
 		checks.check(game.over and game.winner == 0, "the team with the most points wins at time up")
 
 		var pad := game.neutral_station
+		var controlled := map_name == "nightline_foundry"
+		checks.check((pad.control_index >= 0) == controlled, "only the Foundry pad is controlled by a point")
+		if controlled:
+			checks.check(not game.station_working(pad) and pad.control_index == 1
+				and HoldPoint.contains(pad.position, side_point.position), "Foundry's B ammo starts off inside the control area")
+			side_point.owning_team = 0
 		lime.soldier.position = pad.position + Vector3(6, 0, 0)
 		lime.soldier.ammo[0] = 0
 		lime._think_ctf()
@@ -99,9 +105,10 @@ func _run() -> void:
 		game._step_stations(0.0, game.entities.keys())
 		for bot in [lime, blue]:
 			var who: Soldier = bot.soldier
-			checks.check(who.ammo[0] == who.max_ammo(0) and who.grenades == 0 and who.mines == 0
+			var ammo := 0 if controlled and who.team == 1 else who.max_ammo(0)
+			checks.check(who.ammo[0] == ammo and who.grenades == 0 and who.mines == 0
 				and not who.deploy_ready and not who.next_loadout.equals(who.loadout) and game.station_under(who) == null,
-				"the neutral pad refills weapon ammo without power or loadout changes")
+				"the pad refills only allowed players without generator power or loadout changes")
 		lime.soldier.ammo[0] = 0
 		lime.soldier.position = arena.spawn_point(0, 0).origin
 		game._step_stations(2.0, game.entities.keys())
@@ -115,6 +122,19 @@ func _run() -> void:
 		lime.soldier.position = pad.position
 		game._step_stations(0.0, game.entities.keys())
 		checks.check(lime.soldier.ammo[0] == lime.soldier.max_ammo(0), "the pad refills on re-entry once ready")
+		if controlled:
+			side_point.contested = true
+			game._step_stations(0.0, game.entities.keys())
+			checks.check(not game.station_working(pad) and blue.soldier.ammo[0] == 0, "contesting B pauses ammo")
+			side_point.contested = false
+			side_point.owning_team = 1
+			var retaken := game.get_state(false)
+			side_point.owning_team = -1
+			pad.control_index = -1
+			game.set_state(retaken)
+			game._step_stations(0.0, game.entities.keys())
+			checks.check(game.station_team(pad) == 1 and blue.soldier.ammo[0] == blue.soldier.max_ammo(0),
+				"retaking B transfers ammo access and both survive a snapshot")
 		holder.queue_free()
 		await process_frame
 	checks.finish(self)

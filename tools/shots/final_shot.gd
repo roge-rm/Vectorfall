@@ -3,7 +3,7 @@ extends "res://tools/shots/direction_shot.gd"
 ## Pictures of the game's look in the paperback palette for sign-off, then
 ## quits. It needs a screen:
 ##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/final_shot.tscn
-## Saves in /srv/downloads/temp/debug/vectorfall: final-ingame.png (the
+## Saves in /srv/downloads/temp/debug/skifrei: final-ingame.png (the
 ## style scene from the dir-2 camera), final-soldiers.png (light, medium and
 ## heavy of both teams, close, from the front and from behind), final-weapons.png (both guns in your hands
 ## for both teams) and final-far.png (the six soldiers at 50 m on sand, in

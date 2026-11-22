@@ -22,9 +22,9 @@ func _run() -> void:
 	remote.offer(181, held)
 	checks.check(remote.make_command(OnlineClient.STEP).move == Vector2.UP and remote.applied == 181,
 		"input resumes after a long packet gap")
-	var game_port := int(OS.get_environment("VECTORFALL_GAME_PORT"))
-	var web_port := int(OS.get_environment("VECTORFALL_WS_PORT"))
-	var discovery_port := int(OS.get_environment("VECTORFALL_DISCOVERY_PORT"))
+	var game_port := int(OS.get_environment("SKIFREI_GAME_PORT"))
+	var web_port := int(OS.get_environment("SKIFREI_WS_PORT"))
+	var discovery_port := int(OS.get_environment("SKIFREI_DISCOVERY_PORT"))
 	Settings.path = "user://online-match-test.cfg"
 	var probe := PacketPeerUDP.new()
 	probe.bind(0)
@@ -111,11 +111,12 @@ func _run() -> void:
 		"the host accepts a waypoint through the normal client command path")
 	checks.check(not web.latest.get("waypoints", {}).has(mate_id),
 		"the opposing team does not receive the waypoint")
+	await _check_team_calls(main, web_port)
 	checks.check(native.latest.has("results") and native.latest.results == web.latest.get("results", {}),
 		"both teams receive the same authoritative results")
 	var first_round := native.round_id
 	var scene_id := main.get_instance_id()
-	var request := FileAccess.open(OS.get_environment("VECTORFALL_STATUS_DIR").path_join("round.json"), FileAccess.WRITE)
+	var request := FileAccess.open(OS.get_environment("SKIFREI_STATUS_DIR").path_join("round.json"), FileAccess.WRITE)
 	request.store_string(JSON.stringify({"map": native.map_name}))
 	request.close()
 	for index in 420:
@@ -139,6 +140,58 @@ func _run() -> void:
 		"the bot gets its reserved callsign back in the client")
 	await _check_capacity(game_port, web_port)
 	_finish()
+
+
+func _check_team_calls(main: Node, web_port: int) -> void:
+	var teammates: Array[OnlineClient] = []
+	for index in 2:
+		var client := OnlineClient.new()
+		root.add_child(client)
+		client.ready_to_play.connect(client.arena_ready)
+		client.start("ws://127.0.0.1:%d" % web_port, 0, true)
+		teammates.append(client)
+	for index in 180:
+		if teammates.all(func(client: OnlineClient) -> bool: return client.started):
+			break
+		await physics_frame
+	var team: int = main.player.team
+	var mate: OnlineClient
+	for client in teammates:
+		if client.started and client.initial.entities[client.player_id].team == team:
+			mate = client
+			break
+	main.menu.open()
+	main.menu.pick(Orders.MENU.size())
+	main.menu.pick(0)
+	var call := {}
+	if mate != null:
+		for index in 150:
+			call = _flag_run(mate, team)
+			if not call.is_empty() and _flag_run(native, team).get("id") == call.id:
+				break
+			await physics_frame
+	checks.check(not call.is_empty() and call.get("by") == native.player_id,
+		"a native UI call reaches a WebSocket teammate in a 16v16 match")
+	if not call.is_empty():
+		checks.check(not web.latest.get("team_calls", {}).get("teams", {}).has(team),
+			"an opponent receives no snapshot data for the other team's call")
+		var reply := PlayerCommand.new()
+		reply.order = Orders.Kind.ACK_CALL
+		reply.order_arg = call.id
+		web.submit(reply)
+		mate.submit(reply)
+		for index in 150:
+			if _flag_run(native, team).get("acks", PackedInt32Array()).has(mate.player_id):
+				break
+			await physics_frame
+		checks.check(_flag_run(native, team).get("acks") == PackedInt32Array([mate.player_id]),
+			"the server returns the WebSocket teammate's acknowledgement and ignores an opponent's")
+	for client in teammates:
+		client.stop()
+
+
+func _flag_run(client: OnlineClient, team: int) -> Dictionary:
+	return client.latest.get("team_calls", {}).get("teams", {}).get(team, {}).get(Orders.Kind.FLAG_RUN, {})
 
 
 func _check_capacity(game_port: int, web_port: int) -> void:

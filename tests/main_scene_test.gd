@@ -282,7 +282,7 @@ func _run() -> void:
 	screen.pick_slot(2)
 	await ticks(3)
 	checks.check(player.next_loadout.equals(Settings.loadout(2)) and player.loadout.armour == SoldierBody.Armour.LIGHT, "a pick while dead is for the respawn")
-	await ticks(int(Match.RESPAWN_DELAY * 60.0) + 5)
+	await ticks(ceili(player.respawn_in * 60.0) + 5)
 	checks.check(not player.dead and player.loadout.armour == SoldierBody.Armour.HEAVY, "you respawn in it")
 	checks.check(not screen.visible and not main.hud.loadout_button.visible, "the screen and button go once you're back")
 

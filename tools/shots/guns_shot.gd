@@ -6,7 +6,7 @@ extends "res://tools/shots/direction_shot.gd"
 ## Saves m9/guns.png (a row per gun in slot order, team 0 on the left, the
 ## lower right of the frame as in style-weapons.png) and m9/guns-side.png
 ## (each gun from its left side, team 0, at the near detail level) in
-## /srv/downloads/temp/debug/vectorfall.
+## /srv/downloads/temp/debug/skifrei.
 
 
 func _ready() -> void:

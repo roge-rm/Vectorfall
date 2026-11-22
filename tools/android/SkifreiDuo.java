@@ -1,4 +1,4 @@
-package com.rm.vectorfall.android;
+package com.rm.skifrei.android;
 
 import android.app.Activity;
 import android.app.Presentation;
@@ -37,14 +37,14 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Locale;
 
-public final class VectorfallDuo extends GodotPlugin implements DisplayManager.DisplayListener {
-    private static final String TAG = "VectorfallDuo";
+public final class SkifreiDuo extends GodotPlugin implements DisplayManager.DisplayListener {
+    private static final String TAG = "SkifreiDuo";
     private static final int[] SPLASHES = {
-        R.drawable.vectorfall_duo_ski_jet,
-        R.drawable.vectorfall_duo_flag_jet_escape,
-        R.drawable.vectorfall_duo_tank_ambush,
-        R.drawable.vectorfall_duo_bomber_strike,
-        R.drawable.vectorfall_duo_turret_defence,
+        R.drawable.skifrei_duo_ski_jet,
+        R.drawable.skifrei_duo_flag_jet_escape,
+        R.drawable.skifrei_duo_tank_ambush,
+        R.drawable.skifrei_duo_bomber_strike,
+        R.drawable.skifrei_duo_turret_defence,
     };
     private final Handler ui = new Handler(Looper.getMainLooper());
     private DisplayManager displays;
@@ -59,7 +59,7 @@ public final class VectorfallDuo extends GodotPlugin implements DisplayManager.D
     private boolean retriedDismissal;
     private volatile boolean available;
 
-    public VectorfallDuo(Godot godot) {
+    public SkifreiDuo(Godot godot) {
         super(godot);
     }
 
@@ -353,7 +353,7 @@ public final class VectorfallDuo extends GodotPlugin implements DisplayManager.D
             canvas.drawBitmap(splash, null, splashFrame, paint);
             canvas.restore();
             fill(canvas, INK, 0, 0, 640, 72);
-            text(canvas, "VECTORFALL", 18, 45, 38, CREAM, HEADING, Paint.Align.LEFT, 604);
+            text(canvas, "SKIFREI", 18, 45, 38, CREAM, HEADING, Paint.Align.LEFT, 604);
             stripes(canvas, 62);
         }
 
@@ -458,6 +458,11 @@ public final class VectorfallDuo extends GodotPlugin implements DisplayManager.D
                     diamond(canvas, x, y, 9, INK);
                     diamond(canvas, x, y, 6, AMBER);
                     break;
+                case "call":
+                    circle(canvas, x, y - 15, 10, INK, false);
+                    circle(canvas, x, y - 15, 8, AMBER, false);
+                    text(canvas, entry.optString("label"), x, y - 10, 13, INK, HEADING, Paint.Align.CENTER, 16);
+                    return;
                 case "you":
                     circle(canvas, x, y, 9, INK, false);
                     circle(canvas, x, y, 7, CREAM, false);

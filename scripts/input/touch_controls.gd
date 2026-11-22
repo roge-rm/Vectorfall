@@ -257,8 +257,6 @@ func button_shown(k: int) -> bool:
 		return k == 1 or k == 2
 	if soldier == null or soldier.game == null:
 		return k != BOARD_BUTTON
-	if k == ORDERS_BUTTON and not soldier.game.hold_points.is_empty():
-		return false
 	var hull: Vehicle = soldier.game.fleet.hulls.get(soldier.vehicle_id)
 	if hull == null:
 		return k != BOARD_BUTTON or soldier.game.fleet.nearby(soldier) != null

@@ -3,10 +3,10 @@ extends Node
 ## Takes a picture of the test map from just in front of the player's base,
 ## looking down the valley to the other base, and quits. It needs a screen:
 ##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/map_shot.tscn
-## Saved as /srv/downloads/temp/debug/vectorfall/map.png. Add "no-outlines"
+## Saved as /srv/downloads/temp/debug/skifrei/map.png. Add "no-outlines"
 ## after -- for a picture without outlines.
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall"
+const FOLDER := "/srv/downloads/temp/debug/skifrei"
 
 
 func _ready() -> void:

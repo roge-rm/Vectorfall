@@ -3,7 +3,7 @@ extends "res://tools/shots/direction_shot.gd"
 ## Soldiers with each pack, shields and jammers on, hand grenades and mines,
 ## in the paperback palette, then quits. It needs a screen:
 ##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/packs_shot.tscn
-## Saves in /srv/downloads/temp/debug/vectorfall/m9: packs.png (top to
+## Saves in /srv/downloads/temp/debug/skifrei/m9: packs.png (top to
 ## bottom: lime mediums from behind with repair, shield, energy, ammo and
 ## jammer packs; blue light, medium, heavy, light and heavy with the same;
 ## shields and jammers on, both teams, from the front and behind) and

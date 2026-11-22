@@ -1,7 +1,7 @@
 class_name OrderMenu
 extends Control
 
-## The order menu: a short numbered list of orders for your team's bots, on a
+## A short numbered list of bot orders and team calls, on a
 ## cream card under the compass, right of middle. V, the D-pad up or the
 ## ORDERS button opens it. Pick
 ## with the number keys, the D-pad (up and down, right to pick, left to go
@@ -11,11 +11,12 @@ extends Control
 
 signal chosen(order: int, arg: int)
 
-enum Page { ORDERS, BOTS, ROLES }
+enum Page { ORDERS, BOTS, ROLES, CALLS }
 const ROLE_TITLES: Array[String] = ["Offence", "Defence", "Light defence", "Midfield", "Escort me", "Back to the plan"]
 
 var page := Page.ORDERS
 var selected := 0
+var game: Match
 ## For the bots page: the bots on your team.
 var director: BotDirector
 var soldier: Soldier
@@ -34,7 +35,7 @@ func _init() -> void:
 
 
 func open() -> void:
-	page = Page.ORDERS
+	page = Page.CALLS if _hold_match() else Page.ORDERS
 	selected = 0
 	visible = true
 	queue_redraw()
@@ -68,6 +69,8 @@ func title() -> String:
 			return "Which bot"
 		Page.ROLES:
 			return "Role"
+		Page.CALLS:
+			return "Team calls"
 	return "Orders"
 
 
@@ -77,6 +80,8 @@ func entries() -> Array[String]:
 		Page.ORDERS:
 			for kind in Orders.MENU:
 				list.append(Orders.NAMES[kind])
+			if game != null:
+				list.append("Team calls")
 			if commander_mode:
 				list.append("Give roles")
 		Page.BOTS:
@@ -86,6 +91,13 @@ func entries() -> Array[String]:
 				list.append("%s (%s)" % [brain.soldier.display_name, BotBrain.ROLE_NAMES[brain.role]])
 		Page.ROLES:
 			list.assign(ROLE_TITLES)
+		Page.CALLS:
+			for kind in _calls():
+				list.append(Orders.CALL_NAMES[kind])
+	if page in [Page.ORDERS, Page.CALLS]:
+		var call := _acknowledgeable()
+		if not call.is_empty():
+			list.append("Acknowledge %s" % String(Orders.CALL_MARKERS[call.kind]).to_lower())
 	return list
 
 
@@ -97,9 +109,14 @@ func pick(index: int) -> void:
 			if index < Orders.MENU.size():
 				chosen.emit(Orders.MENU[index], 0)
 				close()
-			else:
+			elif game != null and index == Orders.MENU.size():
+				page = Page.CALLS
+				selected = 0
+			elif commander_mode and index == Orders.MENU.size() + int(game != null):
 				page = Page.BOTS
 				selected = 0
+			else:
+				_acknowledge()
 		Page.BOTS:
 			_bot_pick = 0 if index == 0 else team_bots()[index - 1].soldier.entity_id
 			page = Page.ROLES
@@ -107,6 +124,13 @@ func pick(index: int) -> void:
 		Page.ROLES:
 			chosen.emit(Orders.Kind.SET_ROLE, Orders.role_arg(_bot_pick, Orders.ROLES[index]))
 			close()
+		Page.CALLS:
+			var calls := _calls()
+			if index < calls.size():
+				chosen.emit(calls[index], 0)
+				close()
+			else:
+				_acknowledge()
 	queue_redraw()
 
 
@@ -123,6 +147,11 @@ func back() -> void:
 			page = Page.ORDERS
 		Page.ROLES:
 			page = Page.BOTS
+		Page.CALLS:
+			if _hold_match():
+				close()
+			else:
+				page = Page.ORDERS
 	selected = 0
 	queue_redraw()
 
@@ -132,6 +161,32 @@ func move(step: int) -> void:
 	if count > 0:
 		selected = posmod(selected + step, count)
 	queue_redraw()
+
+
+func _hold_match() -> bool:
+	return game != null and not game.hold_points.is_empty()
+
+
+func _calls() -> Array[int]:
+	var calls: Array[int] = []
+	if game != null and soldier != null and not soldier.dead:
+		for kind in Orders.TEAM_CALLS:
+			if game.team_calls.can_send(game, soldier, kind):
+				calls.append(kind)
+	return calls
+
+
+func _acknowledgeable() -> Dictionary:
+	if game != null and soldier != null and not soldier.dead and not game.over:
+		return game.team_calls.latest(soldier, true)
+	return {}
+
+
+func _acknowledge() -> void:
+	var call := _acknowledgeable()
+	if not call.is_empty():
+		chosen.emit(Orders.Kind.ACK_CALL, call.id)
+		close()
 
 
 ## Where the panel goes: right of the touch stick's half (the left 45% of

@@ -2,9 +2,9 @@ services:
   game:
     network_mode: bridge
     environment:
-      VECTORFALL_GAME_PORT: "27300"
-      VECTORFALL_WS_PORT: "27302"
-      VECTORFALL_DISCOVERY: "0"
+      SKIFREI_GAME_PORT: "27300"
+      SKIFREI_WS_PORT: "27302"
+      SKIFREI_DISCOVERY: "0"
     ports:
       - "${GAME_PORT:-27300}:27300/udp"
       - "${WS_PORT:-27302}:27302/tcp"
@@ -13,7 +13,7 @@ services:
   web:
     network_mode: "service:game"
     environment:
-      VECTORFALL_WEB_BIND: "0.0.0.0"
-      VECTORFALL_WEB_PORT: "27303"
-      VECTORFALL_PUBLIC_GAME_PORT: "${GAME_PORT:-27300}"
-      VECTORFALL_PUBLIC_WS_PORT: "${WS_PORT:-27302}"
+      SKIFREI_WEB_BIND: "0.0.0.0"
+      SKIFREI_WEB_PORT: "27303"
+      SKIFREI_PUBLIC_GAME_PORT: "${GAME_PORT:-27300}"
+      SKIFREI_PUBLIC_WS_PORT: "${WS_PORT:-27302}"

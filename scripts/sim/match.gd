@@ -138,6 +138,7 @@ var neutral_supply_at := Vector3.INF
 var results := MatchResults.new()
 var waypoints := {}
 var remote_orders := {}
+var team_calls := TeamCalls.new()
 
 
 func _init(match_seed := 1) -> void:
@@ -224,9 +225,13 @@ func _profiled_step(delta: float) -> void:
 
 
 func _apply_order(id: int, command: PlayerCommand) -> void:
+	if command.order == Orders.Kind.NONE:
+		return
+	if command.order in Orders.TEAM_CALLS or command.order == Orders.Kind.ACK_CALL:
+		team_calls.apply(self, soldier(id), command)
+		return
 	if command.order != Orders.Kind.WAYPOINT:
-		if command.order != Orders.Kind.NONE:
-			ordered.emit(id, command.order, command.order_arg)
+		ordered.emit(id, command.order, command.order_arg)
 		return
 	var sender := soldier(id)
 	var recipient := soldier(command.order_arg)
@@ -242,6 +247,8 @@ func _apply_order(id: int, command: PlayerCommand) -> void:
 
 
 func _step_waypoints() -> void:
+	if not team_calls.by_team.is_empty():
+		team_calls.expire(tick, over)
 	for id: int in waypoints.keys():
 		var order: Dictionary = waypoints[id]
 		var who := soldier(id)
@@ -269,6 +276,7 @@ func tactical_flag_visible(viewer: Soldier, flag: Flag) -> bool:
 
 func change_occupant(who: Soldier) -> void:
 	results.change_occupant(who)
+	team_calls.change_occupant(who)
 	waypoints.erase(who.entity_id)
 	for id: int in waypoints.keys():
 		if waypoints[id].by == who.entity_id:
@@ -359,12 +367,13 @@ func add_flag(team: int, stand: Vector3, rest: Vector3) -> Flag:
 
 
 ## Puts an inventory station for a team with its pad's foot at a point.
-func add_station(team: int, at: Vector3, asset_id := 0) -> InventoryStation:
+func add_station(team: int, at: Vector3, asset_id := 0, control_index := -1) -> InventoryStation:
 	var station := InventoryStation.new()
 	station.entity_id = next_id
 	next_id += 1
 	station.team = team
 	station.asset_id = asset_id
+	station.control_index = control_index
 	station.position = at
 	add_child(station)
 	stations[station.entity_id] = station
@@ -407,11 +416,20 @@ func asset_powered(machine: BaseAsset) -> bool:
 
 func station_working(station: InventoryStation) -> bool:
 	if station.team == InventoryStation.NEUTRAL:
-		return true
+		return station.control_index < 0 or station_team(station) >= 0
 	if station.asset_id == 0:
 		return powered(station.team)
 	var machine := asset(station.asset_id)
 	return machine != null and not machine.destroyed
+
+
+func station_team(station: InventoryStation) -> int:
+	if station.control_index < 0:
+		return station.team
+	if station.control_index >= hold_points.size():
+		return InventoryStation.NEUTRAL
+	var point := hold_points[station.control_index]
+	return InventoryStation.NEUTRAL if point.contested else point.owning_team
 
 
 func deploy_count(team: int, kind: BaseAsset.Kind) -> int:
@@ -715,10 +733,11 @@ func _step_stations(delta: float, ids: Array) -> void:
 		if not station_working(station):
 			station.on.clear()
 			continue
+		var allowed_team := station_team(station)
 		var now: Array[int] = []
 		for id: int in ids:
 			var who := soldier(id)
-			if who != null and station.holds(who):
+			if who != null and (allowed_team == InventoryStation.NEUTRAL or allowed_team == who.team) and station.holds(who):
 				now.append(id)
 		for id in now:
 			var who := soldier(id)
@@ -837,9 +856,10 @@ func _step_flags(delta: float) -> void:
 			continue
 		# Touching it: enemies take it, its own team sends it home if it's lying
 		# about.
+		var reach := settings.flag_home_touch_range if flag.mode == Flag.Mode.HOME else settings.flag_touch_range
 		for id: int in ids:
 			var who := soldier(id)
-			if who == null or not _touching(who, flag.global_position, settings.flag_touch_range):
+			if who == null or not _touching(who, flag.global_position, reach):
 				continue
 			if who.team != flag.team:
 				_take_flag(flag, who)
@@ -1281,13 +1301,31 @@ func repair_target(healer: Soldier, reach: float) -> Node3D:
 	return best_asset
 
 
+func respawn_delay() -> float:
+	var wave := settings.respawn_wave_ticks
+	if wave <= 0:
+		return RESPAWN_DELAY
+	var earliest := tick + roundi(RESPAWN_DELAY * 60.0)
+	return RESPAWN_DELAY + posmod(-earliest, wave) / 60.0
+
+
+func ready_to_respawn(seconds_left: float, delta: float) -> bool:
+	var wave := settings.respawn_wave_ticks
+	if wave <= 0:
+		return seconds_left <= 0.0
+	return tick % wave == 0 and seconds_left < delta * 0.5
+
+
 ## Puts a dead soldier back at one of its team's spawn points, picked with the
 ## match's random numbers.
 func respawn(target: Soldier) -> void:
 	var points: Array = spawns.get(target.team, [])
 	var where := Transform3D(Basis.IDENTITY, target.global_position)
 	if not points.is_empty():
-		where = points[rng.randi_range(0, points.size() - 1)]
+		var first := rng.randi_range(0, points.size() - 1)
+		where = points[first]
+		if settings.respawn_wave_ticks > 0:
+			where = _pick_ctf_spawn(points, first, target.team)
 	target.revive(where)
 	var source: CommandSource = sources.get(target.entity_id)
 	if source != null:
@@ -1295,6 +1333,32 @@ func respawn(target: Soldier) -> void:
 		source.pitch = 0.0
 	results.hits.erase(target.entity_id)
 	respawned.emit(target.entity_id)
+
+
+## Start at a random point. If both flanks are under fire, take the farthest.
+func _pick_ctf_spawn(points: Array, first: int, team: int) -> Transform3D:
+	var best: Transform3D = points[first]
+	var safest := -1.0
+	for slot in points.size():
+		var point: Transform3D = points[(first + slot) % points.size()]
+		var closest := INF
+		var occupied := false
+		for who: Soldier in entities.values():
+			if who.dead:
+				continue
+			var distance := who.at().distance_squared_to(point.origin)
+			if who.team == team:
+				occupied = occupied or distance < 3.0 * 3.0
+			else:
+				closest = minf(closest, distance)
+		if occupied:
+			continue
+		if closest >= 38.0 * 38.0:
+			return point
+		if closest > safest:
+			best = point
+			safest = closest
+	return best
 
 
 func get_state(include_sources := true) -> Dictionary:
@@ -1327,6 +1391,7 @@ func get_state(include_sources := true) -> Dictionary:
 		"hold_points": hold_points.map(func(point: HoldPoint) -> Dictionary: return point.get_state()),
 		"results": results.get_state(include_sources),
 		"waypoints": waypoints.duplicate(true),
+		"team_calls": team_calls.get_state() if include_sources else {},
 		"sensed": sensed.duplicate(),
 		"time_left": time_left,
 		"over": over,
@@ -1370,6 +1435,7 @@ func set_state(state: Dictionary) -> void:
 		entities[id].set_state(entity_state)
 	results.set_state(state.get("results", {}))
 	waypoints = state.get("waypoints", {}).duplicate(true)
+	team_calls.set_state(state.get("team_calls", {}))
 	remote_orders = state.get("tactical_orders", {})
 	sensed.assign(state.get("sensed", [PackedInt32Array(), PackedInt32Array()]))
 	scores.assign(state.scores)

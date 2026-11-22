@@ -85,6 +85,14 @@ func _run() -> void:
 	await ticks(3)
 	checks.check(flag1.global_position.distance_to(a.global_position + Vector3.UP * 1.7) < 1.0, "the flag follows its carrier")
 
+	# A high-speed pass can brush the edge of a stand.
+	reset()
+	place(a, STAND_1 + Vector3(0.0, 0.0, 2.4))
+	var brush := a.distance_to_body(flag1.home)
+	await ticks(3)
+	checks.check(brush > game.settings.flag_touch_range and flag1.carrier_id == a.entity_id,
+		"the home flag can be grabbed on a wider pass than a dropped flag")
+
 	# Your own flag at home can't be taken.
 	reset()
 	place(a, STAND_0 + Vector3(0.0, 0.0, 1.0))
@@ -196,7 +204,29 @@ func _run() -> void:
 	game._return_flag(flag0, 0)
 	game.set_state(carried)
 	checks.check(flag0.mode == Flag.Mode.CARRIED and flag0.carrier_id == b.entity_id, "a carried flag restores with its carrier")
+	await _respawn_waves()
 	checks.finish(self)
+
+
+func _respawn_waves() -> void:
+	reset()
+	var death_tick := game.tick
+	checks.check(is_equal_approx(game.respawn_delay(), Match.RESPAWN_DELAY), "ordinary respawn keeps the four-second wait")
+	game.settings.respawn_wave_ticks = MatchSettings.CTF_RESPAWN_WAVE_TICKS
+	var near := Transform3D(Basis.IDENTITY, b.at())
+	var clear := Transform3D(Basis.IDENTITY, b.at() + Vector3.RIGHT * 60.0)
+	checks.check(game._pick_ctf_spawn([near, clear], 0, a.team) == clear, "reinforcements take the clear flank when one spawn is under pressure")
+	# Kill at different times with both minimum waits ending before the same wave.
+	game.tick = death_tick - posmod(death_tick, MatchSettings.CTF_RESPAWN_WAVE_TICKS) + 1
+	var returned: Array[int] = []
+	var watch := func(_id: int) -> void: returned.append(game.tick)
+	game.respawned.connect(watch)
+	a.die()
+	await ticks(60)
+	b.die()
+	await ticks(MatchSettings.CTF_RESPAWN_WAVE_TICKS)
+	game.respawned.disconnect(watch)
+	checks.check(returned.size() == 2 and returned[0] == returned[1], "CTF deaths at different times respawn on the same wave")
 
 
 func _same(x: Dictionary, y: Dictionary) -> bool:

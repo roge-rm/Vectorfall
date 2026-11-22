@@ -63,7 +63,7 @@ byId("round").addEventListener("submit", async event => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Vectorfall-Admin": "1",
+        "X-Skifrei-Admin": "1",
         "Authorization": "Basic " + btoa(String.fromCharCode(...credentials)),
       },
       body: JSON.stringify({ map: maps.value }),

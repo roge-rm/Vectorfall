@@ -4,7 +4,7 @@ extends Node
 ## Pass a folder name after -- to keep each run's pictures. Add gallery
 ## after the name for the other armour, vehicles, weapons and base equipment.
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall/art-pass"
+const FOLDER := "/srv/downloads/temp/debug/skifrei/art-pass"
 
 var main: Node
 var camera := Camera3D.new()

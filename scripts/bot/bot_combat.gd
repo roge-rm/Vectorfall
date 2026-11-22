@@ -170,6 +170,7 @@ func think(brain: BotBrain) -> void:
 	var boss := brain.director.commander(s.team)
 	if ours == null and boss != null and boss.covers.has(s.entity_id):
 		ours = game.soldier(boss.covers[s.entity_id])
+	var screening := boss != null and boss.push_screening and brain.role == BotBrain.Role.ESCORT and brain.role_target == boss.push_runner
 	var far := reach(brain)
 	var ids := perception.contacts.keys()
 	ids.sort()
@@ -197,6 +198,8 @@ func think(brain: BotBrain) -> void:
 			score -= 60.0
 		if ours != null and other.at().distance_to(ours.at()) < 50.0:
 			score -= 80.0
+		if screening and other.at().distance_to(game.stands[1 - s.team]) < 38.0:
+			score -= 55.0
 		if id == hurt_by and (game.tick - hurt_tick) / 60.0 < HURT_MEMORY:
 			score -= 40.0
 		if id == target_id:
@@ -264,7 +267,9 @@ func _pick_asset(brain: BotBrain) -> int:
 		if raid:
 			if distance > RAID_REACH:
 				continue
-			if shooting_me:
+			if brain.role == BotBrain.Role.GENERATOR and id == brain.role_target and not lob:
+				score -= 130.0
+			elif shooting_me:
 				score -= 100.0
 			elif id == brain.role_target:
 				score -= 50.0

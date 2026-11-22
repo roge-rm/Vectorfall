@@ -77,14 +77,19 @@ const RAID_TIME := 150.0
 const RAID_GAP := 45.0
 const RAID_SIZE := 2
 const RAID_TEAM := 5
+const LARGE_TEAM := 12
+const LARGE_CHASERS := 5
+const SMALL_CHASERS := 3
 ## A flag run sets out from an approach point with an escort, or after the wait
 ## runs out. Distances are in metres and deadlines in simulation ticks.
 const PUSH_TEAM := 5
 const PUSH_NEAR := 24.0
 const PUSH_STANDOFF := BaseAsset.TURRET_RANGE + PUSH_NEAR
+const PUSH_SCREEN_LEAD := 75.0
+const PUSH_SCREEN_RANGE := 45.0
 const PUSH_FIRST := 5 * 60
 const PUSH_TRAVEL := 100 * 60
-const PUSH_WAIT := 9 * 60
+const PUSH_WAIT := 12 * 60
 ## A repair bot gives up on an asset after REPAIR_TIME seconds. Picking one,
 ## metres added for a bot that has to respawn first or go by a station.
 const REPAIR_TIME := 90.0
@@ -150,6 +155,7 @@ var push_runner := 0
 var push_point := Vector3.INF
 var push_deadline := -1
 var push_launched := false
+var push_screening := false
 ## Lines said: the last report's tick, the tick each line and subject was last
 ## said, and the last CHAT_KEPT as { seconds, speaker, line, text }.
 var report_tick := -1000000
@@ -248,7 +254,10 @@ func members() -> Array[Soldier]:
 ## aim for the flank, with room to put their squad down outside the base.
 func vehicle_carrier() -> Soldier:
 	var flag: Flag = game.flags.get(team)
-	return game.soldier(flag.carrier_id) if flag != null and flag.mode == Flag.Mode.CARRIED else null
+	if flag == null or flag.mode != Flag.Mode.CARRIED:
+		return null
+	var carrier := game.soldier(flag.carrier_id)
+	return carrier if carrier != null and not carrier.jamming() else null
 
 
 func vehicle_destination(kind: int) -> Vector3:
@@ -353,9 +362,9 @@ func _read_people() -> void:
 			continue
 		var carrying := game.carried_flag(id) != null
 		var enemy_carrier: Variant = null
-		var own: Flag = game.flags.get(team)
-		if own != null and own.mode == Flag.Mode.CARRIED:
-			enemy_carrier = own.at()
+		var reported := enemy_flag_carrier_position()
+		if reported.is_finite():
+			enemy_carrier = reported
 		var reading := read_person(samples, carrying, game.stands[team], game.stands[1 - team], enemy_carrier)
 		if reading < 0 or reading == entry.role:
 			entry.pending = -1
@@ -409,9 +418,10 @@ static func plan_counts(size: int, situation: Dictionary) -> Dictionary:
 	if size <= 0:
 		return c
 	var diff: int = situation.get("diff", 0)
-	var defence := 1 if size >= 2 else 0
-	var light := 1 if size >= 4 else 0
-	var mid := 0
+	var large := size >= LARGE_TEAM
+	var defence := 2 if large else (1 if size >= 2 else 0)
+	var light := 2 if large else (1 if size >= 4 else 0)
+	var mid := 2 if large else 0
 	# Ahead, more defence and someone in the middle; behind with time running
 	# out, more pressure.
 	if diff >= 1:
@@ -438,23 +448,26 @@ static func plan_counts(size: int, situation: Dictionary) -> Dictionary:
 	var chase := 0
 	var we_carry: bool = situation.get("we_carry", false)
 	if situation.get("own_taken", false):
-		# Everyone useful after our flag, with one at home, offence close to
-		# theirs and, if we have theirs, the carrier and one escort.
-		escort = 1 if we_carry and size >= 4 else 0
+		# Keep offence near their stand, escorts with our carrier and the
+		# rest chasing or watching the lanes.
+		escort = (3 if large else 1) if we_carry and size >= 4 else 0
 		var committed: int = 0 if we_carry else mini(situation.get("committed", 0), offence)
 		offence = 1 if we_carry else committed
 		chase = maxi(size - defence - escort - offence, 0)
 		light = 0
-		mid = 0
+		var limit := LARGE_CHASERS if large else SMALL_CHASERS
+		mid = maxi(chase - limit, 0)
+		chase -= mid
 	elif we_carry:
 		# Escorts come from the offence that has nothing to take, then midfield.
-		escort = mini(3 if size >= 6 else 1, maxi(offence - 1 + mid, 0))
+		escort = mini(4 if large else (3 if size >= 6 else 1), maxi(offence - 1 + mid, 0))
 		var from_offence := mini(escort, offence - 1)
 		offence -= from_offence
 		mid -= escort - from_offence
 	if situation.get("runner", false) and not we_carry and offence >= 2:
-		escort += 1
-		offence -= 1
+		var support := mini(2 if large else 1, offence - 1)
+		escort += support
+		offence -= support
 	c[BotBrain.Role.OFFENCE] = offence
 	c[BotBrain.Role.DEFENCE] = defence
 	c[BotBrain.Role.MIDFIELD] = mid
@@ -490,8 +503,8 @@ func _situation() -> Dictionary:
 func _committed() -> int:
 	var n := 0
 	var stand: Vector3 = game.stands[1 - team]
-	var own: Flag = game.flags[team]
-	var carrier_left := own.at().distance_to(stand) if own.mode == Flag.Mode.CARRIED else 0.0
+	var carrier := enemy_flag_carrier_position()
+	var carrier_left := carrier.distance_to(stand) if carrier.is_finite() else 0.0
 	for brain in brains():
 		if brain.role != BotBrain.Role.OFFENCE or brain.soldier.dead:
 			continue
@@ -509,12 +522,12 @@ func _fitness(brain: BotBrain, role: int) -> float:
 	if game.flags.is_empty():
 		return penalty
 	penalty += _leaning(brain, role)
-	var own: Flag = game.flags[team]
 	match role:
 		BotBrain.Role.DEFENCE, BotBrain.Role.LIGHT_DEFENCE:
 			return penalty + at.distance_to(game.stands[team])
 		BotBrain.Role.CHASE:
-			return penalty + at.distance_to(own.at())
+			var carrier := enemy_flag_carrier_position()
+			return penalty + at.distance_to(carrier if carrier.is_finite() else game.stands[team])
 		BotBrain.Role.ESCORT:
 			var runner := escort_target()
 			if runner != 0 and runner == push_runner:
@@ -563,14 +576,17 @@ func _plan_push(team_brains: Array[BotBrain], situation: Dictionary, offence: in
 	var can_push := theirs != null and theirs.mode == Flag.Mode.HOME and own != null and own.mode == Flag.Mode.HOME
 	if not can_push or size < PUSH_TEAM or offence <= 2 or situation.get("runner", false) or game.tick < PUSH_FIRST:
 		push_runner = 0
+		push_screening = false
 		return 0
 	var eligible := 0
 	for brain in team_brains:
 		if brain.role not in [BotBrain.Role.DEFENCE, BotBrain.Role.CHASE] and _push_escort_available(brain):
 			eligible += 1
-	var escort_count := mini(2 if size >= 8 else 1, mini(offence - 2, eligible - 1))
+	var large := size >= LARGE_TEAM
+	var escort_count := mini(3 if large else (2 if size >= 8 else 1), mini(offence - 2, eligible - 1))
 	if escort_count <= 0:
 		push_runner = 0
+		push_screening = false
 		return 0
 	var runner := director.brain_of(push_runner)
 	if not _push_candidate(runner):
@@ -580,16 +596,20 @@ func _plan_push(team_brains: Array[BotBrain], situation: Dictionary, offence: in
 		for brain in team_brains:
 			if not _push_candidate(brain):
 				continue
-			var cost := brain.soldier.at().distance_to(stand)
+			var soldier := brain.soldier
+			var health_share := soldier.health / soldier.tuning.health_max
+			var cost := soldier.at().distance_to(stand) + 85.0 * (1.0 - health_share)
 			if brain.is_flag_runner():
-				cost -= 35.0
+				cost -= 20.0
 			if cost < best:
 				runner = brain
 				best = cost
 		if runner == null:
 			push_runner = 0
+			push_screening = false
 			return 0
 		push_runner = runner.soldier.entity_id
+		push_screening = false
 		var at := runner.soldier.at()
 		var approaches := director.graph.interest_points(RouteGraph.FLAG_APPROACH, 1 - team)
 		push_point = Vector3.INF
@@ -597,6 +617,10 @@ func _plan_push(team_brains: Array[BotBrain], situation: Dictionary, offence: in
 		for point in approaches:
 			var where := director.graph.points[point]
 			var cost := at.distance_to(where) + where.distance_to(stand)
+			for id: int in known:
+				var enemy: Vector3 = known_position(id)
+				if enemy.distance_squared_to(where.lerp(stand, 0.45)) < PUSH_SCREEN_LEAD * PUSH_SCREEN_LEAD:
+					cost += 35.0
 			if cost < best:
 				push_point = where
 				best = cost
@@ -615,17 +639,21 @@ func _plan_push(team_brains: Array[BotBrain], situation: Dictionary, offence: in
 		push_launched = at.distance_to(stand) < 45.0
 		_decide("%s heads for the flag approach" % runner.soldier.display_name)
 	if not push_launched:
-		var near := runner.soldier.at().distance_squared_to(push_point) <= PUSH_NEAR * PUSH_NEAR
-		var supported := false
+		var distance := runner.soldier.at().distance_squared_to(push_point)
+		var near := distance <= PUSH_NEAR * PUSH_NEAR
+		if distance <= PUSH_SCREEN_LEAD * PUSH_SCREEN_LEAD:
+			push_screening = true
+		var screen := 0
 		if near:
 			push_deadline = mini(push_deadline, game.tick + PUSH_WAIT)
+			var cover: Vector3 = game.stands[1 - team]
 			for brain in team_brains:
 				if brain.role != BotBrain.Role.ESCORT or brain.role_target != push_runner or not _push_escort_available(brain):
 					continue
-				if brain.soldier.at().distance_squared_to(push_point) <= PUSH_NEAR * PUSH_NEAR:
-					supported = true
-					break
-		if supported or game.tick >= push_deadline or attack_now():
+				if brain.soldier.at().distance_squared_to(cover) <= PUSH_SCREEN_RANGE * PUSH_SCREEN_RANGE:
+					screen += 1
+		var supported := screen >= (2 if large else 1)
+		if supported or game.tick >= push_deadline or attack_now() or not game.powered(1 - team):
 			push_launched = true
 			_decide("%s goes for the flag%s" % [runner.soldier.display_name, " with an escort" if supported else ""])
 	return escort_count
@@ -889,16 +917,32 @@ func _learn() -> void:
 		if flag.mode != Flag.Mode.CARRIED:
 			continue
 		var carrier := game.soldier(flag.carrier_id)
-		if carrier == null or not lanes.in_lanes(carrier.at()):
+		if carrier == null:
 			continue
-		# Our flag's carrier is public, shown on everyone's screen.
-		var lane := lanes.lane_of(carrier.at())
+		var at := enemy_flag_carrier_position() if flag_team == team else carrier.at()
+		if not at.is_finite() or not lanes.in_lanes(at):
+			continue
+		var lane := lanes.lane_of(at)
 		var used: Array = carrier_lanes.get(carrier.entity_id, [])
 		if not used.has(lane):
 			used.append(lane)
 		carrier_lanes[carrier.entity_id] = used
 		if flag_team == team:
 			escape_lanes[lane] += 0.05
+
+
+## The map can track a carrier unless its jammer is running.
+func enemy_flag_carrier_position() -> Vector3:
+	var own: Flag = game.flags.get(team)
+	if own == null or own.mode != Flag.Mode.CARRIED:
+		return Vector3.INF
+	var carrier := game.soldier(own.carrier_id)
+	if carrier == null:
+		return Vector3.INF
+	if not carrier.jamming():
+		return carrier.at()
+	var seen: Variant = known_position(carrier.entity_id)
+	return seen if seen != null else Vector3.INF
 
 
 ## Orders the lanes the enemy carrier is likeliest to take home by: how far
@@ -908,7 +952,9 @@ func _plan_chase() -> void:
 	var own: Flag = game.flags[team]
 	if own.mode != Flag.Mode.CARRIED:
 		return
-	var at := own.at()
+	var at := enemy_flag_carrier_position()
+	if not at.is_finite():
+		at = game.stands[team]
 	var home: Vector3 = game.stands[1 - team]
 	var total := 0.0
 	for w in escape_lanes:
@@ -926,15 +972,17 @@ func _plan_chase() -> void:
 ## or wait at its stand once it's past them.
 func chase_point(slot: int, from: Vector3) -> Array:
 	var own: Flag = game.flags[team]
-	var at := own.at()
+	var at := enemy_flag_carrier_position()
+	if not at.is_finite():
+		at = game.stands[team]
 	var lead := clampf(at.distance_to(from) / 40.0, 0.0, 2.0)
-	var carrier := game.soldier(own.carrier_id)
-	var trail := at + (carrier.vel() * lead if carrier != null else Vector3.ZERO)
-	if slot == 0 or escape_order.is_empty() or from.distance_to(at) < 60.0 or slot > escape_order.size() + 1:
+	var contact: Dictionary = known.get(own.carrier_id, {})
+	var trail: Vector3 = at + contact.get("velocity", Vector3.ZERO) * lead
+	if slot == 0 or escape_order.is_empty() or (slot == 1 and from.distance_to(at) < 45.0) or slot > escape_order.size() + 1:
 		return [trail, false]
-	# Home or standing still, it's waiting for its own flag: everyone goes for it.
+	# Once a runner is safe near home, go in after it.
 	var home: Vector3 = game.stands[1 - team]
-	if at.distance_to(home) < CARRIER_HOME or (carrier != null and carrier.horizontal_speed() < 6.0):
+	if at.distance_to(home) < CARRIER_HOME:
 		return [trail, false]
 	# Their stand's route graph point, so the way there goes up the ramp.
 	var stands := director.graph.interest_points(RouteGraph.FLAG_STAND, 1 - team)
@@ -992,6 +1040,28 @@ func points_near_enemies(reach: float) -> Array[int]:
 	return found
 
 
+## Pick a side exit while the carrier is still crossing the stand.
+func flag_exit(carrier: Soldier) -> Vector3:
+	var graph := director.graph
+	var from := carrier.at()
+	var heading := carrier.vel() * Vector3(1.0, 0.0, 1.0)
+	heading = heading.normalized()
+	var best := INF
+	var chosen := Vector3.INF
+	for index in graph.interest_points(RouteGraph.FLAG_EXIT, 1 - team):
+		var point := graph.points[index]
+		var direction := (point - from) * Vector3(1.0, 0.0, 1.0)
+		var cost := direction.length() - heading.dot(direction.normalized()) * 12.0
+		for id: int in known:
+			var enemy: Vector3 = known_position(id)
+			if enemy.distance_squared_to(point) < 40.0 * 40.0:
+				cost += 20.0
+		if cost < best:
+			chosen = point
+			best = cost
+	return chosen
+
+
 ## Where our carrier waits while our flag is carried off: the route graph
 ## point HIDE_NEAR to HIDE_FAR metres from our stand furthest from the enemies
 ## the team knows of, nearer the stand on a tie.
@@ -1005,7 +1075,9 @@ func hide_point() -> Vector3:
 		spots.append(known_position(id))
 	var own: Flag = game.flags[team]
 	if own.mode == Flag.Mode.CARRIED:
-		spots.append(own.at())
+		var carrier := enemy_flag_carrier_position()
+		if carrier.is_finite():
+			spots.append(carrier)
 	var best := stand
 	var best_score := -INF
 	for k in graph.points.size():
@@ -1209,6 +1281,7 @@ func get_state() -> Dictionary:
 		"push_point": push_point,
 		"push_deadline": push_deadline,
 		"push_launched": push_launched,
+		"push_screening": push_screening,
 		"report_tick": report_tick,
 		"said_ticks": said_ticks.duplicate(),
 		"chat": chat.duplicate(true),
@@ -1248,6 +1321,7 @@ func set_state(state: Dictionary) -> void:
 	push_point = state.get("push_point", Vector3.INF)
 	push_deadline = state.get("push_deadline", -1)
 	push_launched = state.get("push_launched", false)
+	push_screening = state.get("push_screening", false)
 	report_tick = state.report_tick
 	said_ticks = state.said_ticks.duplicate()
 	chat.assign(state.chat.duplicate(true))
@@ -1275,7 +1349,9 @@ func _report_carrier() -> void:
 	var own: Flag = game.flags[team]
 	if own.mode != Flag.Mode.CARRIED or lanes == null or lanes.count == 0:
 		return
-	var at := own.at()
+	var at := enemy_flag_carrier_position()
+	if not at.is_finite():
+		return
 	var lane := lanes.lane_of(at) if lanes.in_lanes(at) else (escape_order[0] if not escape_order.is_empty() else -1)
 	if lane < 0 or lane == reported_lane:
 		return
@@ -1536,9 +1612,7 @@ func _flag_turret() -> int:
 	return 0
 
 
-## What a raid goes for: their generator, shot at through its room's
-## openings, else their working turret nearest their flag, else their
-## sensor, or 0.
+## A raid targets the generator first, then the closest turret or sensor.
 func _raid_target() -> int:
 	var enemy := 1 - team
 	var made := game.generator(enemy)
@@ -1603,7 +1677,8 @@ func _check_raid() -> void:
 		if brain.soldier.vehicle_id != 0 or brain.role != BotBrain.Role.OFFENCE or brain.is_flag_runner() or _has_vehicle_work(id) or order_locks.has(id) or game.waypoints.has(id) or repairers.has(id) or game.carried_flag(id) != null:
 			continue
 		picks.append(brain)
-	var attackers := mini(RAID_SIZE, picks.size() if push_runner != 0 else picks.size() - 1)
+	var size := members().size()
+	var attackers := mini(RAID_SIZE + int(size >= LARGE_TEAM), picks.size() if push_runner != 0 else picks.size() - 1)
 	if attackers <= 0:
 		return
 	picks.sort_custom(func(a: BotBrain, b: BotBrain) -> bool:

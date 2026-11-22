@@ -12,8 +12,10 @@ static func make(parent: Node, map: GameMap, minutes: float, captures: int, seed
 	var sites: Array[Vector2] = []
 	if hold:
 		sites = map.control_sites()
+	if sites.is_empty():
+		game.settings.respawn_wave_ticks = MatchSettings.CTF_RESPAWN_WAVE_TICKS
 	for team in 2:
-		game.spawns[team] = map.spawn_points(team, spawn_count)
+		game.spawns[team] = map.ctf_respawn_points(team, spawn_count) if sites.is_empty() else map.spawn_points(team, spawn_count)
 		if not sites.is_empty():
 			game.stands[team] = map.stand_point(team)
 		else:
@@ -28,6 +30,9 @@ static func make(parent: Node, map: GameMap, minutes: float, captures: int, seed
 		game.add_hold_point(Vector3(site.x, map.surface_at(site.x, site.y), site.y))
 	var supply := map.midfield_supply()
 	if resupply and supply.is_finite():
-		game.add_station(InventoryStation.NEUTRAL, Vector3(supply.x, map.surface_at(supply.x, supply.y), supply.y))
+		var control := map.controlled_supply_site() if not sites.is_empty() else -1
+		if control >= 0:
+			supply = sites[control] + Vector2(0.0, 9.0)
+		game.add_station(InventoryStation.NEUTRAL, Vector3(supply.x, map.surface_at(supply.x, supply.y), supply.y), 0, control)
 	parent.add_child(game)
 	return game

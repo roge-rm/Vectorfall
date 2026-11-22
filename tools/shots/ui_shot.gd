@@ -3,7 +3,7 @@ extends Node
 ## Pictures of the paperback cover UI at one window size, and quits. It needs
 ## a screen:
 ##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --resolution 2400x1080 --path . res://tools/shots/ui_shot.tscn
-## Saves in /srv/downloads/temp/debug/vectorfall/ui as <size>-menu.png,
+## Saves in /srv/downloads/temp/debug/skifrei/ui as <size>-menu.png,
 ## -setup, -settings, -howto, -match (keyboard), -touch (touch controls, the
 ## feed and a held SKI), -orders (the order menu open on touch), -pause and
 ## -end (the match over card), -station (one of your inventory stations from
@@ -14,8 +14,8 @@ extends Node
 ## a touch flag chase and the ski course in the milestone 13 release folder.
 ## Uses its own settings file.
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall/ui"
-const RELEASE_FOLDER := "/srv/downloads/temp/debug/vectorfall/m13/release"
+const FOLDER := "/srv/downloads/temp/debug/skifrei/ui"
+const RELEASE_FOLDER := "/srv/downloads/temp/debug/skifrei/m13/release"
 
 var _tag := "1280x720"
 var _out := FOLDER + "/"

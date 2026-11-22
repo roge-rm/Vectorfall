@@ -3,9 +3,9 @@ extends Node
 ## Takes a picture of the touch controls over the main scene and quits. It
 ## needs a screen:
 ##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/touch_shot.tscn
-## touch.png is in /srv/downloads/temp/debug/vectorfall.
+## touch.png is in /srv/downloads/temp/debug/skifrei.
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall"
+const FOLDER := "/srv/downloads/temp/debug/skifrei"
 
 
 func _ready() -> void:

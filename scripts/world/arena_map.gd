@@ -72,6 +72,7 @@ func _build_terrain() -> void:
 	var rows: Array = []
 	rows.resize(row)
 	var floor_y := room_floor() - 1.5
+	var cut_room := not generator_offset().is_finite()
 	var fill := func(j: int) -> void:
 		var z := j * CELL - half
 		var heights := PackedFloat32Array()
@@ -86,7 +87,7 @@ func _build_terrain() -> void:
 			var height := lerpf(base_ground, _land(x, z), smoothstep(64.0, 111.0, around_base))
 			var edge := maxf(smoothstep(play_half.x - 26.0, play_half.x + 72.0, x), smoothstep(play_half.y - 20.0, play_half.y + 70.0, absf(z)))
 			height += 33.0 * edge * edge
-			var solid := minf(height, floor_y) if under_room(x, z, CELL) else height
+			var solid := minf(height, floor_y) if cut_room and under_room(x, z, CELL) else height
 			var patch := _patch_noise.get_noise_2d(x, z) * 0.5 + 0.5
 			for column: int in [i, cells - i]:
 				heights[column] = solid
@@ -114,6 +115,14 @@ func prop(parent: Node3D, at: Vector2, size: Vector3, colour: Color, yaw := 0.0)
 	view.mesh = Cel.bevel_box(size, 0.16)
 	view.visibility_range_end = 450.0
 	obstacles.append(Vector3(at.x, at.y, Vector2(size.x, size.z).length() * 0.5))
+
+
+## A base piece in along, height, side coordinates, with optional route obstruction.
+func base_piece(parent: Node3D, team: int, at: Vector3, size: Vector3, material: Material, obstructs := false) -> void:
+	var where := base_place(team, at.x, at.z, at.y)
+	_box(parent, size, Transform3D(Basis.IDENTITY, where), material)
+	if obstructs:
+		obstacles.append(Vector3(where.x, where.z, Vector2(size.x, size.z).length() * 0.5))
 
 
 func _boundaries() -> void:

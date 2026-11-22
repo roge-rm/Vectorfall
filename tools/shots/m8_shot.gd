@@ -3,12 +3,12 @@ extends Node
 ## Pictures of the menus and a match, and the sounds as WAV files, and quits.
 ## It needs a screen:
 ##   DISPLAY=:0 ANDROID_ADB_SERVER_PORT=5052 tools/godot/Godot_v4.7.2-stable_linux.x86_64 --path . res://tools/shots/m8_shot.tscn
-## Saves in /srv/downloads/temp/debug/vectorfall: m8-menu.png, m8-setup.png,
+## Saves in /srv/downloads/temp/debug/skifrei: m8-menu.png, m8-setup.png,
 ## m8-settings.png, m8-howto.png, m8-match.png, m8-pause.png and
 ## m8-touch.png (the touch controls with the pause button), and every sound
 ## in sounds/. Uses its own settings file.
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall"
+const FOLDER := "/srv/downloads/temp/debug/skifrei"
 
 
 func _ready() -> void:

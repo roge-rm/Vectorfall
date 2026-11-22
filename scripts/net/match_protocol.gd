@@ -1,12 +1,12 @@
 class_name MatchProtocol
 extends RefCounted
 
-const VERSION := 1
+const VERSION := 2
 const MAX_TEAM_SIZE := 16
 const GAME_PORT := 27300
 const DISCOVERY_PORT := 27301
 const WEB_PORT := 27302
-const DISCOVERY_QUERY := "vectorfall/1"
+const DISCOVERY_QUERY := "skifrei/2"
 const INPUT_MAX := 2048
 const SNAPSHOT_MAX := 96 * 1024
 const COMMANDS_MAX := 12
@@ -48,8 +48,8 @@ static func command(data: Variant) -> PlayerCommand:
 	result.buttons &= 2047
 	result.board_id = maxi(0, result.board_id)
 	result.weapon = clampi(result.weapon, -1, 3)
-	if result.order != Orders.Kind.WAYPOINT:
-		if result.order not in Orders.MENU:
+	if result.order not in [Orders.Kind.WAYPOINT, Orders.Kind.ACK_CALL]:
+		if result.order not in Orders.MENU and result.order not in Orders.TEAM_CALLS:
 			result.order = 0
 		result.order_arg = 0
 	if not result.loadout.is_empty():

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Exports the Linux desktop build with the game packed into the executable.
 #
-#   tools/build-linux.sh            debug build, build/desktop/vectorfall.x86_64
-#   tools/build-linux.sh --release  release build, build/desktop/release/vectorfall.x86_64
+#   tools/build-linux.sh            debug build, build/desktop/skifrei.x86_64
+#   tools/build-linux.sh --release  release build, build/desktop/release/skifrei.x86_64
 #   add --arch arm64 for an ARM build
 #   add --run to start it in a window on DISPLAY=:0 afterwards
 set -euo pipefail
@@ -43,10 +43,10 @@ fi
 # build/desktop is a link to the scratch disk, whose folder may be gone.
 mkdir -p "$(readlink -m build/desktop)"
 touch build/.gdignore
-OUT="$PWD/build/desktop/vectorfall.$ARCH"
+OUT="$PWD/build/desktop/skifrei.$ARCH"
 if [ "$MODE" = release ]; then
 	mkdir -p build/desktop/release
-	OUT="$PWD/build/desktop/release/vectorfall.$ARCH"
+	OUT="$PWD/build/desktop/release/skifrei.$ARCH"
 fi
 
 "$GODOT" --headless --path . --import > /dev/null 2>&1 || true

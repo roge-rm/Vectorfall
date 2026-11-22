@@ -1,7 +1,7 @@
 class_name DuoPanel
 extends RefCounted
 
-const PLUGIN := &"VectorfallDuo"
+const PLUGIN := &"SkifreiDuo"
 const REFRESH_SECONDS := 0.2
 
 var _native: Object
@@ -68,6 +68,8 @@ static func map_snapshot(game: Match, viewer: Soldier, bounds: Rect2) -> Diction
 	for point: HoldPoint in game.hold_points:
 		var team := -1 if point.contested else point.owning_team
 		markers.append(_marker(bounds, point.position, team, "hold", point.letter))
+	for call: Dictionary in game.team_calls.active(viewer.team).values():
+		markers.append(_marker(bounds, call.at, viewer.team, "call", Orders.CALL_ICONS[call.kind]))
 	return {
 		"type": "map", "title": game.arena.title, "scores": game.scores,
 		"seconds": int(ceil(maxf(game.time_left, 0.0))),

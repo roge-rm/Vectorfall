@@ -14,9 +14,9 @@ from tempfile import NamedTemporaryFile
 from urllib.parse import unquote, urlsplit
 
 WEB = Path(__file__).resolve().parent
-STATE = Path(os.environ.get("VECTORFALL_STATUS_DIR", "/state"))
-PLAY = Path(os.environ.get("VECTORFALL_PLAY_DIR", "/play")).resolve()
-PASSWORD = os.environ.get("VECTORFALL_ADMIN_PASSWORD", "")
+STATE = Path(os.environ.get("SKIFREI_STATUS_DIR", "/state"))
+PLAY = Path(os.environ.get("SKIFREI_PLAY_DIR", "/play")).resolve()
+PASSWORD = os.environ.get("SKIFREI_ADMIN_PASSWORD", "")
 mimetypes.add_type("application/wasm", ".wasm")
 mimetypes.add_type("application/octet-stream", ".pck")
 
@@ -29,9 +29,9 @@ def status():
         data = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
-    data["game_port"] = int(os.environ.get("VECTORFALL_PUBLIC_GAME_PORT", data["game_port"]))
-    data["ws_port"] = int(os.environ.get("VECTORFALL_PUBLIC_WS_PORT", data["ws_port"]))
-    data["ws_url"] = os.environ.get("VECTORFALL_PUBLIC_WS", "")
+    data["game_port"] = int(os.environ.get("SKIFREI_PUBLIC_GAME_PORT", data["game_port"]))
+    data["ws_port"] = int(os.environ.get("SKIFREI_PUBLIC_WS_PORT", data["ws_port"]))
+    data["ws_url"] = os.environ.get("SKIFREI_PUBLIC_WS", "")
     data["browser"] = (PLAY / "index.html").is_file()
     data["admin"] = bool(PASSWORD)
     return data
@@ -67,7 +67,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
         else:
             routes = {"/": "index.html", "/app.css": "app.css", "/app.js": "app.js",
-                      "/cover.webp": "cover.webp", "/icon.svg": "icon.svg",
+                      "/cover.webp": "cover.webp", "/icon.png": "icon.png",
                       "/BigShouldersDisplay-Black.ttf": "BigShouldersDisplay-Black.ttf",
                       "/IBMPlexSerif-Medium.ttf": "IBMPlexSerif-Medium.ttf"}
             if path not in routes:
@@ -94,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
         if not compare_digest(supplied, expectation):
             self.json_reply(HTTPStatus.UNAUTHORIZED, {"error": "Incorrect password."})
             return
-        if self.headers.get("X-Vectorfall-Admin") != "1" or self.headers.get_content_type() != "application/json":
+        if self.headers.get("X-Skifrei-Admin") != "1" or self.headers.get_content_type() != "application/json":
             self.send_error(HTTPStatus.FORBIDDEN)
             return
         try:
@@ -119,6 +119,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    bind = os.environ.get("VECTORFALL_WEB_BIND", "127.0.0.1")
-    port = int(os.environ.get("VECTORFALL_WEB_PORT", "27303"))
+    bind = os.environ.get("SKIFREI_WEB_BIND", "127.0.0.1")
+    port = int(os.environ.get("SKIFREI_WEB_PORT", "27303"))
     ThreadingHTTPServer((bind, port), Handler).serve_forever()

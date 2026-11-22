@@ -8,8 +8,8 @@ tools/build-linux.sh --release
 build="$PWD/build/desktop"
 stage=$(mktemp -d "$build/appimage.XXXXXX")
 trap 'rm -r -- "$stage"' EXIT
-appdir="$stage/Vectorfall.AppDir"
-mkdir -p "$appdir/usr/bin" "$appdir/usr/share/doc/vectorfall" "$stage/tmp"
+appdir="$stage/Skifrei.AppDir"
+mkdir -p "$appdir/usr/bin" "$appdir/usr/share/doc/skifrei" "$stage/tmp"
 
 tool="$stage/appimagetool.AppImage"
 runtime="$stage/runtime-x86_64"
@@ -22,18 +22,18 @@ printf '%s  %s\n' \
     2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d "$runtime" | sha256sum --check
 chmod +x "$tool"
 
-install -m 755 "$build/release/vectorfall.x86_64" "$appdir/usr/bin/vectorfall"
-install -m 644 tools/desktop/vectorfall.desktop art/icon.svg "$appdir/"
-mv "$appdir/icon.svg" "$appdir/vectorfall.svg"
-install -m 644 LICENSE "$appdir/usr/share/doc/vectorfall/copyright"
+install -m 755 "$build/release/skifrei.x86_64" "$appdir/usr/bin/skifrei"
+install -m 644 tools/desktop/skifrei.desktop "$appdir/"
+install -m 644 art/icon.png "$appdir/skifrei.png"
+install -m 644 LICENSE "$appdir/usr/share/doc/skifrei/copyright"
 cat > "$appdir/AppRun" <<'RUN'
 #!/bin/sh
 appdir=$(dirname "$(readlink -f "$0")")
-exec "$appdir/usr/bin/vectorfall" "$@"
+exec "$appdir/usr/bin/skifrei" "$@"
 RUN
 chmod 755 "$appdir/AppRun"
 
-name="vectorfall-$version-x86_64.AppImage"
+name="skifrei-$version-x86_64.AppImage"
 TMPDIR="$stage/tmp" APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 \
     "$tool" --no-appstream --comp zstd --runtime-file "$runtime" "$appdir" "$stage/$name"
 mv "$stage/$name" "$build/$name"

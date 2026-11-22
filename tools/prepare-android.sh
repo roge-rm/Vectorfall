@@ -24,16 +24,24 @@ fi
 
 chmod +x "$build/gradlew"
 touch "$build/.gdignore"
-install -D -m 0644 "$source_dir/android/VectorfallDuo.java" \
-    "$build/src/main/java/com/rm/vectorfall/android/VectorfallDuo.java"
+# Clear the previous panel from an Android template already prepared for 0.15.0.
+manifest="$build/src/main/AndroidManifest.xml"
+old_plugin=org.godotengine.plugin.v2.VectorfallDuo
+if grep -Fq "$old_plugin" "$manifest"; then
+    sed -i '/android:name="org\.godotengine\.plugin\.v2\.VectorfallDuo"/d; /android:value="com\.rm\.vectorfall\.android\.VectorfallDuo"/d' "$manifest"
+fi
+rm -f "$build/src/main/java/com/rm/vectorfall/android/VectorfallDuo.java" \
+    "$build/src/main/res/drawable-nodpi"/vectorfall_duo_*.png
+
+install -D -m 0644 "$source_dir/android/SkifreiDuo.java" \
+    "$build/src/main/java/com/rm/skifrei/android/SkifreiDuo.java"
 
 for shot in ski-jet flag-jet-escape tank-ambush bomber-strike turret-defence; do
     install -D -m 0644 "$source_dir/../docs/images/$shot.png" \
-        "$build/src/main/res/drawable-nodpi/vectorfall_duo_${shot//-/_}.png"
+        "$build/src/main/res/drawable-nodpi/skifrei_duo_${shot//-/_}.png"
 done
 
-manifest="$build/src/main/AndroidManifest.xml"
-name=org.godotengine.plugin.v2.VectorfallDuo
+name=org.godotengine.plugin.v2.SkifreiDuo
 if ! grep -Fq "$name" "$manifest"; then
-    sed -i '/<\/application>/i\        <meta-data android:name="org.godotengine.plugin.v2.VectorfallDuo"\n            android:value="com.rm.vectorfall.android.VectorfallDuo" />' "$manifest"
+    sed -i '/<\/application>/i\        <meta-data android:name="org.godotengine.plugin.v2.SkifreiDuo"\n            android:value="com.rm.skifrei.android.SkifreiDuo" />' "$manifest"
 fi

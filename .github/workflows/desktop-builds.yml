@@ -67,22 +67,22 @@ jobs:
         run: |
           mkdir -p build/dist
           tools/package-deb.sh --arch arm64
-          cp "build/desktop/vectorfall_${BUILD_VERSION}_arm64.deb" build/dist/
+          cp "build/desktop/skifrei_${BUILD_VERSION}_arm64.deb" build/dist/
       - name: Build the Windows archive
         run: |
           mkdir -p build/windows
-          "tools/godot/Godot_v$GODOT_VERSION-stable_linux.x86_64" --headless --path . --export-release Windows "$PWD/build/windows/Vectorfall.exe"
-          (cd build/windows && zip -qr "../dist/vectorfall-$BUILD_VERSION-windows-x86_64.zip" .)
+          "tools/godot/Godot_v$GODOT_VERSION-stable_linux.x86_64" --headless --path . --export-release Windows "$PWD/build/windows/Skifrei.exe"
+          (cd build/windows && zip -qr "../dist/skifrei-$BUILD_VERSION-windows-x86_64.zip" .)
       - name: Build the macOS app
         run: |
-          "tools/godot/Godot_v$GODOT_VERSION-stable_linux.x86_64" --headless --path . --export-release macOS "$PWD/build/dist/vectorfall-$BUILD_VERSION-macos-universal.zip"
+          "tools/godot/Godot_v$GODOT_VERSION-stable_linux.x86_64" --headless --path . --export-release macOS "$PWD/build/dist/skifrei-$BUILD_VERSION-macos-universal.zip"
       - name: Build the Linux AppImage
         run: |
           tools/package-appimage.sh
-          cp "build/desktop/vectorfall-$BUILD_VERSION-x86_64.AppImage" build/dist/
+          cp "build/desktop/skifrei-$BUILD_VERSION-x86_64.AppImage" build/dist/
       - uses: actions/upload-artifact@v6
         with:
-          name: vectorfall-desktop
+          name: skifrei-desktop
           path: build/dist/*
           if-no-files-found: error
           compression-level: 0
@@ -95,16 +95,16 @@ jobs:
     steps:
       - uses: actions/download-artifact@v6
         with:
-          name: vectorfall-desktop
+          name: skifrei-desktop
       - name: Install and start on Debian Trixie arm64
         shell: bash
         env:
           GODOT_SILENCE_ROOT_WARNING: 1
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends xvfb xauth ./vectorfall_*_arm64.deb
-          test "$(dpkg-query -W -f='${Architecture}' vectorfall)" = arm64
-          xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 /usr/games/vectorfall --display-driver x11 --audio-driver Dummy --quit-after 15 2>&1 | tee startup.log
+          apt-get install -y --no-install-recommends xvfb xauth ./skifrei_*_arm64.deb
+          test "$(dpkg-query -W -f='${Architecture}' skifrei)" = arm64
+          xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 /usr/games/skifrei --display-driver x11 --audio-driver Dummy --quit-after 15 2>&1 | tee startup.log
           grep -F 'OpenGL API OpenGL ES' startup.log
           ! grep -E 'SCRIPT ERROR|^ERROR' startup.log
 
@@ -115,17 +115,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@v6
         with:
-          name: vectorfall-desktop
+          name: skifrei-desktop
       - name: Start the exported game
         shell: pwsh
         run: |
-          Expand-Archive -Path (Get-Item vectorfall-*-windows-x86_64.zip).FullName -DestinationPath game
+          Expand-Archive -Path (Get-Item skifrei-*-windows-x86_64.zip).FullName -DestinationPath game
           $log = Join-Path $PWD startup.log
-          $game = Start-Process -FilePath ./game/Vectorfall.exe -ArgumentList '--headless', '--quit-after', '15', '--log-file', $log -Wait -PassThru
-          if ($game.ExitCode -ne 0) { throw "Vectorfall exited with $($game.ExitCode)" }
+          $game = Start-Process -FilePath ./game/Skifrei.exe -ArgumentList '--headless', '--quit-after', '15', '--log-file', $log -Wait -PassThru
+          if ($game.ExitCode -ne 0) { throw "Skifrei exited with $($game.ExitCode)" }
           $startup = Get-Content -Raw startup.log
           Write-Output $startup
-          if ($startup -notmatch 'Godot Engine' -or $startup -match '(?m)^ERROR|SCRIPT ERROR') { throw 'Vectorfall startup failed' }
+          if ($startup -notmatch 'Godot Engine' -or $startup -match '(?m)^ERROR|SCRIPT ERROR') { throw 'Skifrei startup failed' }
 
   macos-startup:
     needs: package
@@ -134,14 +134,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v6
         with:
-          name: vectorfall-desktop
+          name: skifrei-desktop
       - name: Verify the bundle and start the exported game
         shell: bash
         run: |
-          unzip -q vectorfall-*-macos-universal.zip
-          executable=Vectorfall.app/Contents/MacOS/Vectorfall
+          unzip -q skifrei-*-macos-universal.zip
+          executable=Skifrei.app/Contents/MacOS/Skifrei
           lipo "$executable" -verify_arch x86_64 arm64
-          codesign --verify --deep --strict Vectorfall.app
+          codesign --verify --deep --strict Skifrei.app
           "$executable" --headless --quit-after 15 2>&1 | tee startup.log
           grep -F 'Godot Engine' startup.log
           ! grep -E 'SCRIPT ERROR|^ERROR' startup.log
@@ -154,11 +154,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v6
         with:
-          name: vectorfall-desktop
+          name: skifrei-desktop
       - name: Start the AppImage without FUSE
         shell: bash
         run: |
-          chmod +x vectorfall-*-x86_64.AppImage
-          ./vectorfall-*-x86_64.AppImage --appimage-extract-and-run --headless --quit-after 15 2>&1 | tee startup.log
+          chmod +x skifrei-*-x86_64.AppImage
+          ./skifrei-*-x86_64.AppImage --appimage-extract-and-run --headless --quit-after 15 2>&1 | tee startup.log
           grep -F 'Godot Engine' startup.log
           ! grep -E 'SCRIPT ERROR|^ERROR' startup.log

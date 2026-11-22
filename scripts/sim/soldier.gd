@@ -291,7 +291,7 @@ func push(impulse: Vector3) -> void:
 func die() -> void:
 	dead = true
 	health = 0.0
-	respawn_in = Match.RESPAWN_DELAY
+	respawn_in = game.respawn_delay() if game != null else Match.RESPAWN_DELAY
 	jetting = false
 	skiing = false
 	spin = 0.0
@@ -532,7 +532,7 @@ func simulate(command: PlayerCommand, delta: float, movement_only := false) -> v
 		return
 	if dead:
 		respawn_in -= delta
-		if respawn_in <= 0.0 and game != null:
+		if game != null and game.ready_to_respawn(respawn_in, delta):
 			game.respawn(self)
 	else:
 		_use_weapon(command, delta)

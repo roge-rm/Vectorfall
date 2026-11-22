@@ -25,7 +25,7 @@ $GODOT_HEAD_INCLUDE
 <div id="loading">
   <img src="index.icon.png" alt="">
   <div id="loading-text" role="status">Loading $GODOT_PROJECT_NAME…</div>
-  <noscript><span>Vectorfall needs JavaScript turned on.</span></noscript>
+  <noscript><span>Skifrei needs JavaScript turned on.</span></noscript>
   <div id="loading-bar"><div id="loading-fill"></div></div>
   <div id="loading-amount"></div>
 </div>
@@ -37,11 +37,11 @@ $GODOT_HEAD_INCLUDE
   const fill = document.getElementById('loading-fill');
   const amount = document.getElementById('loading-amount');
   const mb = bytes => (bytes / 1048576).toFixed(1);
-  const startError = 'Vectorfall could not start. Reload the page to try again.';
+  const startError = 'Skifrei could not start. Reload the page to try again.';
 
   function fail(error, explanation) {
     window.removeEventListener('unhandledrejection', startupRejection);
-    delete window.vectorfallShown;
+    delete window.skifreiShown;
     console.error(error);
     message.textContent = explanation;
     bar.style.visibility = 'hidden';
@@ -54,22 +54,22 @@ $GODOT_HEAD_INCLUDE
 
   async function start() {
     if (typeof Engine === 'undefined') {
-      fail('Engine script missing', 'Vectorfall could not load. Reload the page to try again.');
+      fail('Engine script missing', 'Skifrei could not load. Reload the page to try again.');
       return;
     }
     if (!window.isSecureContext) {
-      fail('Insecure context', 'Open Vectorfall over HTTPS to play in your browser.');
+      fail('Insecure context', 'Open Skifrei over HTTPS to play in your browser.');
       return;
     }
     const missing = Engine.getMissingFeatures({ threads: $GODOT_THREADS_ENABLED });
     if (missing.length || typeof WebAssembly === 'undefined') {
-      fail(missing, 'Vectorfall needs a recent browser with WebGL 2 and WebAssembly.');
+      fail(missing, 'Skifrei needs a recent browser with WebGL 2 and WebAssembly.');
       return;
     }
-    window.vectorfallShown = () => {
+    window.skifreiShown = () => {
       window.removeEventListener('unhandledrejection', startupRejection);
       loading.remove();
-      delete window.vectorfallShown;
+      delete window.skifreiShown;
     };
     window.addEventListener('unhandledrejection', startupRejection);
     const engine = new Engine($GODOT_CONFIG);

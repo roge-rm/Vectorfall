@@ -56,6 +56,7 @@ func _run() -> void:
 	await _holds_roles()
 	await _learns_lanes()
 	await _escorts_bot_runner()
+	await _large_flag_push()
 	await _escorts_person()
 	await _person_defends()
 	await _chases_carrier()
@@ -83,11 +84,14 @@ func _plan_counts() -> void:
 	checks.check(_counts(plan.call(8, { "diff": 2 })) == [3, 2, 1, 0, 2, 0], "ahead by two: a second defence too")
 	checks.check(_counts(plan.call(8, { "diff": -1, "late": true })) == [7, 1, 0, 0, 0, 0], "behind late: all but one go on offence")
 	checks.check(_counts(plan.call(8, { "threat": true })) == [5, 1, 0, 0, 2, 0], "enemies near our flag: one more light defence")
-	checks.check(_counts(plan.call(8, { "own_taken": true })) == [0, 1, 0, 0, 0, 7], "our flag taken: all but one chase")
-	checks.check(_counts(plan.call(8, { "own_taken": true, "committed": 3 })) == [3, 1, 0, 0, 0, 4], "our flag taken with 3 offence close to theirs: they keep attacking, 4 chase")
-	checks.check(_counts(plan.call(8, { "own_taken": true, "we_carry": true })) == [1, 1, 0, 1, 0, 5], "both flags out: the carrier, one escort and one at home, the rest chase")
+	checks.check(_counts(plan.call(8, { "own_taken": true })) == [0, 1, 4, 0, 0, 3], "our flag taken: three chase and midfield covers the lanes")
+	checks.check(_counts(plan.call(8, { "own_taken": true, "committed": 3 })) == [3, 1, 1, 0, 0, 3], "our flag taken with 3 offence close to theirs: they keep attacking and three chase")
+	checks.check(_counts(plan.call(8, { "own_taken": true, "we_carry": true })) == [1, 1, 2, 1, 0, 3], "both flags out: the carrier, one escort and one at home, three chase and two screen midfield")
 	checks.check(_counts(plan.call(8, { "we_carry": true })) == [3, 1, 0, 3, 1, 0], "we carry theirs: three escorts from the offence")
 	checks.check(_counts(plan.call(8, { "runner": true })) == [5, 1, 0, 1, 1, 0], "a person runs for their flag: one escort")
+	checks.check(_counts(plan.call(16, {})) == [10, 2, 2, 0, 2, 0], "16 even: two defenders, two midfield, two light defence and ten offence")
+	checks.check(_counts(plan.call(16, { "own_taken": true })) == [0, 2, 9, 0, 0, 5], "16 with our flag taken: a chase squad and midfield cover")
+	checks.check(_counts(plan.call(16, { "own_taken": true, "we_carry": true })) == [1, 2, 5, 3, 0, 5], "16 with both flags taken: three escorts and a chase squad")
 	var small := plan.call(3, {}) as Dictionary
 	checks.check(_counts(small) == [2, 1, 0, 0, 0, 0], "a team of 3: 2 offence and 1 defence")
 
@@ -255,8 +259,8 @@ func _escorts_bot_runner() -> void:
 	runner.soldier.global_position = boss.push_point + Vector3.UP
 	boss.think(true)
 	var approach_goal := runner._role_goal()
-	checks.check(not boss.push_launched and boss.push_deadline <= game.tick + TeamCommander.PUSH_WAIT and approach_goal == [BotBrain.Goal.RALLY, boss.push_point] and escort._role_goal() == [BotBrain.Goal.ESCORT, boss.push_point], "runner waits at the route approach for an escort")
-	escort.soldier.global_position = boss.push_point + Vector3(3.0, 1.0, 0.0)
+	checks.check(not boss.push_launched and boss.push_deadline <= game.tick + TeamCommander.PUSH_WAIT and approach_goal == [BotBrain.Goal.RALLY, boss.push_point] and escort._role_goal()[1].distance_to(game.stands[1]) < TeamCommander.PUSH_SCREEN_RANGE, "runner waits at the approach while the escort moves up")
+	escort.soldier.global_position = escort._role_goal()[1]
 	boss.think(true)
 	var escort_goal := escort._role_goal()
 	checks.check(boss.push_launched and runner._role_goal()[0] == BotBrain.Goal.TAKE_FLAG and escort_goal[0] == BotBrain.Goal.ESCORT and escort_goal[1].distance_to(game.stands[1]) < 20.0, "arrival of an escort sends both ahead to the flag stand")
@@ -290,6 +294,38 @@ func _escorts_bot_runner() -> void:
 	game.waypoints[runner_id] = {"by": 0, "at": boss.push_point, "until": game.tick + Match.WAYPOINT_TICKS}
 	boss.think(true)
 	checks.check(boss.push_runner != runner_id and runner._choose_goal()[0] == BotBrain.Goal.WAYPOINT, "a team waypoint takes priority over the automatic flag run")
+	await _done(setup)
+
+
+func _large_flag_push() -> void:
+	var setup := _match(16, 0, 3, true)
+	var game: Match = setup.game
+	var director: BotDirector = setup.director
+	var boss := director.commander(0)
+	game.tick = TeamCommander.PUSH_FIRST + 1
+	boss.think(true)
+	var runner := director.brain_of(boss.push_runner)
+	var escorts: Array[BotBrain] = []
+	for brain in boss.brains():
+		if brain.role == R.ESCORT and brain.role_target == boss.push_runner:
+			escorts.append(brain)
+	checks.check(runner != null and escorts.size() == 3, "sixteen bots send a runner and three escorts")
+	if runner != null and escorts.size() == 3:
+		runner.soldier.global_position = boss.push_point + Vector3.UP
+		boss.think(true)
+		var stand: Vector3 = game.stands[1]
+		var escort := escorts[0]
+		var cover: Vector3 = escort._role_goal()[1]
+		var second: Vector3 = escorts[1]._role_goal()[1]
+		checks.check(boss.push_screening and not boss.push_launched and cover.distance_to(stand) < TeamCommander.PUSH_SCREEN_RANGE
+			and cover.distance_to(second) >= 11.0, "the escorts spread out ahead of a large team's staged runner")
+		escort.soldier.global_position = cover
+		boss.think(true)
+		checks.check(not boss.push_launched, "one escort does not send in the large team's runner")
+		escorts[1].soldier.global_position = second
+		boss.think(true)
+		checks.check(boss.push_launched and runner._role_goal()[0] == BotBrain.Goal.TAKE_FLAG,
+			"cover near the stand launches the large team's runner")
 	await _done(setup)
 
 
@@ -376,8 +412,16 @@ func _chases_carrier() -> void:
 			chasing = _role_count(director, 0, [R.CHASE])
 			break
 	var defence := _role_count(director, 0, [R.DEFENCE])
-	checks.check(grabbed >= 0 and chasing >= 6, "within 1 s of our flag being taken, %d bots chase" % chasing)
+	checks.check(grabbed >= 0 and chasing == 3, "within 1 s of our flag being taken, %d bots chase" % chasing)
 	checks.check(defence == 1, "and one stays home on defence")
+	var boss := director.commander(0)
+	var jammer := BotLoadouts.loadout(BotLoadouts.Kit.RUNNER_JAMMER)
+	thief.soldier.set_loadout(jammer)
+	thief.soldier.pack_on = true
+	boss.known.erase(thief.soldier.entity_id)
+	checks.check(not boss.enemy_flag_carrier_position().is_finite() and boss.vehicle_carrier() == null, "a jammer hides the carrier from unseen chasers")
+	boss.known[thief.soldier.entity_id] = {"tick": game.tick, "position": thief.soldier.at(), "velocity": Vector3.ZERO}
+	checks.check(boss.enemy_flag_carrier_position().is_equal_approx(thief.soldier.at()), "a sighting gives the chasers a position for the jammed carrier")
 	await _done(setup)
 
 
@@ -415,7 +459,7 @@ func _roles_wear_loadouts() -> void:
 	for brain in director.brains:
 		var worn := brain.soldier.loadout
 		var kit: int = brain.kit_picks.get(brain.role, -1)
-		ok = ok and BotLoadouts.choices(brain.role, brain.personality).has(kit) and worn.equals(brain.wanted_loadout())
+		ok = ok and BotLoadouts.choices(brain.role, brain.personality, true).has(kit) and worn.equals(brain.wanted_loadout())
 		if (brain.role == R.DEFENCE and worn.pack == Pack.TURRET) or (brain.role == R.LIGHT_DEFENCE and worn.pack == Pack.SENSOR):
 			engineers += 1
 		if brain.role == R.DEFENCE and worn.armour == SoldierBody.Armour.HEAVY:

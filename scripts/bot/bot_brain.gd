@@ -19,8 +19,8 @@ extends CommandSource
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
 ## goal_target.
-enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX, DEPLOY, VEHICLE, WAYPOINT, TAKE_POINT, HOLD_POINT, RETAKE_POINT, AMMO }
-const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base", "deploy", "board", "waypoint", "take point", "hold point", "retake point", "ammo"]
+enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX, DEPLOY, VEHICLE, WAYPOINT, TAKE_POINT, HOLD_POINT, RETAKE_POINT, AMMO, BREAKOUT, FLAG_ENTRY }
+const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base", "deploy", "board", "waypoint", "take point", "hold point", "retake point", "ammo", "flag exit", "flag entry"]
 ## OFFENCE takes out the enemy flag turret (role_target) while it works,
 ## then goes for the enemy flag and carries it, DEFENCE holds by the flag,
 ## LIGHT_DEFENCE watches the way enemies come in and chases carriers, ESCORT
@@ -100,6 +100,10 @@ const HIDE_RANGE := 200.0
 ## A carrier plans its way home again this often, round the enemies its team
 ## knows of, in seconds.
 const CARRIER_REPLAN := 1.5
+const CARRIER_EXIT_RANGE := 16.0
+const CARRIER_EXIT_REACHED := 7.0
+const CARRIER_EXIT_TICKS := 5 * 60
+const FLAG_ENTRY_TICKS := 12 * 60
 ## Seconds a carrier's route pays for each point this close to a known enemy,
 ## in metres.
 const ENEMY_COST := 8.0
@@ -434,7 +438,7 @@ func work(delta: float) -> void:
 ## thread in bot order.
 func wanted_loadout() -> Loadout:
 	if not kit_picks.has(role):
-		kit_picks[role] = BotLoadouts.pick(role, personality, kit_rng)
+		kit_picks[role] = BotLoadouts.pick(role, personality, kit_rng, _ctf())
 	var worn := BotLoadouts.loadout(kit_picks[role])
 	if role_slot != 0 or director.deploy_open[soldier.team].is_empty():
 		return worn
@@ -618,7 +622,8 @@ func _choose_goal() -> Array:
 	var waypoint: Dictionary = game.waypoints.get(soldier.entity_id, {})
 	if not waypoint.is_empty() and game.carried_flag(soldier.entity_id) == null:
 		return [Goal.WAYPOINT, waypoint.at]
-	if role != Role.REPAIR and role != Role.GENERATOR and game.carried_flag(soldier.entity_id) == null:
+	var escorting := role == Role.ESCORT and role_target != 0
+	if role != Role.REPAIR and role != Role.GENERATOR and not escorting and game.carried_flag(soldier.entity_id) == null:
 		var ammo := _ammo_detour()
 		if ammo != Vector3.INF:
 			return [Goal.AMMO, ammo]
@@ -702,6 +707,8 @@ func _ammo_detour() -> Vector3:
 	var station := game.neutral_station
 	if station == null or station.cooldowns.has(soldier.entity_id) or combat.target_id != 0:
 		return Vector3.INF
+	if station.control_index >= 0 and game.station_team(station) != soldier.team:
+		return Vector3.INF
 	if soldier.at().distance_squared_to(game.neutral_supply_at) > 55.0 * 55.0:
 		return Vector3.INF
 	for slot in soldier.weapons.size():
@@ -780,6 +787,12 @@ func _role_goal() -> Array:
 	if theirs != null and theirs.mode == Flag.Mode.CARRIED and theirs.carrier_id == me:
 		if own != null and own.mode == Flag.Mode.DROPPED and own.at().distance_to(pos) < 60.0:
 			return [Goal.RETURN_FLAG, own.at()]
+		if goal == Goal.BREAKOUT and game.tick - goal_started < CARRIER_EXIT_TICKS and pos.distance_squared_to(goal_target) > CARRIER_EXIT_REACHED * CARRIER_EXIT_REACHED:
+			return [Goal.BREAKOUT, goal_target]
+		if boss != null and goal not in [Goal.CAPTURE, Goal.BREAKOUT] and pos.distance_squared_to(game.stands[1 - team]) < CARRIER_EXIT_RANGE * CARRIER_EXIT_RANGE:
+			var exit := boss.flag_exit(soldier)
+			if exit.is_finite():
+				return [Goal.BREAKOUT, exit]
 		if own != null and own.mode == Flag.Mode.CARRIED and pos.distance_to(game.stands[team]) < HIDE_RANGE and boss != null:
 			# It can't score until our flag is back, so it waits out of the way.
 			return [Goal.HIDE, boss.hide_point()]
@@ -800,26 +813,31 @@ func _role_goal() -> Array:
 	var own_taken := own != null and own.mode == Flag.Mode.CARRIED
 	if own_taken:
 		var carrier := game.soldier(own.carrier_id)
-		if carrier != null:
-			var near := carrier.at().distance_to(pos)
-			if role == Role.CHASE and boss != null:
-				var chase: Array = boss.chase_point(role_slot, pos)
-				return [Goal.CUT_OFF if chase[1] else Goal.CHASE, chase[0]]
+		if role == Role.CHASE and boss != null:
+			var chase: Array = boss.chase_point(role_slot, pos)
+			return [Goal.CUT_OFF if chase[1] else Goal.CHASE, chase[0]]
+		var where := boss.enemy_flag_carrier_position() if boss != null else own.at()
+		if carrier != null and where.is_finite():
+			var near := where.distance_to(pos)
+			if role == Role.MIDFIELD and boss != null and near >= 30.0:
+				return [Goal.DEFEND, boss.watch_point(role_slot)]
 			# Anyone close, and light defence from anywhere, goes for it.
-			if role == Role.LIGHT_DEFENCE or (role != Role.DEFENCE and near < 30.0) or (role == Role.DEFENCE and near < GUARD_RANGE) or (role != Role.ESCORT and holding_theirs):
+			if role == Role.LIGHT_DEFENCE or (role != Role.DEFENCE and near < 30.0) or (role == Role.DEFENCE and near < GUARD_RANGE):
 				var lead := clampf(near / 40.0, 0.0, 2.0)
-				return [Goal.CHASE, carrier.at() + carrier.vel() * lead]
+				return [Goal.CHASE, where if carrier.jamming() else where + carrier.vel() * lead]
 	if role == Role.ESCORT:
 		var runner := game.soldier(role_target)
 		if runner != null and not runner.dead:
 			if boss != null and role_target == boss.push_runner and not boss.order_locks.has(me):
-				if not boss.push_launched:
+				if not boss.push_launched and not boss.push_screening:
 					return [Goal.ESCORT, boss.push_point]
 				var stand: Vector3 = game.stands[1 - team]
 				var from := (boss.push_point - stand) * Vector3(1.0, 0.0, 1.0)
 				var forward := from.normalized()
-				var side := forward.cross(Vector3.UP) * (5.0 if role_slot % 2 == 0 else -5.0)
-				return [Goal.ESCORT, stand + forward * 10.0 + side]
+				var spread: float = 12.0 * [1.0, -1.0, 0.0][role_slot % 3]
+				var side := forward.cross(Vector3.UP) * spread
+				var ahead := -10.0 if boss.push_launched else 20.0
+				return [Goal.ESCORT, stand + forward * ahead + side]
 			return [Goal.ESCORT, _escort_spot(runner)]
 	if role == Role.GENERATOR:
 		var target_info := director.asset_info(role_target)
@@ -852,31 +870,46 @@ func _role_goal() -> Array:
 					attacking = false
 					return [Goal.RALLY, boss.push_point]
 				attacking = true
-			elif not _ready_to_attack():
+				if goal == Goal.FLAG_ENTRY and game.tick - goal_started < FLAG_ENTRY_TICKS and pos.distance_squared_to(goal_target) > 8.0 * 8.0:
+					return [Goal.FLAG_ENTRY, goal_target]
+				if goal not in [Goal.TAKE_FLAG, Goal.FLAG_ENTRY]:
+					var entry := _flag_entry(pos)
+					if entry.is_finite():
+						return [Goal.FLAG_ENTRY, entry]
+			elif not _ready_to_attack() and director.power[1 - team] and not (boss != null and boss.push_screening):
 				return [Goal.RALLY, _midfield_spot()]
 			# Their flag turret first, while it's up and powered.
 			var turret := director.asset_info(role_target)
-			if not turret.is_empty() and not turret.destroyed and turret.team != team and director.power[turret.team]:
+			if not turret.is_empty() and not turret.destroyed and turret.team != team and director.power[turret.team] and (boss == null or not boss.push_launched or role_slot % 2 == 1):
 				return [Goal.RAID, turret.raid]
 		return [Goal.TAKE_FLAG, at]
+	if role == Role.LIGHT_DEFENCE and boss != null:
+		var post := boss.watch_point(role_slot)
+		var stand := game.stands[team]
+		for threat: Array in boss.threats(WATCH_RANGE):
+			var at: Vector3 = threat[1]
+			if at.distance_squared_to(stand) < 22.0 * 22.0 or at.distance_squared_to(post) < GUARD_RANGE * GUARD_RANGE:
+				return [Goal.CHASE, at]
+		return [Goal.DEFEND, post]
 	if role == Role.DEFENCE or role == Role.LIGHT_DEFENCE:
-		# Anyone coming for the flag gets met: what this bot knows close in,
-		# and what the team knows further out for light defence.
+		# Split defenders between the stand and a separate reactor where there is one.
 		var stand := game.stands[team]
 		var guard := GUARD_RANGE * (PRESS_GUARD if personality == Personality.AGGRESSIVE else 1.0)
-		var room := _generator_room(team)
+		var graph := director.graph
+		var generators := graph.interest_points(RouteGraph.GENERATOR, team)
+		var reactor := graph.points[generators[0]] if not generators.is_empty() else Vector3.INF
+		var second_post := role == Role.DEFENCE and role_slot % 2 == 1 and not generators.is_empty() and graph.room_of(generators[0]) < 0
+		var post := reactor if second_post else stand
+		var reach := GUARD_RANGE * 0.7 if second_post else guard
 		var ids := perception.contacts.keys()
 		ids.sort()
 		for id: int in ids:
 			if perception.knows(id):
 				var guess := perception.guess_position(id, game.tick)
-				if guess.distance_to(stand) < guard or (room != Vector3.INF and guess.distance_to(room) < guard):
+				if guess.distance_to(post) < reach:
 					return [Goal.CHASE, guess]
-		if role == Role.LIGHT_DEFENCE and boss != null:
-			var threats := boss.threats(WATCH_RANGE)
-			if not threats.is_empty():
-				return [Goal.CHASE, threats[0][1]]
-			return [Goal.DEFEND, boss.watch_point(role_slot)]
+		if second_post:
+			return [Goal.DEFEND, post]
 		return [Goal.DEFEND, _defence_spot(role_slot)]
 	# Midfield, and the roles for later milestones, hold the middle. An
 	# aggressive one goes after whoever it's fighting nearby.
@@ -885,6 +918,20 @@ func _role_goal() -> Array:
 		if guess.distance_to(pos) < PRESS_RANGE:
 			return [Goal.CHASE, guess]
 	return [Goal.MIDFIELD, _midfield_spot()]
+
+
+## Join a line across the stand from the nearest marked side.
+func _flag_entry(from: Vector3) -> Vector3:
+	var graph := director.graph
+	var entry := Vector3.INF
+	var distance := INF
+	for index in graph.interest_points(RouteGraph.FLAG_ENTRY, 1 - soldier.team):
+		var at := graph.points[index]
+		var next := from.distance_squared_to(at)
+		if next < distance:
+			entry = at
+			distance = next
+	return entry
 
 
 ## Where a repair bot goes, as [Goal, position], or empty with nothing to
@@ -920,12 +967,6 @@ func _raid_spot(info: Dictionary) -> Vector3:
 	return best
 
 
-## The GENERATOR point in a team's generator room, or Vector3.INF.
-func _generator_room(team: int) -> Vector3:
-	var rooms := director.graph.interest_points(RouteGraph.GENERATOR, team)
-	return director.graph.points[rooms[0]] if not rooms.is_empty() else Vector3.INF
-
-
 ## Health below which the bot backs off, by its personality.
 func low_health() -> float:
 	match personality:
@@ -950,13 +991,15 @@ func _escort_spot(runner: Soldier) -> Vector3:
 	heading = heading.normalized() if heading.length() > 0.1 else Vector3.FORWARD
 	var side := heading.cross(Vector3.UP)
 	var spot := at + runner.vel() * 0.5
-	match role_slot % 3:
+	match role_slot % 4:
 		0:
 			spot += heading * 25.0
 		1:
 			spot += -heading * 10.0 + side * 12.0
 		2:
 			spot += -heading * 10.0 - side * 12.0
+		3:
+			spot += heading * 36.0
 	return spot
 
 
@@ -1048,16 +1091,30 @@ func _hold_range() -> float:
 			return FIX_RANGE
 		Goal.RAID:
 			var info := director.asset_info(role_target)
-			if not info.is_empty() and info.kind != BaseAsset.Kind.GENERATOR:
+			if not info.is_empty() and info.get("perches", []).is_empty():
 				return RAID_RANGE
 			return ARRIVE_RANGE * 0.5
 	return -1.0
 
 
-## True when the steering should jet ahead for speed: going for their flag
-## at home on the last stretch.
-func wants_jet_in() -> bool:
-	if goal != Goal.TAKE_FLAG:
+## Jet on the way into a run or on a long straight leg back with the flag.
+func wants_run_boost(leg_distance: float, heading_error: float) -> bool:
+	if goal == Goal.CAPTURE:
+		var at := soldier.at()
+		return (
+			heading_error < deg_to_rad(35.0) and leg_distance >= 25.0
+			and at.distance_squared_to(goal_target) > 65.0 * 65.0
+			and at.distance_squared_to(game.stands[1 - soldier.team]) > 100.0 * 100.0
+			and combat.target_id == 0 and not combat.hurt_recently(game.tick)
+		)
+	if goal == Goal.ESCORT:
+		var boss := director.commander(soldier.team)
+		if boss == null or not boss.push_screening or role_target != boss.push_runner or boss.order_locks.has(soldier.entity_id):
+			return false
+	elif goal == Goal.BREAKOUT:
+		# Stay on the ground through the flag deck before jetting out.
+		return soldier.at().distance_squared_to(game.stands[1 - soldier.team]) > CARRIER_EXIT_RANGE * CARRIER_EXIT_RANGE
+	elif goal != Goal.TAKE_FLAG:
 		return false
 	var theirs: Flag = game.flags.get(1 - soldier.team)
 	if theirs == null or theirs.mode != Flag.Mode.HOME:
@@ -1069,7 +1126,7 @@ func wants_jet_in() -> bool:
 
 ## Slows to a stop at the end of the route, where a flag goal runs through.
 func slow_at_end() -> bool:
-	return goal != Goal.TAKE_FLAG and goal != Goal.RETURN_FLAG and goal != Goal.CHASE
+	return goal not in [Goal.TAKE_FLAG, Goal.RETURN_FLAG, Goal.CHASE, Goal.BREAKOUT, Goal.FLAG_ENTRY]
 
 
 func _check_goal() -> void:
@@ -1083,7 +1140,7 @@ func _check_goal() -> void:
 		at_goal = HoldPoint.contains(soldier.at(), goal_target, HoldPoint.RADIUS if at_goal else reach)
 		return
 	if goal == Goal.RAID and reach == RAID_RANGE:
-		# Stops short of a turret or sensor while it can shoot it.
+		# Stops short of an exposed asset while it can shoot it.
 		var flat := Vector2(to.x, to.z).length()
 		at_goal = combat.asset_seen == role_target and absf(to.y) < RAID_HEIGHT and flat < reach * (1.25 if at_goal else 1.0)
 		return
@@ -1195,7 +1252,7 @@ func _replan() -> void:
 		var link := graph.link_between(int(ends[0]), int(ends[1]))
 		if link != null:
 			avoid_links[link] = RoutePlanner.AVOID_COST
-	if goal == Goal.CAPTURE:
+	if goal in [Goal.CAPTURE, Goal.BREAKOUT]:
 		# A carrier keeps off the enemy's spawn, where they come back to life.
 		for link: RouteGraph.Link in director.links_near_spawns(1 - soldier.team, CARRIER_KEEP_OFF):
 			avoid_links[link] = float(avoid_links.get(link, 0.0)) + CARRIER_AVOID_COST
@@ -1212,7 +1269,7 @@ func _replan() -> void:
 	if Prof.on:
 		Prof.add("bot.replan.avoid", Time.get_ticks_usec() - prof_a)
 	var prof_t := Time.get_ticks_usec() if Prof.on else 0
-	var start := graph.start_point(soldier.at(), soldier.vel())
+	var start := graph.nearest(soldier.at()) if goal == Goal.BREAKOUT else graph.start_point(soldier.at(), soldier.vel())
 	if Prof.on:
 		Prof.add("bot.replan.start_point", Time.get_ticks_usec() - prof_t)
 	# In the bot phase the search takes its first points after work(), from

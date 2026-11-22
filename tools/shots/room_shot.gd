@@ -10,9 +10,9 @@ extends Node
 ## hud-power-down.png is up on the deck just after the generator is
 ## destroyed, with the notice, and generator-destroyed.png is the room again
 ## a few seconds later. In
-## /srv/downloads/temp/debug/vectorfall/m10.
+## /srv/downloads/temp/debug/skifrei/m10.
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall/m10"
+const FOLDER := "/srv/downloads/temp/debug/skifrei/m10"
 
 var main: Node
 

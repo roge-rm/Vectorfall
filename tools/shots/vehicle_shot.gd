@@ -1,9 +1,9 @@
 extends Node
 
 ## Captures the airfield and vehicles in flight on Ochre Fold.
-## Set VECTORFALL_SHOT_DIR to change the output folder.
+## Set SKIFREI_SHOT_DIR to change the output folder.
 
-const FOLDER := "/srv/downloads/temp/debug/vectorfall/m12"
+const FOLDER := "/srv/downloads/temp/debug/skifrei/m12"
 
 class PilotScript:
 	extends CommandSource
@@ -124,7 +124,7 @@ func _ticks(count: int) -> void:
 
 func _save(file: String) -> void:
 	await RenderingServer.frame_post_draw
-	var folder := OS.get_environment("VECTORFALL_SHOT_DIR")
+	var folder := OS.get_environment("SKIFREI_SHOT_DIR")
 	if folder.is_empty():
 		folder = FOLDER
 	DirAccess.make_dir_recursive_absolute(folder)

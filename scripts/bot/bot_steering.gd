@@ -177,11 +177,11 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 		# Falling short of a point above.
 		jet = true
 		doing = "jet gap"
-	elif not braking and speed < JET_IN_SPEED and s.energy > JET_IN_ENERGY and s.vel().y < 4.0 and brain.wants_jet_in():
-		# Builds speed on the run in to their flag.
+	elif not braking and speed < JET_IN_SPEED and s.energy > JET_IN_ENERGY and s.vel().y < 4.0 and brain.wants_run_boost(to_target, heading_error):
+		# Builds speed on a straight flag run.
 		jet = true
 		ski = true
-		doing = "jet in"
+		doing = "jet run"
 	else:
 		climbing = false
 		doing = "brake" if braking else ("ski" if ski else "run")

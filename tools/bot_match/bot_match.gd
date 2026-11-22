@@ -4,7 +4,7 @@ extends Node
 ## fast as it can, and writes a report on how they moved, fought and played
 ## to build/bot-reports/. Run it with tools/bot-match.sh, which passes these
 ## after --:
-##   --bots N      bots per team, 8 at most (8)
+##   --bots N      bots per team, 16 at most (8)
 ##   --seed N      the match seed (1)
 ##   --minutes N   simulated minutes (5)
 ##   --map NAME    any match map (ochre_fold)
@@ -13,6 +13,7 @@ extends Node
 ##   --plain       every bot the default personality
 ##   --no-base     no generators, turrets, sensors or force fields, for
 ##                 comparing
+##   --no-waves    use the four-second respawn for comparison
 ##   --no-raids    the commanders send no raids on the enemy base
 ##   --serial-bots bots work one after another on the main thread instead of
 ##                 on worker threads, for comparing; the match is the same
@@ -53,6 +54,7 @@ var asset_events: Array[Dictionary] = []
 var generator_hits: Array[Dictionary] = []
 var runner_near_stand_seconds := [0, 0]
 var runner_with_support_seconds := [0, 0]
+var contests := [0, 0]
 var vehicle_boardings: Array[Dictionary] = []
 var vehicle_ticks := {}
 var _vehicle_report: VehicleReport
@@ -73,7 +75,7 @@ func _ready() -> void:
 	for k in args.size() - 1:
 		match args[k]:
 			"--bots":
-				bots = clampi(int(args[k + 1]), 1, 8)
+				bots = clampi(int(args[k + 1]), 1, MatchProtocol.MAX_TEAM_SIZE)
 			"--seed":
 				seed_value = int(args[k + 1])
 			"--minutes":
@@ -93,7 +95,7 @@ func _ready() -> void:
 	game = Match.new(seed_value)
 	game.terrain = map.terrain
 	for team in 2:
-		game.spawns[team] = map.spawn_points(team)
+		game.spawns[team] = map.ctf_respawn_points(team, bots)
 	for team in 2:
 		game.add_flag(team, map.stand_point(team), map.flag_rest(team))
 	for team in 2:
@@ -102,6 +104,8 @@ func _ready() -> void:
 		if not no_base:
 			map.add_base_power(game, team)
 			map.add_vehicle_pads(game, team)
+	if not args.has("--no-waves"):
+		game.settings.respawn_wave_ticks = MatchSettings.CTF_RESPAWN_WAVE_TICKS
 	game.settings.capture_limit = 1000000
 	game.settings.time_limit = minutes * 60.0 + 10.0
 	game.start_clock()
@@ -156,6 +160,7 @@ func _on_flag_event(team: int, soldier_id: int, event: String) -> void:
 		"event": event,
 		"flag_team": team,
 		"carried_flag_team": 1 - team if event == "captured" else team,
+		"distance_from_stand": snappedf(at.distance_to(game.stands[1 - team if event == "captured" else team]), 0.1),
 		"soldier": soldier_id,
 		"health": snappedf(s.health, 1.0) if s != null else 0.0,
 		"position": [snappedf(at.x, 0.1), snappedf(at.y, 0.1), snappedf(at.z, 0.1)],
@@ -171,6 +176,18 @@ func _on_asset_damaged(asset_id: int, attacker_id: int, amount: float, _from: Ve
 
 
 func _observe_runner_support() -> void:
+	var attackers := [0, 0]
+	var defenders := [0, 0]
+	for who: Soldier in game.entities.values():
+		if who.dead or who.vehicle_id != 0:
+			continue
+		if who.at().distance_squared_to(game.stands[who.team]) < 45.0 * 45.0:
+			defenders[who.team] += 1
+		if who.at().distance_squared_to(game.stands[1 - who.team]) < 45.0 * 45.0:
+			attackers[who.team] += 1
+	for team in 2:
+		if attackers[team] > 0 and defenders[1 - team] > 0:
+			contests[team] += 1
 	for brain: BotBrain in director.brains:
 		var who := brain.soldier
 		var stand: Vector3 = game.stands[1 - who.team]
@@ -205,6 +222,8 @@ func _track_bots() -> void:
 				"soldier": who.entity_id, "team": who.team, "alive": not who.dead,
 				"position": [at.x, at.y, at.z], "role": BotBrain.ROLE_NAMES[brain.role],
 				"goal": BotBrain.GOAL_NAMES[brain.goal],
+				"health": snappedf(who.health, 1.0),
+				"speed": snappedf(who.horizontal_speed(), 0.1),
 			})
 	if sample:
 		tracked_positions.append({ "seconds": game.tick / 60.0, "bots": positions })
@@ -213,7 +232,8 @@ func _track_bots() -> void:
 func _on_asset_event(asset_id: int, soldier_id: int, event: String) -> void:
 	var machine := game.asset(asset_id)
 	var kind := BaseAsset.NAMES[machine.kind].to_lower()
-	(destroyed if event == "destroyed" else repaired)[kind] += 1
+	var counts := destroyed if event == "destroyed" else repaired
+	counts[kind] = counts.get(kind, 0) + 1
 	var brain := director.brain_of(soldier_id)
 	asset_events.append({
 		"seconds": snappedf(game.tick / 60.0, 0.1),
@@ -409,6 +429,7 @@ func _report(ticks: int, wall: float) -> Dictionary:
 		"generator_hits": generator_hits,
 		"runner_near_stand_seconds": runner_near_stand_seconds,
 		"runner_with_support_seconds": runner_with_support_seconds,
+		"contested_enemy_stand_seconds": contests,
 		"vehicle_boardings": vehicle_boardings,
 		"vehicle_report": _vehicle_report.report() if _vehicle_report != null else {},
 		"vehicle_rider_seconds": vehicle_seconds,

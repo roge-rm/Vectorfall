@@ -102,9 +102,10 @@ func _check_music() -> void:
 	checks.check(first != null and rotation.stream != null and first != rotation.stream, "when a track finishes, the rotation loads the next song")
 	rotation.set_audible(false)
 	checks.check(rotation.stream_paused, "muting pauses the current song")
-	rotation.stop()
-	rotation.stream = null
-	rotation.queue_free()
+	root.remove_child(rotation)
+	checks.check(rotation.stream == null and not rotation.has_stream_playback(),
+		"leaving the tree releases the paused music playback")
+	rotation.free()
 	# The audio server drops stopped playbacks after its next mix.
 	OS.delay_msec(70)
 	await process_frame
