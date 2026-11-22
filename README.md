@@ -159,7 +159,7 @@ New in 0.13.0
 
 ## Building
 
-Use the Godot 4.7.2 Linux editor at `tools/godot/Godot_v4.7.2-stable_linux.x86_64`. Put an empty `._sc_` file beside the editor to keep its settings local. Install the matching export templates to build packages. For Android, set the Android SDK and Java 21 paths in the editor settings. For Debian packaging, install `dpkg-deb` and ImageMagick.
+Use the Godot 4.7.2 Linux editor at `tools/godot/Godot_v4.7.2-stable_linux.x86_64`. Put an empty `._sc_` file beside the editor to keep its settings local. Install the matching export templates to build packages. For Android, set the Android SDK and Java 21 paths in the editor settings. For Debian packaging, install `dpkg-deb` and either `librsvg2-bin` or ImageMagick.
 
 - `tools/run.sh` runs the game from source. Add `-- --map test` to open the test map.
 - `tools/build-linux.sh --release` exports a standalone 64-bit Linux executable.

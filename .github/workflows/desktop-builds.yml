@@ -29,7 +29,7 @@ jobs:
       - name: Install packaging tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git imagemagick unzip zip
+          apt-get install -y --no-install-recommends ca-certificates curl git librsvg2-bin unzip zip
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -63,16 +63,19 @@ jobs:
           unzip -q "$RUNNER_TEMP/godot.zip" -d tools/godot
           unzip -jq "$RUNNER_TEMP/templates.tpz" 'templates/linux_release.arm64' 'templates/windows_release_x86_64.exe' 'templates/macos.zip' -d "$templates"
           touch tools/godot/._sc_
-      - name: Build Debian, Windows and macOS packages
+      - name: Build the Debian arm64 package
         run: |
-          godot="tools/godot/Godot_v$GODOT_VERSION-stable_linux.x86_64"
-          mkdir -p build/windows build/dist
-          touch build/.gdignore
+          mkdir -p build/dist
           tools/package-deb.sh --arch arm64
           cp "build/desktop/vectorfall_${BUILD_VERSION}_arm64.deb" build/dist/
-          "$godot" --headless --path . --export-release Windows "$PWD/build/windows/Vectorfall.exe"
+      - name: Build the Windows archive
+        run: |
+          mkdir -p build/windows
+          "tools/godot/Godot_v$GODOT_VERSION-stable_linux.x86_64" --headless --path . --export-release Windows "$PWD/build/windows/Vectorfall.exe"
           (cd build/windows && zip -qr "../dist/vectorfall-$BUILD_VERSION-windows-x86_64.zip" .)
-          "$godot" --headless --path . --export-release macOS "$PWD/build/dist/vectorfall-$BUILD_VERSION-macos-universal.zip"
+      - name: Build the macOS app
+        run: |
+          "tools/godot/Godot_v$GODOT_VERSION-stable_linux.x86_64" --headless --path . --export-release macOS "$PWD/build/dist/vectorfall-$BUILD_VERSION-macos-universal.zip"
       - uses: actions/upload-artifact@v6
         with:
           name: vectorfall-desktop

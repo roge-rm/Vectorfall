@@ -36,8 +36,13 @@ sed "s/@RENDERING_DRIVER@/$RENDERING_DRIVER/" "$SRC/launcher" > "$stage/usr/game
 chmod 755 "$stage/usr/games/vectorfall"
 install -m 644 $SRC/vectorfall.desktop "$stage/usr/share/applications/vectorfall.desktop"
 install -m 644 art/icon.svg "$stage/usr/share/icons/hicolor/scalable/apps/vectorfall.svg"
-convert -background none art/icon.svg -resize 256x256 "$stage/usr/share/icons/hicolor/256x256/apps/vectorfall.png" 2> /dev/null
-chmod 644 "$stage/usr/share/icons/hicolor/256x256/apps/vectorfall.png"
+icon="$stage/usr/share/icons/hicolor/256x256/apps/vectorfall.png"
+if command -v rsvg-convert >/dev/null; then
+	rsvg-convert --width 256 --height 256 --output "$icon" art/icon.svg
+else
+	convert -background none art/icon.svg -resize 256x256 "$icon"
+fi
+chmod 644 "$icon"
 install -m 644 LICENSE "$stage/usr/share/doc/vectorfall/copyright"
 kb=$(du -sk --exclude=DEBIAN "$stage" | cut -f1)
 sed "s/@VERSION@/$V/; s/@SIZE@/$kb/; s/@ARCH@/$DEB_ARCH/; s/@EXTRA_DEPS@/$EXTRA_DEPS/" "$SRC/control" > "$stage/DEBIAN/control"
