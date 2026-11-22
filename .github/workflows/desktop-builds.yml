@@ -61,7 +61,7 @@ jobs:
           SUMS
           )
           unzip -q "$RUNNER_TEMP/godot.zip" -d tools/godot
-          unzip -jq "$RUNNER_TEMP/templates.tpz" 'templates/linux_release.arm64' 'templates/windows_release_x86_64.exe' 'templates/macos.zip' -d "$templates"
+          unzip -jq "$RUNNER_TEMP/templates.tpz" 'templates/linux_release.arm64' 'templates/linux_release.x86_64' 'templates/windows_release_x86_64.exe' 'templates/macos.zip' -d "$templates"
           touch tools/godot/._sc_
       - name: Build the Debian arm64 package
         run: |
@@ -76,6 +76,10 @@ jobs:
       - name: Build the macOS app
         run: |
           "tools/godot/Godot_v$GODOT_VERSION-stable_linux.x86_64" --headless --path . --export-release macOS "$PWD/build/dist/vectorfall-$BUILD_VERSION-macos-universal.zip"
+      - name: Build the Linux AppImage
+        run: |
+          tools/package-appimage.sh
+          cp "build/desktop/vectorfall-$BUILD_VERSION-x86_64.AppImage" build/dist/
       - uses: actions/upload-artifact@v6
         with:
           name: vectorfall-desktop
@@ -139,5 +143,22 @@ jobs:
           lipo "$executable" -verify_arch x86_64 arm64
           codesign --verify --deep --strict Vectorfall.app
           "$executable" --headless --quit-after 15 2>&1 | tee startup.log
+          grep -F 'Godot Engine' startup.log
+          ! grep -E 'SCRIPT ERROR|^ERROR' startup.log
+
+
+  appimage-startup:
+    needs: package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: vectorfall-desktop
+      - name: Start the AppImage without FUSE
+        shell: bash
+        run: |
+          chmod +x vectorfall-*-x86_64.AppImage
+          ./vectorfall-*-x86_64.AppImage --appimage-extract-and-run --headless --quit-after 15 2>&1 | tee startup.log
           grep -F 'Godot Engine' startup.log
           ! grep -E 'SCRIPT ERROR|^ERROR' startup.log

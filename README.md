@@ -48,6 +48,7 @@ Download the APK or Debian package from [Releases](https://github.com/roge-rm/Ve
 
 - Android 7.0 and up, on 32-bit or 64-bit ARM. Add [my F-Droid repo](https://hunke.ws/fdroid/) or open `vectorfall-0.15.0.apk` and follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
 - Debian 13 on 64-bit x86. Add [my apt repo](https://hunke.ws/apt/) and run `sudo apt install vectorfall`, or run `sudo apt install ./vectorfall_0.15.0_amd64.deb` from the download folder. Open Vectorfall from the applications menu. The game needs OpenGL 3.3.
+- Steam Deck and other x86-64 Linux PCs. Download the AppImage, make it executable and open it. On Steam Deck, add it as a non-Steam game in Desktop Mode to launch it from Gaming Mode.
 - Raspberry Pi OS Trixie on 64-bit ARM. Run `sudo apt install ./vectorfall_0.15.0_arm64.deb` from the download folder. The game uses OpenGL ES 3.0.
 - Windows on 64-bit x86. Unzip the Windows download and open `Vectorfall.exe`.
 - macOS on Intel or Apple Silicon. Unzip the macOS download and open `Vectorfall.app`. The app is ad-hoc signed and may need approval in Privacy & Security.
@@ -164,7 +165,8 @@ Use the Godot 4.7.2 Linux editor at `tools/godot/Godot_v4.7.2-stable_linux.x86_6
 - `tools/run.sh` runs the game from source. Add `-- --map test` to open the test map.
 - `tools/build-linux.sh --release` exports a standalone 64-bit Linux executable.
 - `tools/package-deb.sh` builds the Debian amd64 package. Add `--arch arm64` for the Raspberry Pi package and install the matching Linux arm64 export template.
-- The [Desktop builds workflow](.github/workflows/desktop-builds.yml) builds the Raspberry Pi, Windows and macOS packages from release tags and checks that each one starts. To build an existing release from the Actions tab, enter its tag in the manual run.
+- `tools/package-appimage.sh` builds the x86-64 Linux AppImage.
+- The [Desktop builds workflow](.github/workflows/desktop-builds.yml) builds the AppImage and the Raspberry Pi, Windows and macOS packages from release tags and checks that each one starts. To build an existing release from the Actions tab, enter its tag in the manual run.
 - `tools/build-android.sh` builds a debug APK for ARM. Add `--emulator` for x86-64.
 - Run `tools/prepare-android.sh` before exporting a release with the Android preset. It installs the Gradle template and adds the native Duo panel.
 - `tools/run-tests.sh` runs the headless tests. Pass names such as `arena_map_test` or `ski_practice_test` to run selected tests.
