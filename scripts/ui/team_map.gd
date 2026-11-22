@@ -35,11 +35,17 @@ func _ready() -> void:
 	chart.picked.connect(_sync_send)
 	body.add_child(chart)
 
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size.x = MenuKit.px(206)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.follow_focus = true
+	body.add_child(scroll)
 	var sidebar := VBoxContainer.new()
-	sidebar.custom_minimum_size.x = MenuKit.px(196)
-	body.add_child(sidebar)
-	sidebar.add_child(MenuKit.heading("Waypoint", 26))
+	sidebar.size_flags_horizontal = SIZE_EXPAND_FILL
+	scroll.add_child(sidebar)
+	sidebar.add_child(MenuKit.heading("Waypoint", 22))
 	recipients = OptionButton.new()
+	_style_recipient_picker()
 	recipients.tooltip_text = "Waypoint recipient"
 	recipients.fit_to_longest_item = false
 	recipients.add_item("Choose teammate", 0)
@@ -48,14 +54,15 @@ func _ready() -> void:
 	send = MenuKit.button("Send waypoint", _send, 20, false, true)
 	sidebar.add_child(send)
 	if not game.hold_points.is_empty():
-		sidebar.add_child(MenuKit.heading("Control points", 26))
+		sidebar.add_child(MenuKit.heading("Control points", 22))
 		objective_status = MenuKit.ink_label("", 14)
 		sidebar.add_child(objective_status)
-	sidebar.add_child(MenuKit.heading("Active orders", 26))
+	sidebar.add_child(MenuKit.heading("Active orders", 22))
 	orders = RichTextLabel.new()
-	orders.focus_mode = FOCUS_CLICK
+	orders.fit_content = true
+	orders.scroll_active = false
+	orders.mouse_filter = MOUSE_FILTER_IGNORE
 	orders.add_theme_color_override("default_color", InkUi.INK)
-	orders.size_flags_vertical = SIZE_EXPAND_FILL
 	sidebar.add_child(orders)
 
 	var objective := "◆  Flag" if game.hold_points.is_empty() else "A–C  Control points"
@@ -66,6 +73,25 @@ func _ready() -> void:
 	back = MenuKit.button("Back", closed.emit, 22, true)
 	footer.add_child(back)
 	hide()
+
+
+func _style_recipient_picker() -> void:
+	var edge := StyleBoxFlat.new()
+	edge.bg_color = InkUi.CREAM
+	edge.border_color = InkUi.INK
+	edge.set_border_width_all(MenuKit.pxi(2))
+	edge.content_margin_left = MenuKit.px(8)
+	edge.content_margin_top = MenuKit.px(4)
+	edge.content_margin_bottom = MenuKit.px(4)
+	for state in ["normal", "hover", "pressed"]:
+		recipients.add_theme_stylebox_override(state, edge)
+	var focus := edge.duplicate() as StyleBoxFlat
+	focus.draw_center = false
+	focus.border_color = InkUi.PINK
+	recipients.add_theme_stylebox_override("focus", focus)
+	for state in ["font_color", "font_hover_color", "font_focus_color", "font_pressed_color"]:
+		recipients.add_theme_color_override(state, InkUi.INK)
+	recipients.add_theme_constant_override("modulate_arrow", 1)
 
 
 func open() -> void:
