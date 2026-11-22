@@ -98,10 +98,10 @@ jobs:
           GODOT_SILENCE_ROOT_WARNING: 1
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ./vectorfall_*_arm64.deb
+          apt-get install -y --no-install-recommends xvfb xauth ./vectorfall_*_arm64.deb
           test "$(dpkg-query -W -f='${Architecture}' vectorfall)" = arm64
-          vectorfall --headless --quit-after 15 2>&1 | tee startup.log
-          grep -F 'Godot Engine' startup.log
+          xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 /usr/games/vectorfall --display-driver x11 --audio-driver Dummy --quit-after 15 2>&1 | tee startup.log
+          grep -F 'OpenGL API OpenGL ES' startup.log
           ! grep -E 'SCRIPT ERROR|^ERROR' startup.log
 
   windows-startup:
@@ -136,7 +136,7 @@ jobs:
         run: |
           unzip -q vectorfall-*-macos-universal.zip
           executable=Vectorfall.app/Contents/MacOS/Vectorfall
-          lipo -verify_arch x86_64 arm64 "$executable"
+          lipo "$executable" -verify_arch x86_64 arm64
           codesign --verify --deep --strict Vectorfall.app
           "$executable" --headless --quit-after 15 2>&1 | tee startup.log
           grep -F 'Godot Engine' startup.log
