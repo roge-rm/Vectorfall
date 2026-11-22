@@ -65,8 +65,8 @@ func _ready() -> void:
 	orders.add_theme_color_override("default_color", InkUi.INK)
 	sidebar.add_child(orders)
 
-	var objective := "◆  Flag" if game.hold_points.is_empty() else "A–C  Control points"
-	var legend := MenuKit.ink_label("●  Teammate     ○  Sensor contact     " + objective, 18)
+	var objective := "Diamonds for flags" if game.hold_points.is_empty() else "A–C for control points"
+	var legend := MenuKit.ink_label("Dots for teammates · Rings for sensor contacts · " + objective, 16)
 	legend.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(legend)
 	var footer := MenuKit.button_row(column)
