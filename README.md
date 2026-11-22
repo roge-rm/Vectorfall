@@ -44,10 +44,12 @@ Dan
 
 ## Install
 
-The [0.15.0 downloads](https://github.com/roge-rm/Skifrei/releases/tag/v0.15.0) and the [browser demo](https://hunke.ws/fdroid/play/vectorfall/) are available under the previous name, Vectorfall. You can also get 0.15.0 from [my F-Droid repo](https://hunke.ws/fdroid/) or [my apt repo](https://hunke.ws/apt/).
+Skifrei 0.16.0 is available for Android, Debian and Raspberry Pi OS. You can also play in a browser. The Windows, macOS and AppImage downloads on GitHub are from 0.15.0, when the game was called Vectorfall.
 
-- Android 7.0 and up, on 32-bit or 64-bit ARM. Open the APK and follow the install prompt. Skifrei has a new Android package and installs separately from 0.15.0.
-- Debian 13 on 64-bit x86 and Raspberry Pi OS Trixie on 64-bit ARM. Download the matching Debian package and open it with your package installer. The x86 build needs OpenGL 3.3 and the Pi build uses OpenGL ES 3.0.
+[F-Droid](https://hunke.ws/fdroid/) · [apt repo](https://hunke.ws/apt/) · [Play in browser](https://hunke.ws/fdroid/play/skifrei/) · [GitHub releases](https://github.com/roge-rm/Skifrei/releases)
+
+- Android 7.0 and up, on 32-bit or 64-bit ARM. Add my F-Droid repo and install Skifrei, or open the APK. It installs separately from Vectorfall.
+- Debian 13 on 64-bit x86 and Raspberry Pi OS Trixie on 64-bit ARM. Add my apt repo and run `sudo apt install skifrei`, or download the matching Debian package and open it with your package installer. The x86 build needs OpenGL 3.3 and the Pi build uses OpenGL ES 3.0.
 - Steam Deck and other x86-64 Linux PCs. Download the AppImage, make it executable and open it. On Steam Deck, add it as a non-Steam game in Desktop Mode to launch it from Gaming Mode.
 - Windows on 64-bit x86. Unzip the download and open the game.
 - macOS on Intel or Apple Silicon. Unzip the download and open the app. The app is ad-hoc signed and may need approval in Privacy & Security.
@@ -136,8 +138,9 @@ Open `Settings` to change look speed for each input, touch button size, gyro aim
 
 ## What's new
 
-In development
+New in 0.16.0
 
+- The game is now called Skifrei.
 - In Capture the Flag you respawn with the next team wave after at least four seconds. At Copper Steps and Nightline Foundry you come back on the flanks. Both bases have cover along the flag exits.
 - Open `Team calls` from `Orders` to call a flag run, mark an exit or ask for generator repairs. Teammates can acknowledge the call from the same menu.
 - Open `How to play → Drills` to practise leading an airborne target, grabbing the flag at speed or repairing the generator under fire.
@@ -166,7 +169,7 @@ New in 0.13.0
 
 ## Building
 
-Use the Godot 4.7.2 Linux editor at `tools/godot/Godot_v4.7.2-stable_linux.x86_64`. Put an empty `._sc_` file beside the editor to keep its settings local. Install the matching export templates to build packages. For Android, set the Android SDK and Java 21 paths in the editor settings. For Debian packaging, install `dpkg-deb` and either `librsvg2-bin` or ImageMagick.
+Use the Godot 4.7.2 Linux editor at `tools/godot/Godot_v4.7.2-stable_linux.x86_64`. Put an empty `._sc_` file beside the editor to keep its settings local. Install the matching export templates to build packages. For Android, set the Android SDK and Java 21 paths in the editor settings. For Debian packaging, install `dpkg-deb`.
 
 - `tools/run.sh` runs the game from source. Add `-- --map test` to open the test map.
 - `tools/build-linux.sh --release` exports a standalone 64-bit Linux executable.
