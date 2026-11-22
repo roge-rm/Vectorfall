@@ -47,6 +47,7 @@ var _mine_pending := false
 ## An order picked from the menu, sent in the next command.
 var _order := 0
 var _order_arg := 0
+var _order_point := Vector2.ZERO
 ## A loadout picked on the loadout screen, sent in the next command.
 var _loadout: Dictionary = {}
 ## While true, as when the loadout screen is open, commands only keep looking
@@ -96,9 +97,10 @@ func _input(event: InputEvent) -> void:
 
 
 ## Sends an order to your team's bots with the next command.
-func queue_order(order: int, arg: int) -> void:
+func queue_order(order: int, arg: int, point := Vector2.ZERO) -> void:
 	_order = order
 	_order_arg = arg
+	_order_point = point
 
 
 ## Sends the loadout you want with the next command: worn at once on a
@@ -222,6 +224,7 @@ func make_command(delta: float) -> PlayerCommand:
 	command.pitch = source.pitch
 	command.order = _order
 	command.order_arg = _order_arg
+	command.order_point = _order_point
 	_order = 0
 	_order_arg = 0
 	command.loadout = _loadout

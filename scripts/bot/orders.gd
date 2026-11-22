@@ -5,8 +5,8 @@ extends RefCounted
 ## match as part of a PlayerCommand (order and order_arg, for one tick), so it
 ## reaches the team's commander on a tick and replays with the commands.
 
-enum Kind { NONE, DEFEND_FLAG, ESCORT_ME, ATTACK_GENERATOR, COVER_ME, TAKE_FLAG, REPAIR_BASE, SET_ROLE }
-const NAMES: Array[String] = ["", "Defend the flag", "Escort me", "Attack the generator", "Cover me", "Take the flag", "Repair the base", "Set a role"]
+enum Kind { NONE, DEFEND_FLAG, ESCORT_ME, ATTACK_GENERATOR, COVER_ME, TAKE_FLAG, REPAIR_BASE, SET_ROLE, WAYPOINT }
+const NAMES: Array[String] = ["", "Defend the flag", "Escort me", "Attack the generator", "Cover me", "Take the flag", "Repair the base", "Set a role", "Waypoint"]
 ## The orders on the menu, in order.
 const MENU: Array[int] = [Kind.DEFEND_FLAG, Kind.ESCORT_ME, Kind.ATTACK_GENERATOR, Kind.COVER_ME, Kind.TAKE_FLAG, Kind.REPAIR_BASE]
 ## Roles a person in commander mode can hand out, and AUTO to give a bot

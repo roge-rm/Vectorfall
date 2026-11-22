@@ -62,6 +62,10 @@ var _end_band: MenuKit.Band
 var _end_score: Label
 var _restart_button: Button
 var _end_menu_button: Button
+var _results_button: Button
+var _map_button: Button
+signal tactical_requested
+signal results_requested
 ## Shown under the respawn count while you're dead.
 var loadout_button: MenuKit.CoverButton
 ## Bottom of the score bar and compass, and top of the status panel, from the
@@ -87,6 +91,10 @@ func _init() -> void:
 	loadout_button.name = "LoadoutButton"
 	loadout_button.visible = false
 	add_child(loadout_button)
+	_map_button = MenuKit.button("Map", tactical_requested.emit, 22, false, true)
+	_map_button.focus_mode = Control.FOCUS_NONE
+	_map_button.hide()
+	add_child(_map_button)
 	_make_end_card()
 
 
@@ -108,6 +116,8 @@ func _make_end_card() -> void:
 	_end_band = box.get_parent().get_parent().get_child(0) as MenuKit.Band
 	_end_score = MenuKit.heading("", 30)
 	box.add_child(_end_score)
+	_results_button = MenuKit.button("Match results", results_requested.emit, MenuKit.BUTTON_SIZE)
+	box.add_child(_results_button)
 	_restart_button = MenuKit.button("Restart (R)", restart_requested.emit, MenuKit.BUTTON_SIZE, false, true)
 	box.add_child(_restart_button)
 	_end_menu_button = MenuKit.button("Main menu", menu_requested.emit, MenuKit.BUTTON_SIZE, true)
@@ -208,8 +218,11 @@ func _on_match_over(team: int) -> void:
 	_end_band.queue_redraw()
 	_end_score.text = ("%s %d : %d %s" % [Soldier.TEAM_NAMES[0], game.scores[0], game.scores[1], Soldier.TEAM_NAMES[1]]).to_upper()
 	# Focus for a gamepad or keyboard.
-	var button := _restart_button if _restart_button.visible else _end_menu_button
-	button.grab_focus.call_deferred()
+	focus_results()
+
+
+func focus_results() -> void:
+	_results_button.grab_focus.call_deferred()
 
 
 func _on_shield_hit(victim_id: int, _amount: float, _from: Vector3) -> void:
@@ -317,6 +330,10 @@ func _process(delta: float) -> void:
 	# Shown while dead and while on one of your stations.
 	var show_loadout := soldier.dead or (game != null and game.station_under(soldier) != null)
 	show_loadout = show_loadout and (game == null or not game.over)
+	_map_button.visible = device == LocalInput.Device.TOUCH and game != null and game.arena != null and not game.over
+	if _map_button.visible and touch != null:
+		var pause_rect := touch.pause_rect()
+		_map_button.position = Vector2(pause_rect.end.x + pause_rect.size.x * 0.45, pause_rect.position.y)
 	if loadout_button.visible != show_loadout:
 		loadout_button.visible = show_loadout
 	if show_loadout:
@@ -413,6 +430,7 @@ func _draw() -> void:
 		_draw_sensor_marks(u)
 		_draw_generator_marker(u)
 		_draw_flag_markers(u)
+		_draw_waypoint(u)
 	var words := notice()
 	if not words.is_empty():
 		var alpha := 1.0 if words == WAIT_FOR_FLAG else clampf(_message_left, 0.0, 1.0)
@@ -717,6 +735,26 @@ func _diamond(at: Vector2, radius: float, colour: Color, filled := true) -> void
 	draw_polyline(closed, colour, 3.0)
 
 
+func _draw_waypoint(u: float) -> void:
+	var order: Dictionary = game.waypoints.get(soldier.entity_id, {})
+	var camera := get_viewport().get_camera_3d()
+	if order.is_empty() or soldier.dead or game.over or camera == null:
+		return
+	var point: Vector3 = order.at
+	var local := camera.to_local(point)
+	var at := camera.unproject_position(point)
+	if local.z >= -0.05:
+		var direction := Vector2(local.x, -local.y)
+		if direction.is_zero_approx():
+			direction = Vector2.DOWN
+		at = size * 0.5 + direction.normalized() * size.length()
+	at = at.clamp(Vector2(85.0 * u, _top_edge + 18.0 * u), Vector2(size.x - 85.0 * u, size.y * 0.76))
+	var distance := int(soldier.at().distance_to(point))
+	_diamond(at, 7.0 * u, InkUi.CREAM, false)
+	InkUi.centred(self, at + Vector2(0, 16.0 * u), "WAYPOINT · %d m" % distance,
+		InkUi.Face.BOLD, _px(13), InkUi.CREAM, 3)
+
+
 func _draw_flag_markers(u: float) -> void:
 	var camera := get_viewport().get_camera_3d()
 	if camera == null:
@@ -878,10 +916,7 @@ func _draw_sensor_marks(u: float) -> void:
 ## True for a flag carried by an enemy with a sensor jammer on, which the
 ## markers and compass leave out.
 func _jammed(flag: Flag) -> bool:
-	if flag.mode != Flag.Mode.CARRIED:
-		return false
-	var carrier := game.soldier(flag.carrier_id)
-	return carrier != null and carrier.team != soldier.team and carrier.jamming()
+	return not game.tactical_flag_visible(soldier, flag)
 
 
 ## Pushes an edge marker towards the middle of the screen until it's clear of

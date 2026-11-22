@@ -117,6 +117,15 @@ static func chosen_name(fallback := DEFAULT) -> String:
 	return fallback
 
 
+func tactical_bounds() -> Rect2:
+	var half := Vector2(OchreFold.PLAY_X, OchreFold.PLAY_Z)
+	if self is ArenaMap:
+		half = (self as ArenaMap).play_half
+	elif self is TestMap:
+		half = Vector2(TestMap.LENGTH, TestMap.WIDTH) * 0.5
+	return Rect2(-half, half * 2.0)
+
+
 ## The ground's height, smooth, from the map's shape.
 func height_at(x: float, z: float) -> float:
 	return ground_height(x, z)

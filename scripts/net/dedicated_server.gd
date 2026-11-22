@@ -121,6 +121,7 @@ func _assign(id: int, preference: int) -> void:
 		source.last.pitch = who.pitch
 		inputs[id] = source
 		game.sources[who.entity_id] = source
+		game.change_occupant(who)
 		who.display_name = "%s %d" % [HUMAN_NAME, id]
 		waiting.erase(id)
 		director.assign_roles()
@@ -137,6 +138,7 @@ func _release(id: int) -> void:
 		return
 	var brain := assignments[id]
 	var who := brain.soldier
+	game.change_occupant(who)
 	who.display_name = "Bot %d" % who.entity_id
 	game.sources[who.entity_id] = brain
 	brain.reset()
@@ -206,9 +208,12 @@ func _snapshot() -> void:
 		events.clear()
 		return
 	var state := _state()
-	var packed := var_to_bytes(state).compress(FileAccess.COMPRESSION_DEFLATE)
+	var packed := {}
 	for id: int in active_players:
-		_send(id, {"kind": "state", "round": epoch, "ack": inputs[id].applied, "state": packed}, 1)
+		var team := assignments[id].soldier.team
+		if not packed.has(team):
+			packed[team] = _team_snapshot(state, team)
+		_send(id, {"kind": "state", "round": epoch, "ack": inputs[id].applied, "state": packed[team]}, 1)
 	if not events.is_empty():
 		var report := MatchProtocol.encode({"kind": "events", "round": epoch, "tick": game.tick, "events": events})
 		for id: int in active_players:
@@ -226,10 +231,24 @@ func _state() -> Dictionary:
 	return state
 
 
+func _team_snapshot(state: Dictionary, team: int) -> PackedByteArray:
+	var view := state.duplicate()
+	var contacts := [PackedInt32Array(), PackedInt32Array()]
+	contacts[team] = game.sensed[team]
+	view["sensed"] = contacts
+	view["tactical_orders"] = {team: game.tactical_orders(team)}
+	var markers := {}
+	for recipient: int in game.waypoints:
+		if game.soldier(recipient).team == team:
+			markers[recipient] = game.waypoints[recipient]
+	view["waypoints"] = markers
+	return var_to_bytes(view).compress(FileAccess.COMPRESSION_DEFLATE)
+
+
 func _welcome(id: int) -> void:
 	_send(id, {"kind": "welcome", "round": epoch, "map": map_name, "minutes": minutes,
 		"captures": captures, "player": assignments[id].soldier.entity_id, "name": server_name,
-		"state": var_to_bytes(_state()).compress(FileAccess.COMPRESSION_DEFLATE)}, 0, true)
+		"state": _team_snapshot(_state(), assignments[id].soldier.team)}, 0, true)
 
 
 func _send(id: int, message: Dictionary, channel: int, reliable := false) -> void:

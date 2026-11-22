@@ -85,6 +85,23 @@ func _run() -> void:
 		await physics_frame
 	checks.check(not paused and main.game.tick > old_tick, "opening the pause menu keeps online snapshots moving")
 	main.pause_menu.resume()
+	var mate_id := 0
+	for id: int in native.latest.entities:
+		if id != native.player_id and native.latest.entities[id].team == main.player.team and not main.game.soldier(id).dead:
+			mate_id = id
+			break
+	main._open_team_map()
+	main._send_waypoint(mate_id, Vector2(0, 60))
+	for index in 120:
+		if native.latest.get("waypoints", {}).has(mate_id) and web.latest.get("tick", 0) >= native.latest.tick:
+			break
+		await physics_frame
+	checks.check(mate_id != 0 and native.latest.get("waypoints", {}).has(mate_id),
+		"the host accepts a waypoint through the normal client command path")
+	checks.check(not web.latest.get("waypoints", {}).has(mate_id),
+		"the opposing team does not receive the waypoint")
+	checks.check(native.latest.has("results") and native.latest.results == web.latest.get("results", {}),
+		"both teams receive the same authoritative results")
 	var first_round := native.round_id
 	var scene_id := main.get_instance_id()
 	var request := FileAccess.open(OS.get_environment("VECTORFALL_STATUS_DIR").path_join("round.json"), FileAccess.WRITE)

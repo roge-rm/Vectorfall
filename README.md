@@ -63,6 +63,12 @@ Touch the enemy flag to take it. Bring it back to your stand when your own flag 
 
 Give bots orders to go for the flag, cover you or help at the base. Turn on `Commander mode` in `Settings` to assign roles. Bots can drive and fly vehicles and repair the base.
 
+### Team map and results
+
+When running from source, open the team map with M, the right stick button or `Map` on touch. Pick a teammate and a spot on the map, then press `Send waypoint`.
+
+Open `Match results` after the match. An assist counts if you hurt an enemy in the eight seconds before a teammate kills them. An escort counts if you're within 35 metres of a teammate when they capture the flag. A repair counts when you bring a destroyed piece of equipment back online.
+
 ### Loadouts and base equipment
 
 Light armour carries up to two weapons, medium carries three and heavy carries four. Armour determines which weapons you can take and how many grenades and mines you can carry. There are seven weapons, including the disc launcher, chaingun, sniper rifle and mortar. Change your loadout while dead or at a friendly inventory station. You can save loadouts.

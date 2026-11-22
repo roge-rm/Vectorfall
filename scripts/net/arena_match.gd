@@ -8,6 +8,7 @@ static func make(parent: Node, map: GameMap, minutes: float, captures: int, seed
 	game.settings.capture_limit = captures
 	game.start_clock()
 	game.terrain = map.terrain
+	game.arena = map
 	for team in 2:
 		game.spawns[team] = map.spawn_points(team, spawn_count)
 		game.add_flag(team, map.stand_point(team), map.flag_rest(team))

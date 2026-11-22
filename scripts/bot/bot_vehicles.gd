@@ -230,7 +230,11 @@ func _crew_candidate(boss: TeamCommander, brain: BotBrain, job_kind: String) -> 
 	var id := who.entity_id
 	var regular_crew := brain.role in [BotBrain.Role.OFFENCE, BotBrain.Role.MIDFIELD]
 	var intercept_crew := job_kind == "intercept" and brain.role in [BotBrain.Role.LIGHT_DEFENCE, BotBrain.Role.CHASE]
-	return (regular_crew or intercept_crew) and not who.dead and who.vehicle_id == 0 and not brain.is_flag_runner() and not boss.order_locks.has(id) and not delivered.has(id) and boss.game.carried_flag(id) == null
+	return (
+		(regular_crew or intercept_crew) and not who.dead and who.vehicle_id == 0 and not brain.is_flag_runner()
+		and not boss.order_locks.has(id) and not boss.game.waypoints.has(id)
+		and not delivered.has(id) and boss.game.carried_flag(id) == null
+	)
 
 
 func _start_mission(boss: TeamCommander, kind: Vehicle.Kind, job_kind: String, objective: Vector3, target: int, minimum: int, want: int, reach: float) -> int:
@@ -347,7 +351,7 @@ func rider_command(brain: BotBrain) -> PlayerCommand:
 	if hull == null:
 		return command
 	var boss := director.commander(who.team)
-	var foot_order := boss.order_locks.has(who.entity_id)
+	var foot_order := boss.order_locks.has(who.entity_id) or game.waypoints.has(who.entity_id)
 	if hull.kind == Vehicle.Kind.TRANSPORT and who.vehicle_seat == 0:
 		_ferry_pilot(hull, command, boss, foot_order)
 		return command

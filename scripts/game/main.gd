@@ -30,6 +30,8 @@ var audio: GameAudio
 var pause_menu: PauseMenu
 var loadout_screen: LoadoutScreen
 var replica: MatchReplica
+var team_map: TeamMap
+var results_board: ResultsBoard
 
 
 func _ready() -> void:
@@ -118,6 +120,20 @@ func _ready() -> void:
 	input.loadout_requested.connect(open_loadout)
 	game.station_entered.connect(_on_station_entered)
 
+	team_map = TeamMap.new()
+	team_map.game = game
+	team_map.viewer = player
+	team_map.closed.connect(_close_team_map)
+	team_map.waypoint_requested.connect(_send_waypoint)
+	layer.add_child(team_map)
+	hud.tactical_requested.connect(_open_team_map)
+	results_board = ResultsBoard.new()
+	results_board.game = game
+	results_board.viewer = player
+	results_board.closed.connect(_close_results)
+	layer.add_child(results_board)
+	hud.results_requested.connect(results_board.open)
+
 	var top := CanvasLayer.new()
 	top.layer = 2
 	add_child(top)
@@ -156,10 +172,56 @@ func _physics_process(_delta: float) -> void:
 		replica.advance(input.make_command(OnlineClient.STEP))
 
 
+func _open_team_map() -> void:
+	if game.over or pause_menu.visible or loadout_screen.visible:
+		return
+	menu.close()
+	touch.release_all()
+	touch.blocked = true
+	input.held_off = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	team_map.open()
+
+
+func _close_team_map() -> void:
+	team_map.hide()
+	touch.release_all()
+	_on_loadout_closed()
+
+
+func _send_waypoint(recipient: int, point: Vector2) -> void:
+	input.queue_order(Orders.Kind.WAYPOINT, recipient, point)
+	_close_team_map()
+
+
+func _close_results() -> void:
+	results_board.hide()
+	hud.focus_results()
+
+
+func _input(event: InputEvent) -> void:
+	if team_map == null:
+		return
+	var toggle := false
+	if event is InputEventKey:
+		toggle = event.pressed and not event.echo and event.physical_keycode == KEY_M
+	elif event is InputEventJoypadButton:
+		toggle = event.pressed and event.button_index == JOY_BUTTON_RIGHT_STICK
+	if results_board.visible and (event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause")):
+		_close_results()
+	elif team_map.visible and (toggle or event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause")):
+		_close_team_map()
+	elif toggle:
+		_open_team_map()
+	else:
+		return
+	get_viewport().set_input_as_handled()
+
+
 ## Opens the loadout screen while you're dead or on one of your stations.
 ## Your soldier stands still while it's open.
 func open_loadout() -> void:
-	if loadout_screen.visible or game.over or pause_menu.visible:
+	if loadout_screen.visible or game.over or pause_menu.visible or team_map.visible:
 		return
 	if not player.dead and game.station_under(player) == null:
 		return
@@ -209,8 +271,10 @@ func apply_settings() -> void:
 
 ## Pauses the whole tree, sim included, and opens the pause menu.
 func pause() -> void:
-	if pause_menu.visible:
+	if pause_menu.visible or game.over:
 		return
+	if team_map.visible:
+		_close_team_map()
 	if menu.visible:
 		menu.close()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -244,6 +308,8 @@ func _on_said(team: int, speaker_id: int, line: int, text: String) -> void:
 
 
 func _on_match_over(_winner: int) -> void:
+	if team_map != null and team_map.visible:
+		_close_team_map()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
@@ -267,12 +333,16 @@ func quit_to_menu() -> void:
 func _notification(what: int) -> void:
 	# Android's back button and leaving the app pause the match.
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED:
-		if pause_menu != null and not pause_menu.visible and not game.over:
+		if what == NOTIFICATION_WM_GO_BACK_REQUEST and results_board != null and results_board.visible:
+			_close_results()
+		elif what == NOTIFICATION_WM_GO_BACK_REQUEST and team_map != null and team_map.visible:
+			_close_team_map()
+		elif pause_menu != null and not pause_menu.visible and not game.over:
 			pause()
 		elif what == NOTIFICATION_WM_GO_BACK_REQUEST and pause_menu != null and pause_menu.home.visible:
 			pause_menu.resume()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if game.over and event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_R:
+	if game.over and not results_board.visible and event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_R:
 		restart()

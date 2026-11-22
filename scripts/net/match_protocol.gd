@@ -38,6 +38,9 @@ static func command(data: Variant) -> PlayerCommand:
 		for slot in kit.weapons:
 			if not slot is int:
 				return null
+	var point: Variant = data.get("order_point", Vector2.ZERO)
+	if not point is Vector2 or not point.is_finite() or (data.order == Orders.Kind.WAYPOINT and not data.has("order_point")):
+		return null
 	var result := PlayerCommand.from_dict(data)
 	result.move = result.move.limit_length()
 	result.yaw = wrapf(result.yaw, -PI, PI)
@@ -45,9 +48,10 @@ static func command(data: Variant) -> PlayerCommand:
 	result.buttons &= 2047
 	result.board_id = maxi(0, result.board_id)
 	result.weapon = clampi(result.weapon, -1, 3)
-	if result.order not in Orders.MENU:
-		result.order = 0
-	result.order_arg = 0
+	if result.order != Orders.Kind.WAYPOINT:
+		if result.order not in Orders.MENU:
+			result.order = 0
+		result.order_arg = 0
 	if not result.loadout.is_empty():
 		result.loadout = Loadout.from_dict(result.loadout).to_dict()
 	return result

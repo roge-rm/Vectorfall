@@ -36,6 +36,7 @@ var weapon := -1
 ## about, such as the bot and role for Orders.Kind.SET_ROLE.
 var order := 0
 var order_arg := 0
+var order_point := Vector2.ZERO
 ## A loadout the soldier wants (Loadout.to_dict()), sent for one tick when it
 ## changes, or empty. It's worn at the next respawn, or at once on a station.
 var loadout: Dictionary = {}
@@ -50,7 +51,10 @@ func duplicate() -> PlayerCommand:
 
 
 func to_dict() -> Dictionary:
-	return { "move": move, "yaw": yaw, "pitch": pitch, "buttons": buttons, "board_id": board_id, "weapon": weapon, "order": order, "order_arg": order_arg, "loadout": loadout.duplicate(true) }
+	var data := { "move": move, "yaw": yaw, "pitch": pitch, "buttons": buttons, "board_id": board_id, "weapon": weapon, "order": order, "order_arg": order_arg, "loadout": loadout.duplicate(true) }
+	if order == Orders.Kind.WAYPOINT:
+		data["order_point"] = order_point
+	return data
 
 
 static func from_dict(data: Dictionary) -> PlayerCommand:
@@ -63,5 +67,6 @@ static func from_dict(data: Dictionary) -> PlayerCommand:
 	command.weapon = data.get("weapon", -1)
 	command.order = data.get("order", 0)
 	command.order_arg = data.get("order_arg", 0)
+	command.order_point = data.get("order_point", Vector2.ZERO)
 	command.loadout = data.get("loadout", {}).duplicate(true)
 	return command

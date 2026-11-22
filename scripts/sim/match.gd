@@ -127,6 +127,15 @@ var bots: BotDirector
 var fleet := VehicleFleet.new(self)
 
 
+const WAYPOINT_TICKS := 30 * 60
+const WAYPOINT_RANGE := 12.0
+
+var arena: GameMap
+var results := MatchResults.new()
+var waypoints := {}
+var remote_orders := {}
+
+
 func _init(match_seed := 1) -> void:
 	seed_value = match_seed
 	rng.seed = match_seed
@@ -148,13 +157,13 @@ func step(delta: float) -> void:
 	ids.sort()
 	if terrain != null:
 		_keep_terrain_collision(ids)
+	_step_waypoints()
 	if bots != null:
 		bots.run_bots(delta)
 	for id: int in ids:
 		var source: CommandSource = sources.get(id)
 		var command := source.make_command(delta) if source != null else PlayerCommand.new()
-		if command.order != 0:
-			ordered.emit(id, command.order, command.order_arg)
+		_apply_order(id, command)
 		_move_soldier(entities[id], command, delta)
 	_step_fleet(delta)
 	_step_stations(delta, ids)
@@ -177,6 +186,7 @@ func _profiled_step(delta: float) -> void:
 		_keep_terrain_collision(ids)
 	Prof.add("terrain_collision", Time.get_ticks_usec() - t)
 	t = Time.get_ticks_usec()
+	_step_waypoints()
 	if bots != null:
 		bots.run_bots(delta)
 	Prof.add("bots", Time.get_ticks_usec() - t)
@@ -185,8 +195,7 @@ func _profiled_step(delta: float) -> void:
 		t = Time.get_ticks_usec()
 		var command := source.make_command(delta) if source != null else PlayerCommand.new()
 		Prof.add("bots" if source is BotBrain else "other_sources", Time.get_ticks_usec() - t)
-		if command.order != 0:
-			ordered.emit(id, command.order, command.order_arg)
+		_apply_order(id, command)
 		t = Time.get_ticks_usec()
 		_move_soldier(entities[id], command, delta)
 		Prof.add("soldier_sim", Time.get_ticks_usec() - t)
@@ -208,6 +217,58 @@ func _profiled_step(delta: float) -> void:
 	_step_fields()
 	_step_sensors()
 	Prof.add("tick", Time.get_ticks_usec() - t0)
+
+
+func _apply_order(id: int, command: PlayerCommand) -> void:
+	if command.order != Orders.Kind.WAYPOINT:
+		if command.order != Orders.Kind.NONE:
+			ordered.emit(id, command.order, command.order_arg)
+		return
+	var sender := soldier(id)
+	var recipient := soldier(command.order_arg)
+	var point := command.order_point
+	if over or arena == null or sender == null or sender.dead or recipient == null or recipient.dead:
+		return
+	if recipient == sender or recipient.team != sender.team or not point.is_finite() or not arena.tactical_bounds().has_point(point):
+		return
+	if carried_flag(recipient.entity_id) != null:
+		return
+	var target := Vector3(point.x, arena.surface_at(point.x, point.y), point.y)
+	waypoints[recipient.entity_id] = {"by": id, "at": target, "until": tick + WAYPOINT_TICKS}
+
+
+func _step_waypoints() -> void:
+	for id: int in waypoints.keys():
+		var order: Dictionary = waypoints[id]
+		var who := soldier(id)
+		if over or who == null or who.dead or tick >= order.until or who.at().distance_to(order.at) <= WAYPOINT_RANGE or carried_flag(id) != null:
+			waypoints.erase(id)
+
+
+func tactical_orders(team: int) -> Dictionary:
+	if bots == null:
+		return remote_orders.get(team, {})
+	var commander := bots.commander(team)
+	return commander.order_locks if commander != null else {}
+
+
+func tactical_soldier_visible(viewer: Soldier, who: Soldier) -> bool:
+	return not who.dead and (who.team == viewer.team or (who.entity_id in sensed[viewer.team] and not who.jamming()))
+
+
+func tactical_flag_visible(viewer: Soldier, flag: Flag) -> bool:
+	if flag.mode != Flag.Mode.CARRIED:
+		return true
+	var carrier := soldier(flag.carrier_id)
+	return carrier != null and (carrier.team == viewer.team or not carrier.jamming())
+
+
+func change_occupant(who: Soldier) -> void:
+	results.change_occupant(who)
+	waypoints.erase(who.entity_id)
+	for id: int in waypoints.keys():
+		if waypoints[id].by == who.entity_id:
+			waypoints.erase(id)
 
 
 func _move_soldier(who: Soldier, command: PlayerCommand, delta: float) -> void:
@@ -618,6 +679,7 @@ func repair_asset(target: BaseAsset, amount: float, by: int) -> void:
 	target.health = minf(target.health + amount, target.max_health())
 	if target.destroyed and target.health >= target.max_health():
 		target.destroyed = false
+		results.add(self, by, MatchResults.Stat.REPAIRS)
 		asset_repaired.emit(target.entity_id, by)
 		if target.kind == BaseAsset.Kind.GENERATOR:
 			power_back.emit(target.team)
@@ -752,6 +814,7 @@ func _take_flag(flag: Flag, who: Soldier) -> void:
 	flag.carrier_id = who.entity_id
 	flag.return_in = 0.0
 	flag.hold_on(who)
+	results.add(self, who.entity_id, MatchResults.Stat.GRABS)
 	flag_taken.emit(flag.team, who.entity_id)
 
 
@@ -765,12 +828,14 @@ func _drop_flag(flag: Flag, carrier: Soldier) -> void:
 
 func _return_flag(flag: Flag, by: int) -> void:
 	flag.send_home()
+	results.add(self, by, MatchResults.Stat.RETURNS)
 	flag_returned.emit(flag.team, by)
 
 
 func _capture(flag: Flag, carrier: Soldier) -> void:
 	flag.send_home()
 	scores[carrier.team] += 1
+	results.capture(self, carrier)
 	flag_captured.emit(carrier.team, carrier.entity_id)
 	if scores[carrier.team] >= settings.capture_limit:
 		_end(carrier.team)
@@ -1092,6 +1157,7 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 	victim.health = maxf(victim.health - amount, 0.0)
 	if attacker != null and attacker.team != victim.team:
 		hit.emit(attacker_id, victim.entity_id, weapon_slot)
+	results.damage(self, victim, attacker_id, amount)
 	damaged.emit(victim.entity_id, attacker_id, amount, from)
 	if victim.health <= 0.0:
 		var hull: Vehicle = fleet.hulls.get(victim.vehicle_id)
@@ -1101,8 +1167,10 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 		var held := carried_flag(victim.entity_id)
 		if held != null:
 			_drop_flag(held, victim)
+		results.kill(self, victim.entity_id, attacker_id)
 		killed.emit(victim.entity_id, attacker_id, weapon_slot)
 		if held != null and team_of(attacker_id) == held.team:
+			results.add(self, attacker_id, MatchResults.Stat.STOPS)
 			carrier_stopped.emit(victim.entity_id, attacker_id)
 
 
@@ -1165,6 +1233,7 @@ func respawn(target: Soldier) -> void:
 	if source != null:
 		source.yaw = target.yaw
 		source.pitch = 0.0
+	results.hits.erase(target.entity_id)
 	respawned.emit(target.entity_id)
 
 
@@ -1195,6 +1264,9 @@ func get_state(include_sources := true) -> Dictionary:
 		field_states[id] = fields[id].get_state()
 	return {
 		"scores": scores.duplicate(),
+		"results": results.get_state(include_sources),
+		"waypoints": waypoints.duplicate(true),
+		"sensed": sensed.duplicate(),
 		"time_left": time_left,
 		"over": over,
 		"winner": winner,
@@ -1235,6 +1307,10 @@ func set_state(state: Dictionary) -> void:
 			entities[id] = made
 			sources[id] = CommandSource.new()
 		entities[id].set_state(entity_state)
+	results.set_state(state.get("results", {}))
+	waypoints = state.get("waypoints", {}).duplicate(true)
+	remote_orders = state.get("tactical_orders", {})
+	sensed.assign(state.get("sensed", [PackedInt32Array(), PackedInt32Array()]))
 	scores.assign(state.scores)
 	time_left = state.time_left
 	over = state.over

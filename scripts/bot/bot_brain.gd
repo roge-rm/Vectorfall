@@ -19,8 +19,8 @@ extends CommandSource
 ## POINT is a route graph point given by go_to(), and HOLD standing still
 ## after reaching it. The rest are capture the flag goals with a position in
 ## goal_target.
-enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX, DEPLOY, VEHICLE }
-const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base", "deploy", "board"]
+enum Goal { NONE, ENEMY_STAND, HOME_STAND, POINT, HOLD, TAKE_FLAG, CAPTURE, RETURN_FLAG, CHASE, ESCORT, DEFEND, MIDFIELD, RETREAT, RALLY, CUT_OFF, HIDE, STATION, HELP, RAID, FIX, DEPLOY, VEHICLE, WAYPOINT }
+const GOAL_NAMES: Array[String] = ["none", "enemy stand", "home stand", "point", "hold", "take flag", "capture", "return flag", "chase", "escort", "defend", "midfield", "back off", "rally", "cut off", "hide", "station", "repair", "raid", "fix base", "deploy", "board", "waypoint"]
 ## OFFENCE takes out the enemy flag turret (role_target) while it works,
 ## then goes for the enemy flag and carries it, DEFENCE holds by the flag,
 ## LIGHT_DEFENCE watches the way enemies come in and chases carriers, ESCORT
@@ -614,6 +614,9 @@ func _think_ctf() -> void:
 ## The goal for now, as [Goal, position]: the role's, or when that's a calm
 ## one, a detour to a station for the role's loadout or to repair a teammate.
 func _choose_goal() -> Array:
+	var waypoint: Dictionary = game.waypoints.get(soldier.entity_id, {})
+	if not waypoint.is_empty() and game.carried_flag(soldier.entity_id) == null:
+		return [Goal.WAYPOINT, waypoint.at]
 	var next := _role_goal()
 	var kind: Goal = next[0]
 	var own: Flag = game.flags.get(soldier.team)
