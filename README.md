@@ -1,10 +1,10 @@
-# Vectorfall
+# Skifrei
 
-Vectorfall is a team shooter for Android, Linux and browsers. Ski down a hill, jet over the next ridge and bring the other team's flag home. Fly a gunship to cover your runner, or go in on foot and knock out the enemy generator.
+Ski down the hills, jet over the ridges and bring the other team's flag home. You can fly a gunship to cover the runner or go in on foot and knock out the enemy generator.
 
-Play Capture the Flag or Capture and Hold, with up to eight soldiers a side locally or sixteen a side on a dedicated server. Bots can fill both teams, drive and fly vehicles, repair the base and take orders from you.
+Play Capture the Flag or Capture and Hold on Android, Linux, Windows, macOS or in a browser. Play up to 8v8 locally or 16v16 on a dedicated server. Bots fill the empty slots, drive and fly vehicles, repair the base and take orders.
 
-Let me know what works and what doesn't in the #vectorfall channel [on my discord](https://discord.gg/9Wun47jGC6), or open an issue here.
+Let me know what works and what doesn't [on my Discord](https://discord.gg/9Wun47jGC6), or open an issue here.
 
 Enjoy,<br>
 Dan
@@ -31,11 +31,11 @@ Dan
     <td align="center"><img src="docs/images/turret-defence.png" width="400" alt="A deployed Lime turret aims up as a jetting Blue soldier fires back" /><br>Turret defence on Beacon Wreck</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/disc-crossfire.png" width="400" alt="Two Lime soldiers exchange disc fire with Blue as an impact throws up a blast" /><br>Disc crossfire on Copper Steps</td>
+    <td align="center"><img src="docs/images/copper-flag-drop.png" width="400" alt="A soldier drops the Lime flag in a firefight beside the Copper Steps exit ramp" /><br>Flag stop on Copper Steps</td>
     <td align="center"><img src="docs/images/grenade-throw.png" width="400" alt="A grenade flies from a Lime heavy toward a retreating Blue soldier" /><br>Grenade throw on Glass Ravine</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/first-person-assault.png" width="400" alt="A first-person view of the chaingun during a firefight and disc explosion" /><br>Chaingun assault on Nightline Foundry</td>
+    <td align="center"><img src="docs/images/foundry-flag-grab.png" width="400" alt="A Lime runner takes the Blue flag inside the covered Nightline Foundry stand" /><br>Flag grab on Nightline Foundry</td>
     <td align="center"><img src="docs/images/gunship-run.png" width="400" alt="From the gunship pilot’s view, a shot travels ahead toward the valley" /><br>Needlewing attack on Ochre Fold</td>
   </tr>
 </table>
@@ -44,14 +44,13 @@ Dan
 
 ## Install
 
-Download the APK or Debian package from [Releases](https://github.com/roge-rm/Vectorfall/releases), or [play in your browser](https://hunke.ws/fdroid/play/vectorfall/).
+The [0.15.0 downloads](https://github.com/roge-rm/Skifrei/releases/tag/v0.15.0) and the [browser demo](https://hunke.ws/fdroid/play/vectorfall/) are available under the previous name, Vectorfall. You can also get 0.15.0 from [my F-Droid repo](https://hunke.ws/fdroid/) or [my apt repo](https://hunke.ws/apt/).
 
-- Android 7.0 and up, on 32-bit or 64-bit ARM. Add [my F-Droid repo](https://hunke.ws/fdroid/) or open `vectorfall-0.15.0.apk` and follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
-- Debian 13 on 64-bit x86. Add [my apt repo](https://hunke.ws/apt/) and run `sudo apt install vectorfall`, or run `sudo apt install ./vectorfall_0.15.0_amd64.deb` from the download folder. Open Vectorfall from the applications menu. The game needs OpenGL 3.3.
+- Android 7.0 and up, on 32-bit or 64-bit ARM. Open the APK and follow the install prompt. Skifrei has a new Android package and installs separately from 0.15.0.
+- Debian 13 on 64-bit x86 and Raspberry Pi OS Trixie on 64-bit ARM. Download the matching Debian package and open it with your package installer. The x86 build needs OpenGL 3.3 and the Pi build uses OpenGL ES 3.0.
 - Steam Deck and other x86-64 Linux PCs. Download the AppImage, make it executable and open it. On Steam Deck, add it as a non-Steam game in Desktop Mode to launch it from Gaming Mode.
-- Raspberry Pi OS Trixie on 64-bit ARM. Run `sudo apt install ./vectorfall_0.15.0_arm64.deb` from the download folder. The game uses OpenGL ES 3.0.
-- Windows on 64-bit x86. Unzip the Windows download and open `Vectorfall.exe`.
-- macOS on Intel or Apple Silicon. Unzip the macOS download and open `Vectorfall.app`. The app is ad-hoc signed and may need approval in Privacy & Security.
+- Windows on 64-bit x86. Unzip the download and open the game.
+- macOS on Intel or Apple Silicon. Unzip the download and open the app. The app is ad-hoc signed and may need approval in Privacy & Security.
 
 Android supports touch, gyro aim and gamepads. Linux supports a mouse and keyboard or a gamepad.
 
@@ -59,7 +58,7 @@ Choose Xbox or Nintendo under Gamepad layout in Settings. On the Retroid Pocket 
 
 ## Playing
 
-Open `Online`. Pick a game on your LAN or enter a server address. Bots fill the empty slots. A dedicated server can run 16v16. See the [dedicated server guide](server/README.md) for Docker Compose, the dashboard and the browser build.
+Open `Online` to find a game on your LAN or enter a server address. See the [dedicated server guide](server/README.md) for Docker Compose, the dashboard and browser play.
 
 Open `How to play` and choose `Ski practice`. Hold jump on the way down a hill. Jet over the next rise. Let go of jet to refill your energy. You can reset the run. The game saves your best time.
 
@@ -75,7 +74,7 @@ Choose any map in `Match setup` and set `Mode` to `Capture and hold`.
 
 Stay inside a control point for three seconds with no enemies inside to take it. Your team gets a point for every five seconds it holds. Enemies in the area stop the points. The team with the most points when time runs out wins.
 
-On Nightline Foundry and Gannet Reach, turn on `Midfield ammo` to add a resupply pad. Both teams can use it. Wait 12 seconds after a refill. Step back onto the pad to use it again. Use a base station to change your loadout or replace grenades, mines and deployables.
+On Nightline Foundry and Gannet Reach, turn on `Midfield ammo` to add a resupply pad. In Capture and Hold on Nightline Foundry, your team needs to hold B and keep enemies out of it to use the pad. Wait 12 seconds after a refill. Step back onto the pad to use it again. Use a base station to change your loadout or replace grenades, mines and deployables.
 
 ### Team map and results
 
@@ -107,8 +106,8 @@ Walk up to a stopped or slow-moving friendly vehicle with a free seat. Press `Bo
 |---|---|
 | Ochre Fold | Long ski runs across sand ridges between hilltop bases. |
 | Saltwake Flats | An open salt pan with a drainage cut and a wind berm on the sides. |
-| Nightline Foundry | Casting bays give infantry cover, with service roads around the yard. |
-| Copper Steps | Ramps climb the rock shelves to the flag decks, with ferry pads below. |
+| Nightline Foundry | The flags are under covered loading bays. The service roads lead to separate reactor sheds. |
+| Copper Steps | The clifftop flags have two flank ramps, with the generators set back from the decks. |
 | Caldera Relay | Take the crater floor or stay high on either rim. |
 | Gannet Reach | Cross by the cliff path, the raised causeway or the tidal flats. |
 | White Signal | A tunnel through the snow, with open routes to either side. |
@@ -136,6 +135,13 @@ Choose `Test map` in `Match setup` for a smaller arena.
 Open `Settings` to change look speed for each input, touch button size, gyro aim, aim assist or auto ski. Set the view distance, render scale and outlines there too. There are separate volume controls for effects, voices and music.
 
 ## What's new
+
+In development
+
+- In Capture the Flag you respawn with the next team wave after at least four seconds. At Copper Steps and Nightline Foundry you come back on the flanks. Both bases have cover along the flag exits.
+- Open `Team calls` from `Orders` to call a flag run, mark an exit or ask for generator repairs. Teammates can acknowledge the call from the same menu.
+- Open `How to play → Drills` to practise leading an airborne target, grabbing the flag at speed or repairing the generator under fire.
+- The server browser lists LAN games and can use a public directory. A dedicated server can rotate arenas and modes after each round.
 
 New in 0.15.0
 
