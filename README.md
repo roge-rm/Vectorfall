@@ -46,8 +46,8 @@ Dan
 
 Download the APK or Debian package from [Releases](https://github.com/roge-rm/Vectorfall/releases).
 
-- Android 7.0 and up, on 32-bit or 64-bit ARM. Open `vectorfall-0.13.0.apk`. Follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
-- Debian 13 on 64-bit x86. Install `vectorfall_0.13.0_amd64.deb` with `sudo apt install ./vectorfall_0.13.0_amd64.deb` from the download folder. Open Vectorfall from the applications menu. The game needs OpenGL 3.3.
+- Android 7.0 and up, on 32-bit or 64-bit ARM. Open `vectorfall-0.14.0.apk`. Follow the install prompt. If you installed a debug APK, remove it first. That clears the debug build's saved settings and loadouts.
+- Debian 13 on 64-bit x86. Install `vectorfall_0.14.0_amd64.deb` with `sudo apt install ./vectorfall_0.14.0_amd64.deb` from the download folder. Open Vectorfall from the applications menu. The game needs OpenGL 3.3.
 
 Android supports touch, gyro aim and gamepads. Linux supports a mouse and keyboard or a gamepad.
 
@@ -65,7 +65,7 @@ Give bots orders to go for the flag, cover you or help at the base. Turn on `Com
 
 ### Capture and hold
 
-When running from source, choose Nightline Foundry or Gannet Reach in `Match setup`. Set `Mode` to `Capture and hold`.
+Choose Nightline Foundry or Gannet Reach in `Match setup`. Set `Mode` to `Capture and hold`.
 
 Stay inside a control point for three seconds with no enemies inside to take it. Your team gets a point for every five seconds it holds. Enemies in the area stop the points. The team with the most points when time runs out wins.
 
@@ -73,7 +73,7 @@ Turn on `Midfield ammo` to try a resupply pad on either arena. Both teams can us
 
 ### Team map and results
 
-When running from source, open the team map with M, the right stick button or `Map` on touch. Pick a teammate and a spot on the map, then press `Send waypoint`.
+Open the team map with M, the right stick button or `Map` on touch. Pick a teammate and a spot on the map, then press `Send waypoint`.
 
 Open `Match results` after the match. An assist counts if you hurt an enemy in the eight seconds before a teammate kills them. An escort counts if you're within 35 metres of a teammate when they capture the flag. A repair counts when you bring a destroyed piece of equipment back online.
 
@@ -130,6 +130,13 @@ Choose `Test map` in `Match setup` for a smaller arena.
 Open `Settings` to change look speed for each input, touch button size, gyro aim, aim assist or auto ski. Set the view distance, render scale and outlines there too. There are separate volume controls for effects, voices and music.
 
 ## What's new
+
+New in 0.14.0
+
+- Open the team map to see teammates, objectives and orders. Pick a teammate and send them a waypoint.
+- Open Match results to see what each player did during the round.
+- Play Capture and Hold on Nightline Foundry and Gannet Reach.
+- Turn on Midfield ammo to try a neutral resupply pad on those two arenas.
 
 New in 0.13.0
 
