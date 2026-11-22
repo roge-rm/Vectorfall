@@ -22,27 +22,32 @@ Dan
 
 ---
 
+## Gameplay
+
+![Ski down the marked course, jet over the crest and grab the flag in Ski Practice](docs/images/ski-run.gif)
+
 ## Screenshots
 
 <table>
   <tr>
-    <td align="center"><img src="docs/images/main-menu.png" width="400" alt="The Vectorfall paperback-style menu with Play, Settings and How to Play" /><br>Main menu</td>
-    <td align="center"><img src="docs/images/white-signal.png" width="400" alt="A flag chase past White Signal's snow tunnel with the touch controls visible" /><br>White Signal</td>
+    <td align="center"><img src="docs/images/ski-run.png" width="400" alt="Approaching the jet gate in Ski Practice with the timer and speed readout" /><br>Ski Practice</td>
+    <td align="center"><img src="docs/images/bomber-and-ferry.png" width="400" alt="A Blue Cinder Kite and Morrow Ferry flying above Ochre Fold" /><br>Bomber and ferry</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/ski-practice.png" width="400" alt="The start of Ski Practice looking down the marked slope, with a timer and speed readout" /><br>Ski Practice</td>
-    <td align="center"><img src="docs/images/needlewing.png" width="400" alt="A Lime Needlewing gunship flying over orange ridges with the touch flight controls visible" /><br>Flying a Needlewing</td>
+    <td align="center"><img src="docs/images/caldera-relay.png" width="400" alt="The two rim routes overlooking the crater floor on Caldera Relay" /><br>Caldera Relay</td>
+    <td align="center"><img src="docs/images/beacon-wreck.png" width="400" alt="Cargo bays of the wreck between the outer dunes on Beacon Wreck" /><br>Beacon Wreck</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/glass-ravine.png" width="400" alt="An intact high crossing and broken bridge ends above a green canyon" /><br>Glass Ravine</td>
-    <td align="center"><img src="docs/images/gannet-reach.png" width="400" alt="The raised causeway running between a cliff path and the tidal flats on the coast" /><br>Gannet Reach</td>
+    <td align="center"><img src="docs/images/greenfall-terraces.png" width="400" alt="Green hills and parallel switchbacks on Greenfall Terraces" /><br>Greenfall Terraces</td>
+    <td align="center"><img src="docs/images/copper-steps.png" width="400" alt="Red rock shelves and ramps below a flag deck on Copper Steps" /><br>Copper Steps</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/nightline-foundry.png" width="400" alt="Casting bays and service roads across the dark foundry yard" /><br>Nightline Foundry</td>
-    <td align="center"><img src="docs/images/fleet.png" width="400" alt="Lime team's tank, ferry, bomber, gunship and grav bike lined up in front of their pads" /><br>The fleet</td>
+    <td align="center"><img src="docs/images/armour-classes.png" width="400" alt="Lime and Blue soldiers in light, medium and heavy armour" /><br>Armour classes</td>
+    <td align="center"><img src="docs/images/ground-vehicles.png" width="400" alt="The Basalt Crawler and Tern Sled outside the Lime base" /><br>Tank and grav bike</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/generator-room.png" width="400" alt="The Lime generator inside a base, glowing green while powered" /><br>Generator room</td>
+    <td align="center"><img src="docs/images/match-setup.png" width="400" alt="Match Setup with arena, team, bot skill and match limits" /><br>Match setup</td>
+    <td align="center"><img src="docs/images/loadout.png" width="400" alt="The loadout screen with armour, weapons and equipment choices" /><br>Loadout</td>
   </tr>
 </table>
 
