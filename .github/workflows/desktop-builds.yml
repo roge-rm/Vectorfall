@@ -1,0 +1,140 @@
+name: Desktop builds
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Release tag that the game files must match
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      GODOT_VERSION: 4.7.2
+      GODOT_SILENCE_ROOT_WARNING: 1
+    steps:
+      - name: Install packaging tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git imagemagick unzip zip
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check release source
+        env:
+          SOURCE_TAG: ${{ inputs.source_tag || github.ref_name }}
+        run: |
+          [[ "$SOURCE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git rev-parse --verify "refs/tags/$SOURCE_TAG^{commit}"
+          git diff --exit-code "refs/tags/$SOURCE_TAG" -- project.godot art docs/images maps scenes scripts shaders
+          version=${SOURCE_TAG#v}
+          grep -Fx "config/version=\"$version\"" project.godot
+          grep -Fx "version/name=\"$version\"" export_presets.cfg
+          echo "BUILD_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Install Godot and release templates
+        run: |
+          download="https://github.com/godotengine/godot/releases/download/$GODOT_VERSION-stable"
+          editor="Godot_v$GODOT_VERSION-stable_linux.x86_64"
+          templates="tools/godot/editor_data/export_templates/$GODOT_VERSION.stable"
+          mkdir -p "$templates"
+          curl --fail --location --retry 3 "$download/$editor.zip" -o "$RUNNER_TEMP/godot.zip"
+          curl --fail --location --retry 3 "$download/Godot_v$GODOT_VERSION-stable_export_templates.tpz" -o "$RUNNER_TEMP/templates.tpz"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum -c <<'SUMS'
+          cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip
+          f298490b8d44d934be425a5a65a51bf15f422428b229a06a6e11d9ffea248011  templates.tpz
+          SUMS
+          )
+          unzip -q "$RUNNER_TEMP/godot.zip" -d tools/godot
+          unzip -jq "$RUNNER_TEMP/templates.tpz" 'templates/linux_release.arm64' 'templates/windows_release_x86_64.exe' 'templates/macos.zip' -d "$templates"
+          touch tools/godot/._sc_
+      - name: Build Debian, Windows and macOS packages
+        run: |
+          godot="tools/godot/Godot_v$GODOT_VERSION-stable_linux.x86_64"
+          mkdir -p build/windows build/dist
+          touch build/.gdignore
+          tools/package-deb.sh --arch arm64
+          cp "build/desktop/vectorfall_${BUILD_VERSION}_arm64.deb" build/dist/
+          "$godot" --headless --path . --export-release Windows "$PWD/build/windows/Vectorfall.exe"
+          (cd build/windows && zip -qr "../dist/vectorfall-$BUILD_VERSION-windows-x86_64.zip" .)
+          "$godot" --headless --path . --export-release macOS "$PWD/build/dist/vectorfall-$BUILD_VERSION-macos-universal.zip"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: vectorfall-desktop
+          path: build/dist/*
+          if-no-files-found: error
+          compression-level: 0
+
+  raspberry-pi-package:
+    needs: package
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: vectorfall-desktop
+      - name: Install and start on Debian Trixie arm64
+        shell: bash
+        env:
+          GODOT_SILENCE_ROOT_WARNING: 1
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ./vectorfall_*_arm64.deb
+          test "$(dpkg-query -W -f='${Architecture}' vectorfall)" = arm64
+          vectorfall --headless --quit-after 15 2>&1 | tee startup.log
+          grep -F 'Godot Engine' startup.log
+          ! grep -E 'SCRIPT ERROR|^ERROR' startup.log
+
+  windows-startup:
+    needs: package
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: vectorfall-desktop
+      - name: Start the exported game
+        shell: pwsh
+        run: |
+          Expand-Archive -Path (Get-Item vectorfall-*-windows-x86_64.zip).FullName -DestinationPath game
+          $log = Join-Path $PWD startup.log
+          $game = Start-Process -FilePath ./game/Vectorfall.exe -ArgumentList '--headless', '--quit-after', '15', '--log-file', $log -Wait -PassThru
+          if ($game.ExitCode -ne 0) { throw "Vectorfall exited with $($game.ExitCode)" }
+          $startup = Get-Content -Raw startup.log
+          Write-Output $startup
+          if ($startup -notmatch 'Godot Engine' -or $startup -match '(?m)^ERROR|SCRIPT ERROR') { throw 'Vectorfall startup failed' }
+
+  macos-startup:
+    needs: package
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: vectorfall-desktop
+      - name: Verify the bundle and start the exported game
+        shell: bash
+        run: |
+          unzip -q vectorfall-*-macos-universal.zip
+          executable=Vectorfall.app/Contents/MacOS/Vectorfall
+          lipo -verify_arch x86_64 arm64 "$executable"
+          codesign --verify --deep --strict Vectorfall.app
+          "$executable" --headless --quit-after 15 2>&1 | tee startup.log
+          grep -F 'Godot Engine' startup.log
+          ! grep -E 'SCRIPT ERROR|^ERROR' startup.log
