@@ -13,6 +13,7 @@ var home: CoverPage
 var setup_screen: SetupScreen
 var settings_screen: SettingsScreen
 var how_to: HowToPlay
+var online: OnlineScreen
 ## Last input used, as a LocalInput.Device.
 var device := LocalInput.Device.KEYBOARD
 var _loading: Label
@@ -43,6 +44,7 @@ func _ready() -> void:
 	home.name = "Home"
 	ui.add_child(home)
 	home.add_button("Play", show_setup, true)
+	home.add_button("Online", show_online)
 	home.add_button("Settings", show_settings)
 	home.add_button("How to play", show_how_to)
 	if not OS.has_feature("android"):
@@ -61,13 +63,20 @@ func _ready() -> void:
 	how_to.closed.connect(show_home)
 	how_to.practice_pressed.connect(start_practice)
 	ui.add_child(how_to)
+	online = OnlineScreen.new()
+	online.hide()
+	online.closed.connect(show_home)
+	ui.add_child(online)
 	_loading = MenuKit.heading("Loading", 48)
 	_loading.set_anchors_preset(Control.PRESET_CENTER)
 	_loading.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_loading.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_loading.visible = false
 	ui.add_child(_loading)
-	show_home()
+	if OnlineClient.last_error.is_empty() and not OS.has_feature("web"):
+		show_home()
+	else:
+		show_online()
 
 
 func _process(_delta: float) -> void:
@@ -84,7 +93,7 @@ static func footnote(setup: MatchSetup) -> String:
 
 
 func _hide_all() -> void:
-	for screen: Control in [home, setup_screen, settings_screen, how_to]:
+	for screen: Control in [home, setup_screen, settings_screen, how_to, online]:
 		screen.visible = false
 
 
@@ -99,6 +108,11 @@ func show_home() -> void:
 func show_setup() -> void:
 	_hide_all()
 	setup_screen.open()
+
+
+func show_online() -> void:
+	_hide_all()
+	online.open()
 
 
 func show_settings() -> void:
@@ -204,13 +218,13 @@ class CoverPage:
 		var u := _unit()
 		var wide := size.x / u
 		var drop := _drop()
-		var tall := 54.0 if buttons.size() <= 3 else 46.0
-		var gap := 10.0 if buttons.size() <= 3 else 8.0
+		var tall := 54.0 if buttons.size() <= 3 else (39.0 if buttons.size() >= 5 else 46.0)
+		var gap := 6.0 if buttons.size() >= 5 else 8.0
 		for k in buttons.size():
 			buttons[k].custom_minimum_size = Vector2(270.0, tall) * u
 			buttons[k].position = Vector2(28.0, 132.0 + drop + k * (tall + gap)) * u
 			buttons[k].size = buttons[k].custom_minimum_size
-			buttons[k].font_size = roundi(36.0 * u)
+			buttons[k].font_size = roundi(32.0 * u if buttons.size() >= 5 else 36.0 * u)
 		var frame_width := minf(486.0, wide - 28.0 - 330.0)
 		var frame := Rect2(wide - 28.0 - frame_width, 130.0 + drop, frame_width, frame_width * 236.0 / 486.0)
 		picture.position = frame.position * u

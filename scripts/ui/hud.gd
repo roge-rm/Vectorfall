@@ -61,6 +61,7 @@ var _end: Control
 var _end_band: MenuKit.Band
 var _end_score: Label
 var _restart_button: Button
+var _end_menu_button: Button
 ## Shown under the respawn count while you're dead.
 var loadout_button: MenuKit.CoverButton
 ## Bottom of the score bar and compass, and top of the status panel, from the
@@ -109,7 +110,12 @@ func _make_end_card() -> void:
 	box.add_child(_end_score)
 	_restart_button = MenuKit.button("Restart (R)", restart_requested.emit, MenuKit.BUTTON_SIZE, false, true)
 	box.add_child(_restart_button)
-	box.add_child(MenuKit.button("Main menu", menu_requested.emit, MenuKit.BUTTON_SIZE, true))
+	_end_menu_button = MenuKit.button("Main menu", menu_requested.emit, MenuKit.BUTTON_SIZE, true)
+	box.add_child(_end_menu_button)
+
+
+func online_round() -> void:
+	_restart_button.hide()
 
 
 ## Listens to a match for hits and kills.
@@ -202,7 +208,8 @@ func _on_match_over(team: int) -> void:
 	_end_band.queue_redraw()
 	_end_score.text = ("%s %d : %d %s" % [Soldier.TEAM_NAMES[0], game.scores[0], game.scores[1], Soldier.TEAM_NAMES[1]]).to_upper()
 	# Focus for a gamepad or keyboard.
-	_restart_button.grab_focus.call_deferred()
+	var button := _restart_button if _restart_button.visible else _end_menu_button
+	button.grab_focus.call_deferred()
 
 
 func _on_shield_hit(victim_id: int, _amount: float, _from: Vector3) -> void:

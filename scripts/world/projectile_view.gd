@@ -29,6 +29,7 @@ const BLINK_EVERY := 1.0
 const BLINK_ON := 0.15
 
 var game: Match
+var online_pose: Callable
 var _views: Array[MultiMeshInstance3D] = []
 ## Per team: mine bodies and their lights.
 var _mines: Array[MultiMeshInstance3D] = []
@@ -131,15 +132,15 @@ func _process(_delta: float) -> void:
 	# Mine bodies and lights per team.
 	var mine_counts: Array[int] = [0, 0, 0, 0]
 	for shot in game.projectiles:
+		var at: Vector3 = online_pose.call(shot) if online_pose.is_valid() else shot.visual_position()
 		if shot.weapon == Weapon.MINE:
 			# Tumbling in flight, no light yet.
 			var turn := Basis.from_euler(Vector3(shot.age * 6.0, shot.age * 4.0, 0.0))
-			_place_mine(shot.team, mine_counts, Transform3D(turn, shot.visual_position()), false)
+			_place_mine(shot.team, mine_counts, Transform3D(turn, at), false)
 			continue
 		var kind := KINDS[shot.weapon] if shot.weapon < KINDS.size() else Kind.TRACER
 		if kind < 0 or counts[kind] >= MAX_SHOTS:
 			continue
-		var at := shot.visual_position()
 		var dir := shot.velocity.normalized() if shot.velocity.length() > 0.01 else Vector3.FORWARD
 		var up := Vector3.UP if absf(dir.y) < 0.99 else Vector3.RIGHT
 		var basis := Basis.looking_at(dir, up)

@@ -1,0 +1,11 @@
+.git
+.godot
+.env
+build
+tools
+tests
+docs
+PLAN.md
+HANDOFF.md
+
+**/__pycache__

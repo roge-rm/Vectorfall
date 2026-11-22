@@ -1168,7 +1168,7 @@ func respawn(target: Soldier) -> void:
 	respawned.emit(target.entity_id)
 
 
-func get_state() -> Dictionary:
+func get_state(include_sources := true) -> Dictionary:
 	var states := {}
 	for id: int in entities:
 		states[id] = entities[id].get_state()
@@ -1176,10 +1176,11 @@ func get_state() -> Dictionary:
 	for shot in projectiles:
 		shots.append(shot.get_state())
 	var source_states := {}
-	for id: int in sources:
-		var source_state := sources[id].get_state()
-		if not source_state.is_empty():
-			source_states[id] = source_state
+	if include_sources:
+		for id: int in sources:
+			var source_state := sources[id].get_state()
+			if not source_state.is_empty():
+				source_states[id] = source_state
 	var flag_states := {}
 	for team in flags:
 		flag_states[team] = flags[team].get_state()

@@ -427,8 +427,8 @@ func _wall_normals() -> PackedVector3Array:
 	return normals
 
 
-func simulate(command: PlayerCommand, delta: float) -> void:
-	if not command.loadout.is_empty():
+func simulate(command: PlayerCommand, delta: float, movement_only := false) -> void:
+	if not movement_only and not command.loadout.is_empty():
 		next_loadout = Loadout.from_dict(command.loadout).fixed()
 	if dead:
 		# A body only falls and slides until it's time to respawn.
@@ -526,6 +526,8 @@ func simulate(command: PlayerCommand, delta: float) -> void:
 		if kept.length() > horizontal_speed():
 			velocity.x = kept.x
 			velocity.z = kept.z
+	if movement_only:
+		return
 	if dead:
 		respawn_in -= delta
 		if respawn_in <= 0.0 and game != null:

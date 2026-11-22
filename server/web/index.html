@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vectorfall Server</title>
+  <link rel="icon" href="/icon.svg">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><h1>Vectorfall</h1></header>
+    <div class="stripes"></div>
+    <div class="cover">
+      <section class="match" aria-labelledby="arena">
+        <h2 id="arena">Dedicated server</h2>
+        <p id="server" class="italic" role="status">Connecting…</p>
+        <div class="score" id="score" hidden>
+          <span class="lime">Lime <strong id="lime">0</strong></span>
+          <time id="time">00:00</time>
+          <span class="blue"><strong id="blue">0</strong> Blue</span>
+        </div>
+        <p id="roster"></p>
+        <a class="button" id="play" hidden>Play in browser</a>
+        <p id="join" class="join"></p>
+      </section>
+      <figure><img src="/cover.webp" alt="Copper Steps, with a flag deck overlooking the canyon"></figure>
+    </div>
+    <section id="admin" class="admin" hidden>
+      <h2>Match setup</h2>
+      <form id="round">
+        <label>Arena <select id="maps" required></select></label>
+        <label>Admin password <input id="password" type="password" autocomplete="current-password" required></label>
+        <button class="button" type="submit">Start new round</button>
+      </form>
+      <p id="result" role="status" hidden></p>
+    </section>
+  </main>
+</body>
+</html>

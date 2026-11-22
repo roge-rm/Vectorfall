@@ -24,3 +24,6 @@
 core.[0-9]*
 
 __pycache__/
+
+# Dedicated server settings
+/.env

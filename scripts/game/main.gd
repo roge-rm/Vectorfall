@@ -29,6 +29,7 @@ var effects: Effects
 var audio: GameAudio
 var pause_menu: PauseMenu
 var loadout_screen: LoadoutScreen
+var replica: MatchReplica
 
 
 func _ready() -> void:
@@ -36,50 +37,34 @@ func _ready() -> void:
 	get_tree().paused = false
 	Settings.load_file()
 	setup = MatchSetup.current
-	map = GameMap.make(GameMap.chosen_name(setup.map))
+	var connection := OnlineClient.active
+	var selected := GameMap.chosen_name(setup.map) if connection == null else connection.map_name
+	map = GameMap.make(selected)
 	add_child(map)
 	map.set_view_distance(Settings.view_distance)
 	print("Map %s built in %.2f s, its route graph in %.2f s" % [map.title, map.build_seconds, map.graph_seconds])
-	game = Match.new(1)
-	game.settings.time_limit = setup.time_limit
-	game.settings.capture_limit = setup.capture_limit
-	game.start_clock()
-	game.terrain = map.terrain
-	for team in 2:
-		game.spawns[team] = map.spawn_points(team)
-	for team in 2:
-		game.add_flag(team, map.stand_point(team), map.flag_rest(team))
-	for team in 2:
-		for at in map.station_points(team):
-			game.add_station(team, at)
-		map.add_base_power(game, team)
-		map.add_vehicle_pads(game, team)
-	add_child(game)
+	var minutes := setup.time_limit / 60.0 if connection == null else float(connection.minutes)
+	var captures := setup.capture_limit if connection == null else connection.captures
+	game = ArenaMatch.make(self, map, minutes, captures)
 	game.match_over.connect(_on_match_over)
 	input = LocalInput.new()
 	add_child(input)
-	var own := setup.team
-	var other := 1 - own
-	player = game.add_soldier(own, map.spawn_point(own, 3), input.source, Settings.current_loadout())
+	if connection == null:
+		_spawn_offline()
+	else:
+		replica = MatchReplica.new()
+		replica.start(connection, game)
+		player = replica.player
 	player.display_name = "You"
 	player.set_first_person(true)
 	input.soldier = player
-
-	bots = BotDirector.new(game, map.route_graph)
-	bots.skill_levels.assign(setup.skill_levels())
-	for k in setup.own_bots:
-		# Slot 3 is yours.
-		bots.add_bot(own, map.spawn_point(own, k if k < 3 else k + 1))
-	for k in setup.enemy_bots:
-		var brain := bots.add_bot(other, map.spawn_point(other, k))
-		if enemy == null:
-			enemy = brain.soldier
-	game.prepare_terrain()
-	overlay = BotOverlay.new(bots)
-	add_child(overlay)
+	input.source.yaw = player.yaw
+	input.source.pitch = player.pitch
 
 	var view := ProjectileView.new()
 	view.game = game
+	if replica != null:
+		view.online_pose = replica.projectile_position
 	add_child(view)
 	effects = Effects.new()
 	add_child(effects)
@@ -106,7 +91,7 @@ func _ready() -> void:
 	menu = OrderMenu.new()
 	menu.director = bots
 	menu.soldier = player
-	menu.commander_mode = Settings.commander_mode
+	menu.commander_mode = replica == null and Settings.commander_mode
 	layer.add_child(menu)
 	menu.chosen.connect(input.queue_order)
 	touch = TouchControls.new()
@@ -120,8 +105,9 @@ func _ready() -> void:
 	hud.touch = touch
 	input.menu = menu
 	input.pause_requested.connect(pause)
-	for team: int in bots.commanders:
-		bots.commanders[team].said.connect(_on_said)
+	if bots != null:
+		for team: int in bots.commanders:
+			bots.commanders[team].said.connect(_on_said)
 	input.device_changed.connect(_on_device_changed)
 	_on_device_changed(input.device)
 	loadout_screen = LoadoutScreen.new()
@@ -135,12 +121,39 @@ func _ready() -> void:
 	var top := CanvasLayer.new()
 	top.layer = 2
 	add_child(top)
-	pause_menu = PauseMenu.new()
+	pause_menu = PauseMenu.new("Restart" if replica == null else "")
 	top.add_child(pause_menu)
 	pause_menu.resumed.connect(_on_resumed)
 	pause_menu.restart_pressed.connect(restart)
 	pause_menu.quit_pressed.connect(quit_to_menu)
 	pause_menu.settings.changed.connect(apply_settings)
+	if replica != null:
+		replica.client.arena_ready()
+		hud.online_round()
+		if game.over:
+			game.match_over.emit(game.winner)
+
+
+func _spawn_offline() -> void:
+	var own := setup.team
+	var other := 1 - own
+	player = game.add_soldier(own, map.spawn_point(own, 3), input.source, Settings.current_loadout())
+	bots = BotDirector.new(game, map.route_graph)
+	bots.skill_levels.assign(setup.skill_levels())
+	for k in setup.own_bots:
+		bots.add_bot(own, map.spawn_point(own, k if k < 3 else k + 1))
+	for k in setup.enemy_bots:
+		var brain := bots.add_bot(other, map.spawn_point(other, k))
+		if enemy == null:
+			enemy = brain.soldier
+	game.prepare_terrain()
+	overlay = BotOverlay.new(bots)
+	add_child(overlay)
+
+
+func _physics_process(_delta: float) -> void:
+	if replica != null and is_instance_valid(replica.client):
+		replica.advance(input.make_command(OnlineClient.STEP))
 
 
 ## Opens the loadout screen while you're dead or on one of your stations.
@@ -159,8 +172,9 @@ func open_loadout() -> void:
 
 
 func _on_loadout_closed() -> void:
-	input.held_off = false
-	touch.blocked = false
+	var online_paused := replica != null and pause_menu.visible
+	input.held_off = online_paused
+	touch.blocked = online_paused
 	if input.device == LocalInput.Device.KEYBOARD and not game.over and not pause_menu.visible and DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -170,7 +184,10 @@ func _on_station_entered(_station_id: int, soldier_id: int) -> void:
 		open_loadout()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if replica != null and is_instance_valid(replica.client):
+		replica.render(delta)
+		replica.events(_on_said)
 	# It closes once you're back to life off a station, or pushed off one.
 	if loadout_screen != null and loadout_screen.visible and (game.over or (not player.dead and game.station_under(player) == null)):
 		loadout_screen.close()
@@ -185,7 +202,7 @@ func _on_device_changed(device: LocalInput.Device) -> void:
 func apply_settings() -> void:
 	map.set_view_distance(Settings.view_distance)
 	camera.far = Settings.view_distance
-	menu.commander_mode = Settings.commander_mode
+	menu.commander_mode = replica == null and Settings.commander_mode
 	touch.scale_factor = Settings.touch_size
 	touch.queue_redraw()
 
@@ -197,7 +214,11 @@ func pause() -> void:
 	if menu.visible:
 		menu.close()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	get_tree().paused = true
+	if replica == null:
+		get_tree().paused = true
+	else:
+		input.held_off = true
+		touch.blocked = true
 	# Touches lifted while paused are never seen, so start clean both ways.
 	touch.release_all()
 	pause_menu.device = input.device
@@ -206,6 +227,9 @@ func pause() -> void:
 
 func _on_resumed() -> void:
 	get_tree().paused = false
+	if replica != null:
+		input.held_off = loadout_screen.visible
+		touch.blocked = loadout_screen.visible
 	touch.release_all()
 	if input.device == LocalInput.Device.KEYBOARD and not game.over and not loadout_screen.visible and DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -225,12 +249,16 @@ func _on_match_over(_winner: int) -> void:
 
 ## Starts the match again from the beginning.
 func restart() -> void:
+	if replica != null:
+		return
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	get_tree().paused = false
 	get_tree().reload_current_scene()
 
 
 func quit_to_menu() -> void:
+	if OnlineClient.active != null:
+		OnlineClient.active.stop()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	get_tree().paused = false
 	get_tree().change_scene_to_file(MENU_SCENE)

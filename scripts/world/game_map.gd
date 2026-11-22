@@ -137,8 +137,7 @@ func deck_height() -> float:
 	return base_ground + 2.0
 
 
-## Where a team's soldiers start: spawn_side m to the side of their flag stand in two groups
-## of four, one each side, facing the other base.
+## Where a team's soldiers start, in two rows beside the flag stand facing the other base.
 func spawn_point(team: int, slot := 0) -> Transform3D:
 	var side := 1.0 if slot % 2 == 0 else -1.0
 	var row := slot / 2
@@ -149,9 +148,9 @@ func spawn_point(team: int, slot := 0) -> Transform3D:
 
 
 ## Every place a team's soldiers respawn.
-func spawn_points(team: int) -> Array[Transform3D]:
+func spawn_points(team: int, count := 8) -> Array[Transform3D]:
 	var points: Array[Transform3D] = []
-	for slot in 8:
+	for slot in count:
 		points.append(spawn_point(team, slot))
 	return points
 

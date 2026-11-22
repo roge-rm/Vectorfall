@@ -2,9 +2,14 @@
 
 Vectorfall is a capture-the-flag shooter for Android and Linux. Ski down a hill, jet over the next ridge and bring the other team's flag home. Fly a gunship to cover your runner, or go in on foot and knock out the enemy generator.
 
-It's in the spirit of Tribes, with the look of a science fiction paperback. Lime and Blue play on ten arenas with up to eight soldiers a side. Bots can fill both teams, drive and fly vehicles, repair the base and take orders from you. The game is offline in 0.12.0. Online play is planned.
+It's in the spirit of Tribes, with the look of a science fiction paperback. Lime and Blue play on ten arenas with up to eight soldiers a side. Bots can fill both teams, drive and fly vehicles, repair the base and take orders from you.
 
-New in 0.12.0
+New in 0.13.0
+
+- Join an online match by address or find servers on your LAN. Bots fill the rest of the team.
+- Run a dedicated server with Docker Compose and check the match from its browser dashboard.
+
+Added in 0.12.0
 
 - Ferry pilots wait for passengers, pick landing sites and slow down to drop troops near the enemy base.
 - Gunship crews cover friendly flag runners and intercept enemy carriers. Tank and bomber crews leave when their targets are gone.
@@ -63,6 +68,8 @@ Download the APK or Debian package from [the releases page](https://github.com/r
 Android supports touch, gyro aim and gamepads. Linux supports a mouse and keyboard or a gamepad.
 
 ## Playing
+
+The 0.12.0 downloads play offline. In a build with online play, choose **Online** to find a LAN match or enter a server address. Bots fill empty slots. See [Dedicated server](server/README.md) to host matches with Docker Compose, open the dashboard or serve the browser build.
 
 Choose **How to Play → Ski Practice** for a timed run with a reset button and a saved best time. Hold jump as you go downhill to ski and pick up speed. Jet over the next rise, then let go of jet to refill your energy before the next climb.
 
