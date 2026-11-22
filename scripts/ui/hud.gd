@@ -92,6 +92,7 @@ func _init() -> void:
 	loadout_button.visible = false
 	add_child(loadout_button)
 	_map_button = MenuKit.button("Map", tactical_requested.emit, 22, false, true)
+	_map_button.custom_minimum_size.x = MenuKit.px(76)
 	_map_button.focus_mode = Control.FOCUS_NONE
 	_map_button.hide()
 	add_child(_map_button)
