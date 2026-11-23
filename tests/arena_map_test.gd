@@ -140,6 +140,9 @@ func _check_reworked_base(map: ArenaMap, game: Match) -> void:
 			var a := graph.nearest(Vector3(deck.x, deck.y, side * inner))
 			var b := graph.nearest(Vector3(deck.x, map.surface_at(deck.x, side * outer), side * outer))
 			exits = exits and graph.link_between(start, a) != null and graph.link_between(a, b) != null
+			if map is CopperSteps:
+				exits = exits and graph.interest_points(RouteGraph.FLAG_EXIT, team).any(
+					func(id: int) -> bool: return side * graph.points[id].z > outer and graph.link_between(b, id) != null)
 			var z := side * 27.0
 			var y := map.surface_at(deck.x, z)
 			var surface := game.world_ray(Vector3(deck.x, y + 1, z), Vector3(deck.x, y - 1, z), Match.WORLD_LAYER)

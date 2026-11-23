@@ -131,7 +131,8 @@ func add_base_points(graph: RouteGraph) -> void:
 				graph.add_interest(RouteGraph.WAY_IN, team, point)
 				if edge == 14.0:
 					graph.add_interest(RouteGraph.FLAG_ENTRY, team, point)
-				if edge == 35.0:
+				# Keep the carrier going past the ramp before it turns for home.
+				if edge == 47.0:
 					graph.add_interest(RouteGraph.FLAG_EXIT, team, point)
 
 

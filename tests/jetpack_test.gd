@@ -90,7 +90,40 @@ func _run() -> void:
 	while not soldier.grounded:
 		await ticks(1)
 	checks.check(soldier.horizontal_speed() > 10.0, "landing on a downhill keeps and adds speed (%.2f m/s)" % soldier.horizontal_speed())
+	await _check_bodies_settle()
 	checks.finish(self)
+
+
+func _check_bodies_settle() -> void:
+	soldier.velocity = Vector3(55.0, 0.0, 0.0)
+	var death_at := soldier.global_position
+	soldier.die()
+	await ticks(30)
+	var skid := soldier.global_position.x - death_at.x
+	checks.check(skid > 0.4 and skid < 1.3 and soldier.velocity.is_zero_approx(),
+		"a fast soldier dying on a slope skids briefly (%.2f m)" % skid)
+
+	var start := Vector3(30.0, 50.0, 300.0)
+	for speed: float in [0.0, 20.0]:
+		soldier.revive(Transform3D(Basis.IDENTITY, start))
+		soldier.velocity = Vector3(speed, -12.0, 0.0)
+		soldier.die()
+		for i in 90:
+			await ticks(1)
+			if soldier.grounded:
+				break
+		checks.check(soldier.grounded and soldier.global_position.y < start.y, "a body killed in the air lands on the slope")
+		var landing := soldier.global_position
+		await ticks(30)
+		skid = soldier.global_position.x - landing.x
+		if speed > 0.0:
+			checks.check(skid > 0.4 and skid < 1.3, "a moving body skids briefly on landing (%.2f m)" % skid)
+		else:
+			checks.check(absf(skid) < 0.1, "a body falling straight down doesn't start sliding")
+		var settled := soldier.global_position
+		await ticks(30)
+		checks.check(soldier.velocity.is_zero_approx() and soldier.global_position.distance_to(settled) < 0.1,
+			"the body stays where it settled")
 
 
 func _state_with(position: Vector3, velocity: Vector3) -> Dictionary:

@@ -22,6 +22,9 @@ const SWITCH_TIME := 0.3
 const THROW_TIME := 0.5
 ## No throw waiting, for throw_pending.
 const NO_THROW := -1
+## A fast body skids about a metre before it stops, in m/s and m/s².
+const BODY_SKID_SPEED := 7.0
+const BODY_SKID_BRAKE := 24.0
 
 var entity_id := 0
 var team := 0
@@ -433,7 +436,6 @@ func simulate(command: PlayerCommand, delta: float, movement_only := false) -> v
 	if not movement_only and not command.loadout.is_empty():
 		next_loadout = Loadout.from_dict(command.loadout).fixed()
 	if dead:
-		# A body only falls and slides until it's time to respawn.
 		var still := PlayerCommand.new()
 		still.yaw = yaw
 		still.pitch = pitch
@@ -458,6 +460,8 @@ func simulate(command: PlayerCommand, delta: float, movement_only := false) -> v
 		if jump_pressed:
 			velocity = velocity.slide(floor_normal) + Vector3.UP * t.jump_speed
 			grounded = false
+	elif grounded and dead:
+		horizontal = horizontal.limit_length(BODY_SKID_SPEED).move_toward(Vector3.ZERO, BODY_SKID_BRAKE * delta)
 	elif grounded and not jetting:
 		var speed := horizontal.length()
 		var target := wish * t.run_speed
@@ -514,7 +518,10 @@ func simulate(command: PlayerCommand, delta: float, movement_only := false) -> v
 		move_and_slide()
 	grounded = is_on_floor()
 	floor_normal = get_floor_normal() if grounded else Vector3.UP
-	if grounded and ski_held:
+	if grounded and dead:
+		# Hitting a slope doesn't turn the fall into a skid.
+		velocity = Vector3(velocity.x, 0.0, velocity.z).limit_length(minf(horizontal.length(), BODY_SKID_SPEED))
+	elif grounded and ski_held:
 		# move_and_slide() drops the vertical part of your speed on the floor,
 		# which would stop you skiing downhill, so keep the part along the slope.
 		# Landing this way only loses the part into the slope, so a downhill

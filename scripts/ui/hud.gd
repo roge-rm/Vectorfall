@@ -864,9 +864,8 @@ func _draw_flag_markers(u: float) -> void:
 		var screen := Vector2(-1000.0, -1000.0) if behind else camera.unproject_position(point)
 		var inside := not behind and Rect2(Vector2.ZERO, size).grow(-margin).has_point(screen)
 		var at := screen
-		var dir := Vector2.ZERO
 		if not inside:
-			dir = Vector2(local.x, -local.y)
+			var dir := Vector2(local.x, -local.y)
 			dir = dir.normalized() if dir.length() > 0.001 else Vector2.DOWN
 			# Arrows stay below the score and compass and above the status
 			# panel.
@@ -882,39 +881,7 @@ func _draw_flag_markers(u: float) -> void:
 			var side := dir.orthogonal() * radius * 0.9
 			var arrow := PackedVector2Array([tip, at + dir * radius * 1.0 + side, at + dir * radius * 1.0 - side])
 			InkUi.shape(self, arrow, colour, short)
-		var state := ""
-		match flag.mode:
-			Flag.Mode.CARRIED:
-				var carrier := game.soldier(flag.carrier_id)
-				state = "CARRIER" if carrier != soldier else "YOU"
-			Flag.Mode.DROPPED:
-				state = "DROPPED"
 		_diamond(at, radius, colour, flag.mode != Flag.Mode.HOME)
-		var label := "%s flag" % ("Your" if _mine(team) else "Enemy")
-		var metres := roundi(soldier.global_position.distance_to(flag.global_position))
-		var shown := "%s  %d m" % [label, metres] if state == "" else "%s %s  %d m" % [label, state.to_lower(), metres]
-		shown = shown.to_upper()
-		var text_at := at + Vector2(0.0, radius * 2.8)
-		if not inside and dir.y > 0.5:
-			text_at = at + Vector2(0.0, -radius * 1.6)
-		elif not inside:
-			# Above the arrow when below it would run into a touch button.
-			var label_box := Rect2(text_at - Vector2(60.0 * u, 12.0 * u), Vector2(120.0 * u, 14.0 * u))
-			for box in _avoid:
-				if box.intersects(label_box):
-					text_at = at + Vector2(0.0, -radius * 1.6)
-					break
-		var font_size := _px(13.0)
-		# The label stays on screen.
-		var half_width := InkUi.width(shown, InkUi.Face.BLACK, font_size) * 0.5 + font_size * 0.4
-		text_at.x = clampf(text_at.x, half_width, maxf(size.x - half_width, half_width))
-		# Slid left of any touch button it still runs into.
-		var box_h := font_size * 1.2
-		for box in _avoid:
-			var words := Rect2(text_at - Vector2(half_width, box_h * 0.8), Vector2(half_width * 2.0, box_h))
-			if box.intersects(words):
-				text_at.x = box.position.x - half_width
-		InkUi.text(self, text_at, shown, font_size, colour.lightened(0.15))
 
 
 ## A lightning bolt half as wide as tall, centred on at: filled with power,
