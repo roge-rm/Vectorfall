@@ -64,6 +64,10 @@ Open `Online` to find a game on your LAN or enter a server address. See the [ded
 
 Open `How to play` and choose `Ski practice`. Hold jump on the way down a hill. Jet over the next rise. Let go of jet to refill your energy. You can reset the run. The game saves your best time.
 
+Let go of ski to brake and turn on the ground. Save some jet energy to slow down before a hard landing.
+
+Open `How to play → Drills → Jet landing` to practise braking before touchdown. The results card shows your landing speed.
+
 Open `Play` to set up a local match. Pick one of ten arenas. Pick Lime or Blue. Set the number of bots and their skill for each side. Set the time and capture limits. Local matches go up to 8v8.
 
 Touch the enemy flag to take it. Bring it back to your stand when your own flag is home. Touch your dropped flag to return it. It returns on its own after 30 seconds.
@@ -102,6 +106,8 @@ Knock out the enemy generator to cut power to their base. The generator powers t
 
 Walk up to a stopped or slow-moving friendly vehicle with a free seat. Press `Board`. Use the move controls to drive. Look where you want to turn. In an aircraft, press jet to climb and jump to descend. On touch those buttons read UP and DOWN. Keep your generator running so the pads can replace lost vehicles.
 
+Fast hull impacts can hurt enemy soldiers. Hard crashes into terrain, buildings or other vehicles damage the hull.
+
 ## Arenas
 
 | Arena | Routes and landmarks |
@@ -137,6 +143,13 @@ Choose `Test map` in `Match setup` for a smaller arena.
 Open `Settings` to change look speed for each input, touch button size, gyro aim, aim assist or auto ski. Set the view distance, render scale and outlines there too. There are separate volume controls for effects, voices and music.
 
 ## What's new
+
+New in 0.18.0
+
+- Let go of Ski to brake and turn more quickly. Skis slow down faster on level ground than on slopes.
+- Hard landings hurt and make a distinct thud. Save some jet energy to slow down before you touch down.
+- Fast vehicles can hurt enemy soldiers. Hard crashes damage the hull, jolt the driver's camera and show how much hull health was lost.
+- Open `How to play → Drills → Jet landing` to practise braking into a marked lane. The result shows your landing speed.
 
 New in 0.17.0
 
