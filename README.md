@@ -138,6 +138,14 @@ Open `Settings` to change look speed for each input, touch button size, gyro aim
 
 ## What's new
 
+New in 0.17.0
+
+- Press F11 to toggle fullscreen on desktop. The launcher icon shows a flag on a mountain at sunset.
+- Flag and sensor markers leave more room for the compass and notices. On Copper Steps, bot flag carriers clear the ramp before turning for home.
+- Bots steer around visible enemy mines, wait for a better chaingun shot, plan routes for their armour and switch escorts to the teammate who takes the flag.
+- Armour is easier to see in shadow, wrecks give off more visible smoke and fallen soldiers stop sliding sooner.
+- Local rewind restores the active terrain collision and the bot route cache.
+
 New in 0.16.0
 
 - The game is now called Skifrei.
