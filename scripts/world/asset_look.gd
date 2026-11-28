@@ -126,25 +126,25 @@ func _show(state: int, team: int) -> void:
 		_sparks.emitting = state == Shown.DESTROYED
 
 
-## Thin dark smoke rising from the top and a few sparks now and then, each
+## Smoke rising above the wreck and a few sparks now and then, each
 ## one instanced draw call.
 func _make_wreck_effects() -> void:
 	var top := BaseAsset.HEIGHT[asset.kind]
 	_smoke = CPUParticles3D.new()
 	_smoke.name = "Smoke"
 	_smoke.mesh = Effects.lumpy_ball(6, 3, 0.4, 2.0)
-	_smoke.material_override = Cel.material(Color(0.2, 0.19, 0.21), 0.0, false)
+	_smoke.material_override = Cel.material(Color(0.31, 0.28, 0.34), 0.0, false)
 	_smoke.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_smoke.amount = 8
-	_smoke.lifetime = 2.4
+	_smoke.lifetime = 3.0
 	_smoke.position = Vector3.UP * top * 0.85
 	_smoke.direction = Vector3.UP
-	_smoke.spread = 12.0
-	_smoke.gravity = Vector3.UP * 0.4
-	_smoke.initial_velocity_min = 0.5
-	_smoke.initial_velocity_max = 0.9
-	_smoke.scale_amount_min = 0.3
-	_smoke.scale_amount_max = 0.5
+	_smoke.spread = 18.0
+	_smoke.gravity = Vector3.UP * 0.6
+	_smoke.initial_velocity_min = 0.7
+	_smoke.initial_velocity_max = 1.1
+	_smoke.scale_amount_min = 0.48
+	_smoke.scale_amount_max = 0.78
 	var grow := Curve.new()
 	grow.add_point(Vector2(0.0, 0.3))
 	grow.add_point(Vector2(0.5, 1.0))

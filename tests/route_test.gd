@@ -76,4 +76,11 @@ func _run() -> void:
 	checks.check(planner.plan(wall, c, d, 0.0, 0.0) == [c, ramp, d], "with none it goes round by the ramp")
 	var avoid := { wall.link_between(c, top): RoutePlanner.AVOID_COST }
 	checks.check(planner.plan(wall, c, d, 0.0, 100.0, avoid) == [c, ramp, d], "a link it got stuck on is avoided")
+	var light := SoldierBody.Armour.LIGHT
+	var heavy := SoldierBody.Armour.HEAVY
+	var climb := wall.link_between(c, top)
+	checks.check(planner.cross(climb, 0.0, 65.0, heavy).x > planner.cross(climb, 0.0, 65.0, light).x, "the heavy takes longer than the light to cross a jet link")
+	var search := planner.begin(wall, c, d, 0.0, 65.0, {}, Vector2.ZERO, 0, heavy)
+	var resumed := RoutePlanner.Search.from_state(wall, search.to_state())
+	checks.check(resumed.armour == heavy, "a restored route search keeps its armour")
 	checks.finish(self)

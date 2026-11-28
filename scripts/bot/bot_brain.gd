@@ -353,6 +353,8 @@ func before_work() -> void:
 	if _thinks_now():
 		perception.look(soldier, game, director)
 		combat.look_at_asset(self)
+	if _works_now():
+		steering.look_for_mine(self)
 
 
 ## True if it carries a search on this tick, after before_work().
@@ -826,9 +828,11 @@ func _role_goal() -> Array:
 				var lead := clampf(near / 40.0, 0.0, 2.0)
 				return [Goal.CHASE, where if carrier.jamming() else where + carrier.vel() * lead]
 	if role == Role.ESCORT:
-		var runner := game.soldier(role_target)
+		var locked := boss != null and boss.order_locks.has(me)
+		var covering_carrier := holding_theirs and not locked
+		var runner := game.soldier(theirs.carrier_id if covering_carrier else role_target)
 		if runner != null and not runner.dead:
-			if boss != null and role_target == boss.push_runner and not boss.order_locks.has(me):
+			if boss != null and not covering_carrier and not locked and role_target == boss.push_runner:
 				if not boss.push_launched and not boss.push_screening:
 					return [Goal.ESCORT, boss.push_point]
 				var stand: Vector3 = game.stands[1 - team]
@@ -1275,7 +1279,7 @@ func _replan() -> void:
 	# In the bot phase the search takes its first points after work(), from
 	# the tick's shared pool; outside it, at once.
 	var first := 0 if Soldier.use_snapshot else BotDirector.SEARCH_FIRST
-	_search = director.begin_plan(start, goal_point, soldier.vel(), soldier.energy, avoid_links, first, director.shut_for(soldier.team))
+	_search = director.begin_plan(start, goal_point, soldier.vel(), soldier.energy, avoid_links, first, director.shut_for(soldier.team), soldier.loadout.armour)
 	if not Soldier.use_snapshot:
 		director.owe_points(_search.expanded)
 	_search_tick = game.tick

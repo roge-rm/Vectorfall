@@ -27,6 +27,7 @@ func ticks(n: int) -> void:
 func _run() -> void:
 	_lead_maths()
 	await _hits_crossing_target()
+	await _chaingun_holds_fire_while_turning()
 	_lob_maths()
 	await _mortar_still_target()
 	await _sniper_far_target()
@@ -112,6 +113,27 @@ func _range_setup(match_seed: int, loadout: Loadout, distance: float) -> Array:
 	target.health = 100000.0
 	target.tuning.health_max = 100000.0
 	return [holder, game, brain, target]
+
+
+func _chaingun_holds_fire_while_turning() -> void:
+	var setup := _range_setup(5, Loadout.make(SoldierBody.Armour.MEDIUM, [Weapon.CHAINGUN]), 30.0)
+	await ticks(2)
+	var game: Match = setup[1]
+	var brain: BotBrain = setup[2]
+	var target: Soldier = setup[3]
+	brain.perception._see(target, game.tick)
+	brain.perception.contacts[target.entity_id].noticed = true
+	brain.combat.target_id = target.entity_id
+	brain.combat.weapon = Weapon.CHAINGUN
+	brain.combat.aim_error = Vector2.ZERO
+	var lined_up := PlayerCommand.new()
+	brain.combat.apply(brain, lined_up, 1.0)
+	brain.combat.aim_yaw += 0.08
+	var turning := PlayerCommand.new()
+	brain.combat.apply(brain, turning, 0.0)
+	checks.check(lined_up.has(PlayerCommand.FIRE) and not turning.has(PlayerCommand.FIRE), "the chaingun holds fire while tracking back onto a target 30 m away")
+	setup[0].free()
+	await ticks(2)
 
 
 ## A heavy bot with a mortar lobs it onto an enemy standing 50 m away: the

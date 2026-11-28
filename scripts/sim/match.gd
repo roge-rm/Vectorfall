@@ -1371,6 +1371,9 @@ func get_state(include_sources := true) -> Dictionary:
 	var source_states := {}
 	if include_sources:
 		for id: int in sources:
+			# The director saves its brains along with the shared bot state.
+			if bots != null and sources[id] is BotBrain:
+				continue
 			var source_state := sources[id].get_state()
 			if not source_state.is_empty():
 				source_states[id] = source_state
@@ -1386,7 +1389,7 @@ func get_state(include_sources := true) -> Dictionary:
 	var field_states := {}
 	for id: int in fields:
 		field_states[id] = fields[id].get_state()
-	return {
+	var state := {
 		"scores": scores.duplicate(),
 		"hold_points": hold_points.map(func(point: HoldPoint) -> Dictionary: return point.get_state()),
 		"results": results.get_state(include_sources),
@@ -1411,6 +1414,12 @@ func get_state(include_sources := true) -> Dictionary:
 		"mines": mines.map(func(mine: Mine) -> Dictionary: return mine.get_state()),
 		"sources": source_states,
 	}
+	if include_sources:
+		if terrain != null:
+			state["terrain_collision"] = terrain.collision_state()
+		if bots != null:
+			state["bots"] = bots.get_state()
+	return state
 
 
 ## Puts the match back to a state from get_state(), making any soldiers it's
@@ -1528,6 +1537,10 @@ func set_state(state: Dictionary) -> void:
 	for mine_state: Dictionary in state.get("mines", []):
 		mines.append(Mine.from_state(mine_state))
 	fleet.set_state(state.get("fleet", {}))
+	if terrain != null and state.has("terrain_collision"):
+		terrain.set_collision_state(state.terrain_collision)
+	if bots != null and state.has("bots"):
+		bots.set_state(state.bots)
 	next_id = state.next_id
 	if is_inside_tree():
 		_step_sensors()

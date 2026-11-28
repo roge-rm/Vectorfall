@@ -36,6 +36,7 @@ func _run() -> void:
 	_check_shield()
 	_check_air_hit()
 	_check_carrier()
+	_check_marker_clearance()
 	checks.finish(self)
 
 
@@ -94,3 +95,19 @@ func _check_carrier() -> void:
 	game._take_flag(ours, b)
 	game.damage(b, 1000.0, b.entity_id, Weapon.DISC, b.global_position)
 	checks.check(ours.mode == Flag.Mode.DROPPED and stops.size() == 1, "a carrier who dies to their own shot only drops the flag")
+
+
+func _check_marker_clearance() -> void:
+	hud._top_edge = 90.0
+	var notice_area := Rect2(480, 210, 320, 40)
+	var respawn_area := Rect2(500, 265, 280, 45)
+	hud._marker_banners = [notice_area, respawn_area]
+	var radius := 14.0
+	var above_compass := Vector2(640, 82)
+	var above_notice := Vector2(640, 202)
+	var clear := Vector2(120, 220)
+	checks.check(hud._below_hud(above_compass, radius) == Vector2(640, 104),
+		"the whole marker is kept below the scoreboard and compass")
+	checks.check(hud._below_hud(above_notice, radius) == Vector2(640, 324),
+		"the whole marker clears both active banners")
+	checks.check(hud._below_hud(clear, radius) == clear, "a clear marker stays where it was projected")

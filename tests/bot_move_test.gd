@@ -39,6 +39,8 @@ func _test_map_match(match_seed: int, bots_per_team: int) -> Dictionary:
 func _run() -> void:
 	await _base_to_base()
 	await _boxed_in()
+	await _mine_in_path(0.0)
+	await _mine_in_path(32.0)
 	await _same_seed()
 	checks.finish(self)
 
@@ -48,7 +50,6 @@ func _base_to_base() -> void:
 	var map: TestMap = setup.map
 	var director: BotDirector = setup.director
 	var brain := director.add_bot(0, map.spawn_point(0, 3))
-	# Medium, which the route planner's numbers are for.
 	brain.soldier.set_loadout(Loadout.standard())
 	var s := brain.soldier
 	var reached := -1.0
@@ -120,6 +121,34 @@ func _boxed_in() -> void:
 	checks.check(escapes.has("other way"), "and tries another way (%s)" % ", ".join(escapes))
 	checks.check(freed > 0.0, "and gets out to the point past the box in %.1f s" % freed)
 	checks.check(brain.stats.time_stuck > 0.0, "the time it was stuck is counted (%.1f s)" % brain.stats.time_stuck)
+	holder.free()
+	await ticks(2)
+
+
+func _mine_in_path(speed: float) -> void:
+	var holder := Node3D.new()
+	root.add_child(holder)
+	TestWorld.flat_ground(holder)
+	var graph := RouteGraph.new()
+	var start := graph.add_point(Vector3.ZERO)
+	var end := graph.add_point(Vector3(55.0, 0.0, 0.0))
+	graph.add_link(start, end, RouteGraph.Kind.RUN)
+	var game := Match.new(7)
+	holder.add_child(game)
+	var director := BotDirector.new(game, graph)
+	var brain := director.add_bot(0, Transform3D(Basis(Vector3.UP, -PI * 0.5), Vector3.UP * 0.2))
+	var mine := Mine.new()
+	mine.team = 1
+	mine.position = Vector3(22.0 if speed > 0.0 else 10.0, 0.05, 0.0)
+	game.mines.append(mine)
+	await ticks(5)
+	brain.go_to(end)
+	brain.soldier.velocity = Vector3.RIGHT * speed
+	for i in 60 * 12:
+		await physics_frame
+		if brain.goal == BotBrain.Goal.HOLD:
+			break
+	checks.check(game.mines.has(mine) and brain.goal == BotBrain.Goal.HOLD, "the bot goes round an armed enemy mine and reaches its goal (started at %.0f m/s)" % speed)
 	holder.free()
 	await ticks(2)
 

@@ -40,9 +40,10 @@ static var _ground_shared: Dictionary[String, Variant] = {}
 ## outline. figure is for soldiers, what they carry and flags, whose outline
 ## thins sooner with distance so it doesn't swallow them. small is for
 ## things a hand's width across, like mines and hand grenades, which get the
-## effects' thin outline with no wobble.
-static func material(colour: Color, team_amount := 0.0, outlined := true, vertex_colour := false, near := false, figure := false, small := false) -> ShaderMaterial:
-	var key := "%s/%s/%s/%s/%s/%s/%s" % [colour.to_html(), team_amount, outlined, vertex_colour, near, figure, small]
+## effects' thin outline with no wobble. shadow_fill keeps armour readable
+## away from the sun.
+static func material(colour: Color, team_amount := 0.0, outlined := true, vertex_colour := false, near := false, figure := false, small := false, shadow_fill := false) -> ShaderMaterial:
+	var key := "%s/%s/%s/%s/%s/%s/%s/%s" % [colour.to_html(), team_amount, outlined, vertex_colour, near, figure, small, shadow_fill]
 	if _materials.has(key):
 		return _materials[key]
 	var made := ShaderMaterial.new()
@@ -54,6 +55,7 @@ static func material(colour: Color, team_amount := 0.0, outlined := true, vertex
 	# bright band towards the horizon.
 	made.set_shader_parameter("rim_amount", 0.3 if team_amount > 0.0 else 0.0)
 	made.set_shader_parameter("camera_light", near)
+	made.set_shader_parameter("shadow_fill", shadow_fill)
 	made.set_shader_parameter("paper_grain", paper_grain())
 	_share(made, _shared)
 	if outlined:

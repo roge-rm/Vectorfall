@@ -523,7 +523,7 @@ func plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}, 
 ## kept and shared between bots; a route got from the store is the same one
 ## planning again would give. Routes avoiding links aren't kept. The search
 ## comes back done, or for run_plan() to carry on each tick.
-func begin_plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}, first := SEARCH_FIRST, shut := 0) -> RoutePlanner.Search:
+func begin_plan(start: int, goal: int, velocity: Vector3, energy: float, avoid := {}, first := SEARCH_FIRST, shut := 0, armour: int = SoldierBody.Armour.MEDIUM) -> RoutePlanner.Search:
 	var speed := Vector2(velocity.x, velocity.z).length()
 	var speed_step := int(speed / 5.0)
 	var energy_step := int(energy / 20.0)
@@ -537,20 +537,21 @@ func begin_plan(start: int, goal: int, velocity: Vector3, energy: float, avoid :
 	var rounded_energy := energy_step * 20.0 + 10.0
 	var key := []
 	if avoid.is_empty():
-		key = [start, goal, speed_step, energy_step, heading_step, shut]
+		key = [start, goal, speed_step, energy_step, heading_step, shut, armour]
 		if _plans.has(key):
 			if Prof.on:
 				Prof.count("astar_cached")
 			var kept := RoutePlanner.Search.new()
 			kept.start = start
 			kept.goal = goal
+			kept.armour = armour
 			kept.done = true
 			kept.result.assign(_plans[key])
 			return kept
 	if Prof.on:
 		Prof.count("astar_avoid" if not avoid.is_empty() else "astar_new")
 	var t := Time.get_ticks_usec() if Prof.on else 0
-	var search := planner.begin(graph, start, goal, rounded_speed, rounded_energy, avoid, heading, shut)
+	var search := planner.begin(graph, start, goal, rounded_speed, rounded_energy, avoid, heading, shut, armour)
 	if Prof.on:
 		Prof.add("bot.replan.begin", Time.get_ticks_usec() - t)
 	search.key = key
@@ -761,6 +762,7 @@ func get_state() -> Dictionary:
 		"disc_rays_left": _disc_rays_left,
 		"search_turns": _search_turns.duplicate(),
 		"points_owed": _points_owed,
+		"plans": _plans.duplicate(true),
 		"brains": brain_states,
 		"commanded_tick": _commanded_tick,
 		"vehicle_orders": vehicle_orders.get_state(),
@@ -776,6 +778,7 @@ func set_state(state: Dictionary) -> void:
 	_disc_rays_left = state.get("disc_rays_left", 0)
 	_search_turns.assign(state.get("search_turns", []))
 	_points_owed = state.get("points_owed", 0)
+	_plans = state.get("plans", {}).duplicate(true)
 	_commanded_tick = state.commanded_tick
 	vehicle_orders.set_state(state.get("vehicle_orders", {}))
 	for pair: Array in state.commanders:

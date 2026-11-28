@@ -82,6 +82,7 @@ var _energy_full_for := 0.0
 var _compass := Rect2()
 ## The touch controls' rects for this frame, from _touch_rects().
 var _avoid: Array[Rect2] = []
+var _marker_banners: Array[Rect2] = []
 
 
 func _init(ladder_run := false) -> void:
@@ -465,6 +466,17 @@ func _draw() -> void:
 				prompt = "%s · Board [%s]" % [prompt, key]
 			InkUi.centred(self, centre + Vector2(0, 46.0 * u), prompt, InkUi.Face.BLACK, _px(13), InkUi.CREAM, 3)
 	_draw_feed(u, avoid)
+	var words := notice()
+	var respawn := "Respawning in %d" % ceili(maxf(soldier.respawn_in, 0.0)) if soldier.dead else ""
+	var notice_area := Rect2()
+	var respawn_area := Rect2()
+	_marker_banners.clear()
+	if not words.is_empty():
+		notice_area = _banner_rect(Vector2(centre.x, size.y * 0.3), words, 20)
+		_marker_banners.append(notice_area)
+	if soldier.dead:
+		respawn_area = _banner_rect(Vector2(centre.x, size.y * 0.38), respawn, 26)
+		_marker_banners.append(respawn_area)
 	if game != null:
 		_draw_sensor_marks(u)
 		_draw_generator_marker(u)
@@ -472,24 +484,23 @@ func _draw() -> void:
 		_draw_control_markers(u)
 		_draw_waypoint(u)
 		_draw_team_call(u)
-	var words := notice()
 	if not words.is_empty():
 		var alpha := 1.0 if words == WAIT_FOR_FLAG else clampf(_message_left, 0.0, 1.0)
-		_banner(Vector2(centre.x, size.y * 0.3), words, 20, alpha)
+		_banner(notice_area, words, 20, alpha)
 	if soldier.dead:
-		_banner(Vector2(centre.x, size.y * 0.38), "Respawning in %d" % ceili(maxf(soldier.respawn_in, 0.0)), 26, 1.0)
+		_banner(respawn_area, respawn, 26, 1.0)
 
 
-## Big Shoulders words on a cream card with an ink edge, centred on at.
-func _banner(at: Vector2, words: String, font_size: float, alpha: float) -> void:
+func _banner_rect(at: Vector2, words: String, font_size: int) -> Rect2:
 	var u := _u()
-	var text := words.to_upper()
-	var px := roundi(font_size * u)
-	var wide := InkUi.width(text, InkUi.Face.BLACK, px) + 24.0 * u
+	var wide := InkUi.width(words.to_upper(), InkUi.Face.BLACK, _px(font_size)) + 24.0 * u
 	var tall := font_size * 1.4 * u
-	var rect := Rect2(at - Vector2(wide, tall) * 0.5, Vector2(wide, tall))
-	InkUi.box(self, rect, Color(InkUi.CREAM, alpha), maxf(2.0, 2.0 * u))
-	InkUi.centred(self, rect.get_center(), text, InkUi.Face.BLACK, px, Color(InkUi.INK, alpha))
+	return Rect2(at - Vector2(wide, tall) * 0.5, Vector2(wide, tall))
+
+
+func _banner(rect: Rect2, words: String, font_size: int, alpha: float) -> void:
+	InkUi.box(self, rect, Color(InkUi.CREAM, alpha), maxf(2.0, 2.0 * _u()))
+	InkUi.centred(self, rect.get_center(), words.to_upper(), InkUi.Face.BLACK, _px(font_size), Color(InkUi.INK, alpha))
 
 
 func _clock_text() -> String:
@@ -877,10 +888,13 @@ func _draw_flag_markers(u: float) -> void:
 			var scale := minf(half.x / maxf(absf(dir.x), 0.0001), half.y / maxf(absf(dir.y), 0.0001))
 			at = middle + dir * scale
 			at = _clear_of_touch(at, radius * 3.0)
+			at = _below_hud(at, radius * 3.0)
 			var tip := at + dir * radius * 2.4
 			var side := dir.orthogonal() * radius * 0.9
 			var arrow := PackedVector2Array([tip, at + dir * radius * 1.0 + side, at + dir * radius * 1.0 - side])
 			InkUi.shape(self, arrow, colour, short)
+		else:
+			at = _below_hud(at, radius + 3.0)
 		_diamond(at, radius, colour, flag.mode != Flag.Mode.HOME)
 
 
@@ -966,8 +980,19 @@ func _draw_sensor_marks(u: float) -> void:
 		if camera.is_position_behind(point):
 			continue
 		var at := camera.unproject_position(point)
-		if Rect2(Vector2.ZERO, size).has_point(at):
+		if Rect2(Vector2.ZERO, size).has_point(at) and _below_hud(at, radius + 3.0) == at:
 			_diamond(at, radius, Palette.team(other.team), false)
+
+
+## Flags remain visible below the HUD. Sensor marks only show at their
+## projected positions, so they still point to the right soldier.
+func _below_hud(at: Vector2, radius: float) -> Vector2:
+	at.y = maxf(at.y, _top_edge + radius)
+	for banner in _marker_banners:
+		var avoid := banner.grow(radius)
+		if avoid.has_point(at):
+			at.y = avoid.end.y
+	return at
 
 
 ## True for a flag carried by an enemy with a sensor jammer on, which the

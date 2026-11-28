@@ -34,6 +34,8 @@ const HOP_ENERGY := 15.0
 ## m/s, and with more energy than this.
 const JET_IN_SPEED := 30.0
 const JET_IN_ENERGY := 40.0
+## Room to pass the trigger with the soldier's body and a little steering error.
+const MINE_CLEARANCE := Match.MINE_TRIGGER + 1.5
 
 ## Waiting for energy below a climb.
 var resting := false
@@ -45,6 +47,7 @@ var hop_ticks := 0
 var climbing := false
 ## What it's doing, for the debug overlay.
 var doing := ""
+var _mine_ahead := Vector3.INF
 
 
 func reset() -> void:
@@ -52,6 +55,44 @@ func reset() -> void:
 	climbing = false
 	resting = false
 	doing = ""
+
+
+## A visible enemy mine in the near path. The ray runs before the worker phase.
+func look_for_mine(brain: BotBrain) -> void:
+	_mine_ahead = Vector3.INF
+	var s := brain.soldier
+	if brain.game.mines.is_empty() or not s.grounded or (brain.path.is_empty() and not brain.direct):
+		return
+	var pos := s.at()
+	var drift := Vector2(s.vel().x, s.vel().z)
+	var reach := clampf(drift.length() * 0.7, 12.0, 26.0)
+	var aim := brain.aim_point(reach) - pos
+	var way := Vector2(aim.x, aim.z).limit_length(reach)
+	var skiing := drift.length() > s.tuning.run_speed + 1.0
+	var travel := drift.normalized() if skiing else way.normalized()
+	var ahead_limit := reach if skiing else way.length() + Match.MINE_TRIGGER
+	var closest := reach * reach
+	var candidate: Mine
+	for mine in brain.game.mines:
+		if mine.team == s.team or not mine.armed():
+			continue
+		var to := mine.position - pos
+		if absf(to.y) > Match.MINE_TRIGGER:
+			continue
+		var flat := Vector2(to.x, to.z)
+		var ahead := flat.dot(travel)
+		if ahead <= 0.0 or ahead > ahead_limit:
+			continue
+		if flat.length_squared() < closest and absf(flat.cross(travel)) < MINE_CLEARANCE:
+			closest = flat.length_squared()
+			candidate = mine
+	if candidate != null:
+		var eye := s.eye_transform()
+		var visible_at := candidate.position + candidate.normal * 0.15
+		var to_mine := visible_at - eye.origin
+		var in_view := -eye.basis.z.dot(to_mine.normalized()) > cos(BotPerception.VIEW_HALF_ANGLE)
+		if in_view and brain.director.take_ray() and brain.game.line_clear(eye.origin, visible_at):
+			_mine_ahead = candidate.position
 
 
 func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
@@ -196,6 +237,18 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 		wish = -along
 		doing = "air brake"
 
+	if _mine_ahead != Vector3.INF:
+		var side := dir.cross(Vector3.UP)
+		if (_mine_ahead - pos).dot(side) > 0.0:
+			side = -side
+		wish = (dir + side).normalized()
+		if speed > t.run_speed + 1.0:
+			wish = (wish * t.run_speed - vh).normalized()
+		ski = false
+		jet = false
+		jump = false
+		doing = "avoid mine"
+
 	command.yaw = atan2(-dir.x, -dir.z)
 	command.pitch = clampf(atan2(to_aim.y, maxf(flat.length(), 1.0)), -0.6, 0.6)
 	if wish != Vector3.ZERO:
@@ -213,9 +266,13 @@ func steer(brain: BotBrain, _delta: float) -> PlayerCommand:
 ## Energy to wait for below a wall a link has to jet: a heavy's weak jet
 ## needs twice the link's and at least HEAVY_WALL_ENERGY.
 static func wall_energy(s: Soldier, link: RouteGraph.Link) -> float:
-	if s.loadout.armour == SoldierBody.Armour.HEAVY:
-		return minf(maxf(link.energy * 2.0, HEAVY_WALL_ENERGY), rest_until(s))
-	return link.energy
+	return wall_energy_for(s.loadout.armour, link.energy, s.tuning.energy_max)
+
+
+static func wall_energy_for(armour: int, energy: float, tank: float) -> float:
+	if armour == SoldierBody.Armour.HEAVY:
+		return minf(maxf(energy * 2.0, HEAVY_WALL_ENERGY), minf(REST_UNTIL, tank - 5.0))
+	return energy
 
 
 ## Energy to wait for, at most a little under the armour's full tank.

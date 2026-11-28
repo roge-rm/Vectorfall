@@ -264,6 +264,13 @@ func _escorts_bot_runner() -> void:
 	boss.think(true)
 	var escort_goal := escort._role_goal()
 	checks.check(boss.push_launched and runner._role_goal()[0] == BotBrain.Goal.TAKE_FLAG and escort_goal[0] == BotBrain.Goal.ESCORT and escort_goal[1].distance_to(game.stands[1]) < 20.0, "arrival of an escort sends both ahead to the flag stand")
+	# Another bot takes the flag between commander ticks.
+	var enemy_flag: Flag = game.flags[1]
+	enemy_flag.mode = Flag.Mode.CARRIED
+	enemy_flag.carrier_id = delivered.soldier.entity_id
+	checks.check(escort._role_goal() == [BotBrain.Goal.ESCORT, escort._escort_spot(delivered.soldier)], "a staged escort follows the actual carrier before the next commander tick")
+	enemy_flag.mode = Flag.Mode.HOME
+	enemy_flag.carrier_id = 0
 	var reserved_at := reserved.soldier.global_position
 	var delivered_at := delivered.soldier.global_position
 	var generator := game.generator(1)

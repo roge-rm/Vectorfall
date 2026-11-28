@@ -61,6 +61,8 @@ uniform vec3 sun_direction = vec3(-0.369, 0.766, 0.527);
 // Lit from above and behind the camera instead, for the gun in your hands,
 // so it reads the same whichever way you face.
 uniform bool camera_light = false;
+// Armour keeps some fill light even on the side facing away from the sun.
+uniform bool shadow_fill = false;
 uniform vec4 sun_colour : source_color = vec4(1.0, 0.9, 0.74, 1.0);
 uniform vec4 ambient : source_color = vec4(0.62, 0.56, 0.5, 1.0);
 uniform float ambient_energy = 0.5;
@@ -185,6 +187,9 @@ void fragment() {
 	vec3 light_dir = camera_light ? vec3(-0.35, 0.75, 0.56) : normalize((VIEW_MATRIX * vec4(sun_direction, 0.0)).xyz);
 	float n_dot_l = dot(NORMAL, light_dir);
 	float band = n_dot_l > lit_edge ? shade_lit : (n_dot_l > mid_edge ? shade_mid : shade_dark);
+	if (shadow_fill && n_dot_l <= mid_edge) {
+		band = max(band, min(0.48, shade_mid));
+	}
 	// Team colours shade less, so they stay the strongest colours in shadow.
 	band = mix(band, max(band, 0.8), team);
 	float rim = step(rim_edge, 1.0 - max(dot(NORMAL, VIEW), 0.0)) * step(0.0, n_dot_l) * rim_amount;
@@ -241,6 +246,9 @@ void fragment() {
 	}
 	// Glow lifts the hatching off what it lights.
 	inked *= 1.0 - 0.7 * glow_amount;
+	if (shadow_fill) {
+		inked *= 0.6;
+	}
 	lit = mix(lit, mix(ink.rgb, hatch_colour.rgb, hatch_colour.a), inked);
 	lit *= paper.rgb;
 	if (grit > 0.0) {

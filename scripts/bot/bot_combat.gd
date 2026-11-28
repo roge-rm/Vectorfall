@@ -520,7 +520,7 @@ func apply(brain: BotBrain, command: PlayerCommand, delta: float) -> void:
 	var tolerance := maxf(atan2(1.5, distance), 0.02)
 	match weapon:
 		Weapon.CHAINGUN:
-			tolerance *= 2.0
+			tolerance = atan2(0.9, distance) + w.spread * 0.5
 		Weapon.MORTAR:
 			tolerance = maxf(atan2(3.0, distance), 0.02)
 		Weapon.SNIPER:

@@ -25,22 +25,28 @@ const GUESS_SPEED := 26.0
 ## Seconds added to a link this bot has got stuck on.
 const AVOID_COST := 60.0
 
-var tuning := MovementTuning.new()
+var _tuning: Array[MovementTuning] = [
+	MovementTuning.for_armour(SoldierBody.Armour.LIGHT),
+	MovementTuning.for_armour(SoldierBody.Armour.MEDIUM),
+	MovementTuning.for_armour(SoldierBody.Armour.HEAVY),
+]
 
 
 ## Seconds to cross a link starting at speed v0 with energy e0, and the speed
 ## and energy at its end, as (seconds, speed, energy).
-func cross(link: RouteGraph.Link, v0: float, e0: float) -> Vector3:
-	var t := tuning
+func cross(link: RouteGraph.Link, v0: float, e0: float, armour: int = SoldierBody.Armour.MEDIUM) -> Vector3:
+	var t := _tuning[armour]
+	e0 = minf(e0, t.energy_max)
 	var run := t.run_speed
 	var d3 := link.distance
 	if link.must_jet:
 		# Walls slow you to running speed, and you may have to wait for energy.
+		var need_jet := BotSteering.wall_energy_for(armour, link.energy, t.energy_max)
 		var wait := 0.0
-		if e0 < link.energy:
-			wait = (link.energy - e0) / t.energy_refill + t.refill_delay
-			e0 = link.energy
-		return Vector3(wait + d3 / run, run, e0 - link.energy)
+		if e0 < need_jet:
+			wait = (need_jet - e0) / t.energy_refill + t.refill_delay
+			e0 = need_jet
+		return Vector3(wait + d3 / run, run, e0 - need_jet)
 	var g := t.gravity
 	var wait := 0.0
 	if link.steep > 0.0:
@@ -77,6 +83,7 @@ class Search:
 	var goal := -1
 	var speed := 0.0
 	var energy := 0.0
+	var armour: int = SoldierBody.Armour.MEDIUM
 	var avoid := {}
 	var heading := Vector2.ZERO
 	## Teams whose force fields are shut to this search, as bits (1 << team).
@@ -102,7 +109,7 @@ class Search:
 	## The search as plain data for a saved state, without the graph.
 	func to_state() -> Dictionary:
 		return {
-			"start": start, "goal": goal, "speed": speed, "energy": energy,
+			"start": start, "goal": goal, "speed": speed, "energy": energy, "armour": armour,
 			"avoid": avoid.duplicate(), "heading": heading, "shut": shut, "key": key.duplicate(),
 			"expanded": expanded, "done": done, "result": PackedInt32Array(result),
 			"cost": cost.duplicate(), "speeds": speeds.duplicate(), "energies": energies.duplicate(),
@@ -118,6 +125,7 @@ class Search:
 			search.set(field, state[field])
 		search.avoid = state.avoid.duplicate()
 		search.shut = state.get("shut", 0)
+		search.armour = state.get("armour", SoldierBody.Armour.MEDIUM)
 		search.key = state.key.duplicate()
 		search.result.assign(Array(state.result))
 		for field: String in ["cost", "speeds", "energies", "came", "closed", "heap_key", "heap_at"]:
@@ -129,20 +137,21 @@ class Search:
 ## there's no way. avoid maps links to extra seconds, heading is the flat
 ## direction the bot is moving in, if it's moving, and shut holds the teams
 ## whose force fields it can't pass, as bits (1 << team).
-func plan(graph: RouteGraph, start: int, goal: int, speed: float, energy: float, avoid := {}, heading := Vector2.ZERO, shut := 0) -> Array[int]:
-	var search := begin(graph, start, goal, speed, energy, avoid, heading, shut)
+func plan(graph: RouteGraph, start: int, goal: int, speed: float, energy: float, avoid := {}, heading := Vector2.ZERO, shut := 0, armour: int = SoldierBody.Armour.MEDIUM) -> Array[int]:
+	var search := begin(graph, start, goal, speed, energy, avoid, heading, shut, armour)
 	step(search, -1)
 	return search.result
 
 
 ## A search for plan() to run with step().
-func begin(graph: RouteGraph, start: int, goal: int, speed: float, energy: float, avoid := {}, heading := Vector2.ZERO, shut := 0) -> Search:
+func begin(graph: RouteGraph, start: int, goal: int, speed: float, energy: float, avoid := {}, heading := Vector2.ZERO, shut := 0, armour: int = SoldierBody.Armour.MEDIUM) -> Search:
 	var search := Search.new()
 	search.graph = graph
 	search.start = start
 	search.goal = goal
 	search.speed = speed
-	search.energy = energy
+	search.armour = armour
+	search.energy = minf(energy, _tuning[armour].energy_max)
 	search.avoid = avoid
 	search.heading = heading
 	search.shut = shut
@@ -164,7 +173,7 @@ func begin(graph: RouteGraph, start: int, goal: int, speed: float, energy: float
 	search.closed.resize(n)
 	search.cost[start] = 0.0
 	search.speeds[start] = speed
-	search.energies[start] = energy
+	search.energies[start] = search.energy
 	search.heap_key = PackedFloat64Array([_guess(graph.points[start], graph.points[goal])])
 	search.heap_at = PackedInt32Array([start])
 	search.heap_n = 1
@@ -212,7 +221,7 @@ func step(search: Search, budget: int) -> bool:
 	var slot_field := graph.slot_field
 	var shut := search.shut
 	var slot_link := graph.slot_link
-	var t := tuning
+	var t := _tuning[search.armour]
 	var run := t.run_speed
 	var gravity := t.gravity
 	var refill := t.energy_refill
@@ -278,7 +287,7 @@ func step(search: Search, budget: int) -> bool:
 			var e_in := e0
 			var crossed: Vector3
 			if slot_must_jet[s] != 0:
-				var need_jet := slot_energy[s]
+				var need_jet := BotSteering.wall_energy_for(search.armour, slot_energy[s], energy_max)
 				var wait_jet := 0.0
 				if e_in < need_jet:
 					wait_jet = (need_jet - e_in) / refill + refill_delay

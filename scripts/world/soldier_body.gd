@@ -158,7 +158,7 @@ func _joint(parent: Node3D, at: Vector3, part: String) -> Node3D:
 	joint.position = at
 	parent.add_child(joint)
 	var view := _view(joint, part)
-	view.material_override = Cel.material(Color.WHITE, 1.0, true, true, false, true)
+	view.material_override = Cel.material(Color.WHITE, 1.0, true, true, false, true, false, true)
 	view.visibility_range_end = FAR_DISTANCE
 	var far := _view(joint, part, true)
 	far.material_override = view.material_override

@@ -45,6 +45,7 @@ func _run() -> void:
 	_check_seams()
 	await _check_collision()
 	await _check_far_shot()
+	_check_collision_rewind()
 	await _check_ski_across_chunks()
 	checks.finish(self)
 
@@ -176,6 +177,25 @@ func _check_far_shot() -> void:
 	var a := Vector3(-300.0, 200.0, 0.0)
 	var b := Vector3(-300.0, -200.0, 0.0)
 	checks.check(not game.line_clear(a, b) and game.line_clear(a, a + Vector3.RIGHT * 50.0), "sight lines are blocked by the ground and clear above it")
+
+
+func _check_collision_rewind() -> void:
+	var saved := game.get_state()
+	var keys := terrain.active_collision()
+	var far := Vector3(-250.0, 0.0, 250.0)
+	var points := PackedVector3Array([far])
+	var speeds := PackedFloat32Array([0.0])
+	for i in Terrain.COLLISION_LINGER + 1:
+		terrain.keep_collision_near(points, speeds)
+	var moved := terrain.active_collision() != keys
+	game.set_state(saved)
+	checks.check(moved and terrain.active_collision() == keys and terrain.collision_state() == saved.terrain_collision,
+		"rewinding reinstates the saved collision bodies and tick")
+	for i in Terrain.COLLISION_LINGER:
+		terrain.keep_collision_near(points, speeds)
+	var lingered := terrain.active_collision().has(keys[0])
+	terrain.keep_collision_near(points, speeds)
+	checks.check(lingered and not terrain.active_collision().has(keys[0]), "restored collision chunks keep their original linger time")
 
 
 func _check_ski_across_chunks() -> void:

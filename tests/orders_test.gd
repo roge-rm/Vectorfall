@@ -54,6 +54,7 @@ func _run() -> void:
 	root.add_child(map)
 	_personalities()
 	await _orders_move_bots()
+	await _route_rewind()
 	await _orders_replay()
 	await _reports()
 	await _commander_locks()
@@ -182,6 +183,27 @@ func _taken_off(boss: TeamCommander, ids: Array) -> int:
 		if not boss.order_locks.has(id):
 			n += 1
 	return n
+
+
+func _route_rewind() -> void:
+	var setup := _match(0, 0, 11)
+	var game: Match = setup.game
+	var director: BotDirector = setup.director
+	var start := director.graph.nearest(map.spawn_point(0, 0).origin)
+	var goal := director.graph.nearest(map.flag_rest(1))
+	var before := game.get_state()
+	var route := director.plan(start, goal, Vector3.ZERO, 80.0)
+	var after := game.get_state()
+	var cached := director.begin_plan(start, goal, Vector3.ZERO, 80.0, {}, 0)
+	game.set_state(before)
+	var cold := director.begin_plan(start, goal, Vector3.ZERO, 80.0, {}, 0)
+	game.set_state(after)
+	var restored := director.begin_plan(start, goal, Vector3.ZERO, 80.0, {}, 0)
+	checks.check(not route.is_empty() and cached.done and not cold.done and restored.done and restored.result == route,
+		"rewinding restores which routes are cached and which need search time")
+	var online := game.get_state(false)
+	checks.check(not online.has("bots") and not online.has("terrain_collision"), "replica snapshots omit local replay state")
+	await _done(setup)
 
 
 ## The same seed and the same orders play out the same. The first two matches

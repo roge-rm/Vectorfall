@@ -280,6 +280,23 @@ func active_collision() -> Array[Vector2i]:
 	return keys
 
 
+func collision_state() -> Dictionary:
+	return { "tick": _tick, "active": _active.duplicate() }
+
+
+## Restores the active bodies and each chunk's remaining linger time.
+func set_collision_state(state: Dictionary) -> void:
+	var active: Dictionary = state.active
+	for key: Vector2i in _active:
+		if not active.has(key):
+			remove_child(_bodies[_collision_index(key)])
+	for key: Vector2i in active:
+		if not _active.has(key):
+			add_child(_collision_body(key))
+	_active.assign(active)
+	_tick = state.tick
+
+
 ## The collision chunk a point is in.
 func collision_key(x: float, z: float) -> Vector2i:
 	var span := COLLISION_CELLS * cell
