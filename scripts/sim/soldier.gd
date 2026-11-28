@@ -25,6 +25,9 @@ const NO_THROW := -1
 ## A fast body skids about a metre before it stops, in m/s and m/s².
 const BODY_SKID_SPEED := 7.0
 const BODY_SKID_BRAKE := 24.0
+## Landing speed in m/s and damage per m/s above it.
+const FALL_SAFE_SPEED := 24.0
+const FALL_DAMAGE_PER_SPEED := 4.5
 
 var entity_id := 0
 var team := 0
@@ -433,6 +436,7 @@ func _wall_normals() -> PackedVector3Array:
 
 
 func simulate(command: PlayerCommand, delta: float, movement_only := false) -> void:
+	var started_on_floor := grounded
 	if not movement_only and not command.loadout.is_empty():
 		next_loadout = Loadout.from_dict(command.loadout).fixed()
 	if dead:
@@ -463,15 +467,12 @@ func simulate(command: PlayerCommand, delta: float, movement_only := false) -> v
 	elif grounded and dead:
 		horizontal = horizontal.limit_length(BODY_SKID_SPEED).move_toward(Vector3.ZERO, BODY_SKID_BRAKE * delta)
 	elif grounded and not jetting:
-		var speed := horizontal.length()
 		var target := wish * t.run_speed
-		if speed > t.run_speed + 0.01 and horizontal.dot(wish) >= 0.0:
-			# Above run speed you keep your speed, fading slowly, and only braking
-			# by pulling back takes it off faster.
-			horizontal = horizontal.normalized() * maxf(speed - t.overspeed_decay * delta, t.run_speed)
-		else:
-			var rate := t.ground_accel if wish_dir != Vector3.ZERO else t.ground_friction
-			horizontal = horizontal.move_toward(target, rate * delta)
+		var along := horizontal.dot(wish_dir)
+		if along > t.run_speed:
+			target = wish_dir * maxf(along - t.overspeed_decay * delta, t.run_speed)
+		var rate := t.ground_accel if wish_dir != Vector3.ZERO else t.ground_friction
+		horizontal = horizontal.move_toward(target, rate * delta)
 		if jump_pressed:
 			v_y = t.jump_speed
 			grounded = false
@@ -537,6 +538,14 @@ func simulate(command: PlayerCommand, delta: float, movement_only := false) -> v
 			velocity.z = kept.z
 	if movement_only:
 		return
+	if grounded and not started_on_floor and not dead and game != null and not game.over:
+		# Only the downward speed into the floor hurts. Ski speed along the slope carries on.
+		var fall_speed := maxf(0.0, minf(-before.y, -before.dot(floor_normal)))
+		game.landed.emit(entity_id, fall_speed)
+		if fall_speed > FALL_SAFE_SPEED:
+			game.damage(self, (fall_speed - FALL_SAFE_SPEED) * FALL_DAMAGE_PER_SPEED, entity_id, Weapon.FALL_IMPACT, global_position)
+			if dead:
+				return
 	if dead:
 		respawn_in -= delta
 		if game != null and game.ready_to_respawn(respawn_in, delta):
@@ -665,7 +674,10 @@ func _ski(wish_dir: Vector3, delta: float) -> void:
 	v += Vector3.DOWN.slide(n) * t.gravity * delta
 	var speed := v.length()
 	if speed > 0.0:
-		v *= maxf(speed - t.ski_friction * delta, 0.0) / speed
+		# Blend down to the slope friction by about seven degrees.
+		var grade := Vector2(n.x, n.z).length()
+		var friction := lerpf(t.ski_flat_friction, t.ski_friction, smoothstep(0.0, 0.12, grade))
+		v *= maxf(speed - friction * delta, 0.0) / speed
 	if wish_dir != Vector3.ZERO:
 		var dir := wish_dir.slide(n).normalized()
 		var add := clampf(t.ski_steer_speed - v.dot(dir), 0.0, t.ski_steer_accel * delta)

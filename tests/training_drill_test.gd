@@ -41,6 +41,16 @@ func _run() -> void:
 	menu = current_scene as MainMenu
 	drill = await _start(menu, TrainingDrill.Kind.REPAIR)
 	await _repair(drill)
+	drill._quit()
+	await scene_changed
+	menu = current_scene as MainMenu
+	drill = await _start(menu, TrainingDrill.Kind.LANDING)
+	await _landing(drill)
+	drill._quit()
+	await scene_changed
+	menu = current_scene as MainMenu
+	checks.check(menu.drills.visible and root.gui_get_focus_owner() == menu.drills.buttons[TrainingDrill.Kind.LANDING],
+		"leaving Jet landing returns focus to its Play button")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TEST_SETTINGS))
 	checks.finish(self)
 
@@ -142,3 +152,41 @@ func _repair(drill: TrainingDrill) -> void:
 	drill.reset_run()
 	checks.check(not drill.finished and not drill.game.powered(0) and not drill.turret.destroyed,
 		"retry resets the damage and the live defence")
+
+
+func _landing(drill: TrainingDrill) -> void:
+	checks.check(drill.kind == TrainingDrill.Kind.LANDING and not drill.touch.button_shown(0) and drill.touch.button_shown(2),
+		"Jet landing opens from Drills with movement controls")
+	await _ski_off_ridge(drill, false)
+	checks.check(drill.finished and not drill.passed and drill._result_words.text.begins_with("Landing speed")
+		and drill.player.health < drill.player.tuning.health_max,
+		"a real unbraked drop fails and shows the measured speed (%s)" % drill._result_words.text)
+	drill.reset_run()
+	checks.check(not drill.finished and drill.player.position == drill.map.start.origin and drill.player.energy == drill.player.tuning.energy_max,
+		"retry starts at the ridge with full jet energy")
+	await _ski_off_ridge(drill, true)
+	checks.check(drill.passed and drill._result_words.text.begins_with("Landing speed")
+		and drill.player.health == drill.player.tuning.health_max and drill.player.energy < drill.player.tuning.energy_max,
+		"jet braking clears the drill without landing damage (%s)" % drill._result_words.text)
+	drill.reset_run()
+	drill.player.position.x = (DrillMap.LANDING_LIP + DrillMap.LANDING_START) * 0.5
+	drill.game.landed.emit(drill.player.entity_id, 12.0)
+	checks.check(drill.finished and not drill.passed and drill._result_words.text.ends_with("Land inside the lit lane."),
+		"the first landing short of the marked lane ends the run")
+
+
+func _ski_off_ridge(drill: TrainingDrill, brake: bool) -> void:
+	Input.action_press("move_forward")
+	Input.action_press("jump")
+	Input.action_press("ski")
+	for i in 600:
+		if drill.finished:
+			break
+		var player := drill.player
+		if brake and player.position.x > DrillMap.LANDING_LIP and player.position.y < 20.0:
+			Input.action_press("jet")
+		await physics_frame
+	Input.action_release("jet")
+	Input.action_release("move_forward")
+	Input.action_release("jump")
+	Input.action_release("ski")

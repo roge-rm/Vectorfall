@@ -22,6 +22,10 @@ const TURRET := 9
 ## Slots below this are guns a loadout can carry.
 const GUNS := 7
 
+## Damage events outside the weapon slots.
+const VEHICLE_IMPACT := -1
+const FALL_IMPACT := -2
+
 static var all: Array[Weapon] = make_all()
 
 var slot := 0

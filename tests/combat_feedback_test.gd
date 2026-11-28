@@ -36,7 +36,9 @@ func _run() -> void:
 	_check_shield()
 	_check_air_hit()
 	_check_carrier()
+	_check_impact_feed()
 	_check_marker_clearance()
+	_check_impact_feedback()
 	checks.finish(self)
 
 
@@ -111,3 +113,40 @@ func _check_marker_clearance() -> void:
 	checks.check(hud._below_hud(above_notice, radius) == Vector2(640, 324),
 		"the whole marker clears both active banners")
 	checks.check(hud._below_hud(clear, radius) == clear, "a clear marker stays where it was projected")
+
+
+func _check_impact_feed() -> void:
+	game.respawn(b)
+	game.damage(b, 1000.0, a.entity_id, Weapon.VEHICLE_IMPACT, a.global_position)
+	checks.check(hud.feed_text().back() == "You vehicle impact " + b.display_name, "vehicle impact credits the driver in the feed")
+	game.respawn(b)
+	game.damage(b, 1000.0, 0, Weapon.FALL_IMPACT, b.global_position)
+	checks.check(hud.feed_text().back() == b.display_name + " fell", "a fatal fall appears in the feed")
+
+
+func _check_impact_feedback() -> void:
+	var camera := FirstPersonCamera.new()
+	camera.soldier = a
+	root.add_child(camera)
+	var audio := GameAudio.new()
+	root.add_child(audio)
+	audio.watch(game, a)
+	game.landed.emit(a.entity_id, Soldier.FALL_SAFE_SPEED)
+	checks.check(audio._next_flat == 0, "an ordinary landing does not play the hard landing sound")
+	game.landed.emit(a.entity_id, Soldier.FALL_SAFE_SPEED + 1.0)
+	checks.check(audio._flat[0].stream == SoundBank.get_stream("hard_land"), "a hard landing plays its own thud")
+
+	game.vehicle_crashed.emit(b.entity_id, b.position, 20.0)
+	checks.check(camera.v_offset == 0.0 and hud._hull_damage_left == 0.0, "another driver's crash does not jolt the camera or show hull loss")
+	var pad := game.fleet.add_pad(0, Vehicle.Kind.BIKE, Vector3(0.0, 0.0, 40.0), 0.0)
+	var hull := game.fleet._make_hull(game.next_id, pad, pad.position + Vector3.UP)
+	hull.crew[0] = a.entity_id
+	a.mount(hull.entity_id, 0)
+	hull.health = 12.5
+	game.fleet.damage(hull, 80.0, 0, -1, Weapon.VEHICLE_IMPACT)
+	checks.check(camera.v_offset < 0.0 and hud._hull_damage == 12.5 and hud._hull_damage_left > 0.0
+		and audio._flat[1].stream == SoundBank.get_stream("vehicle_crash"),
+		"a wreck jolts its driver and reports the actual hull health lost with the crash sound")
+	camera._process(0.4)
+	hud._process(2.0)
+	checks.check(camera.v_offset == 0.0 and hud._hull_damage_left == 0.0, "the crash jolt and damage readout fade")

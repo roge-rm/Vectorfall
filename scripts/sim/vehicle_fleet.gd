@@ -4,6 +4,12 @@ extends RefCounted
 const BOARD_REACH := 3.0
 const RETURN_AFTER := 30.0
 const SHOT_INHERIT := 0.38
+## Closing speed in m/s below which a bump does no damage.
+const IMPACT_SPEED := 8.0
+## A ram is survivable at full health even in light armour.
+const MAX_RAM_DAMAGE := 70.0
+## A shove can briefly separate the soldier from the hull as it passes.
+const RAM_REPEAT_TICKS := 18
 
 var game: Match
 var pads: Dictionary[int, VehiclePad] = {}
@@ -100,8 +106,11 @@ func command(who: Soldier, input: PlayerCommand, delta: float) -> void:
 func step(delta: float) -> void:
 	var ids := hulls.keys()
 	ids.sort()
+	var crashed_pairs: Dictionary[Vector2i, bool] = {}
 	for id: int in ids:
-		var hull := hulls[id]
+		var hull: Vehicle = hulls.get(id)
+		if hull == null:
+			continue
 		var pad := pads[hull.pad_id]
 		if hull.position.y < -200.0:
 			damage(hull, hull.health, 0, -1, Weapon.DISC)
@@ -114,7 +123,14 @@ func step(delta: float) -> void:
 			var to := Basis(Vector3.UP, hull.yaw) * Vector3(pilot.move.x, 0.0, -pilot.move.y)
 			probe += to.normalized() * Vehicle.SIZE[hull.kind].z * 0.49
 		var floor_y := maxf(ground_at(hull.position), ground_at(probe)) if probe != hull.position else ground_at(probe)
-		hull.drive(pilot, floor_y, delta)
+		var start := hull.global_position
+		var incoming := hull.drive(pilot, floor_y, delta)
+		if not game.over:
+			if pilot != null and incoming.length_squared() > IMPACT_SPEED * IMPACT_SPEED:
+				_ram_soldiers(hull, start, incoming)
+			_crash(hull, incoming, crashed_pairs)
+		if not hulls.has(id):
+			continue
 		for seat in hull.crew.size():
 			var rider := game.soldier(hull.crew[seat])
 			if rider == null:
@@ -144,6 +160,97 @@ func step(delta: float) -> void:
 func ground_at(at: Vector3) -> float:
 	var hit := game.world_ray(at + Vector3.UP * 2.0, at + Vector3.DOWN * 155.0, Match.WORLD_LAYER)
 	return hit.position.y if not hit.is_empty() else at.y - 155.0
+
+
+## Sweep the hull's travelled segment against foot soldiers' body extents.
+## The hull still slides past a soldier instead of stopping on their collider.
+func _ram_soldiers(hull: Vehicle, start: Vector3, incoming: Vector3) -> void:
+	var motion := hull.global_position - start
+	if motion.length_squared() < 0.0001:
+		return
+	var basis := hull.global_basis
+	var local_motion := basis.transposed() * motion
+	var half := Vehicle.SIZE[hull.kind] * 0.5
+	var reach := half.length() + motion.length() + 1.5
+	var reach_sq := reach * reach
+	var driver := hull.crew[0]
+	var weight := sqrt(Vehicle.MASS[hull.kind] / Vehicle.MASS[Vehicle.Kind.GUNSHIP])
+	for id: int in game.entities:
+		var victim := game.entities[id] as Soldier
+		if victim.dead or victim.team == hull.team or victim.vehicle_id != 0 or game.tick < hull.ram_until.get(id, 0):
+			continue
+		var target := victim.centre()
+		if start.distance_squared_to(target) > reach_sq:
+			continue
+		var end := hull.to_local(target)
+		var before := end + local_motion
+		var extent := half + Vector3(victim.tuning.radius, victim.tuning.height * 0.5, victim.tuning.radius)
+		var box := AABB(-extent, extent * 2.0)
+		if box.has_point(before):
+			continue
+		var contact: Variant = box.intersects_segment(before, end)
+		if contact == null:
+			continue
+		var surface: Vector3 = contact / extent
+		var axis := surface.abs().max_axis_index()
+		var outward := Vector3.ZERO
+		outward[axis] = signf(surface[axis])
+		var normal := basis * outward
+		var speed := (incoming - victim.velocity).dot(normal)
+		if speed <= IMPACT_SPEED or motion.dot(normal) <= 0.0:
+			continue
+		var contact_center := target - basis * (contact as Vector3)
+		if not game.world_ray(contact_center, target, hull.collision_mask, [hull.get_rid()]).is_empty():
+			continue
+		var amount := minf(MAX_RAM_DAMAGE, (speed - IMPACT_SPEED) * 3.0 * weight)
+		hull.ram_until[id] = game.tick + RAM_REPEAT_TICKS
+		victim.push(normal * amount * 0.12 * victim.tuning.mass)
+		game.damage(victim, amount, driver, Weapon.VEHICLE_IMPACT, contact_center)
+
+
+func _crash(hull: Vehicle, incoming: Vector3, pairs: Dictionary[Vector2i, bool]) -> void:
+	# drive() skips move_and_slide() when stationary, so its contacts can be old.
+	if incoming.length_squared() <= 0.0004:
+		return
+	var wall_speed := 0.0
+	for i in hull.get_slide_collision_count():
+		var contact := hull.get_slide_collision(i)
+		var normal := contact.get_normal()
+		hull.velocity -= normal * minf(0.0, hull.velocity.dot(normal))
+		var other := contact.get_collider() as Vehicle
+		if other == null:
+			wall_speed = maxf(wall_speed, -incoming.dot(normal))
+			continue
+		if not hulls.has(other.entity_id):
+			continue
+		var speed := (other.velocity - incoming).dot(normal)
+		if speed <= IMPACT_SPEED:
+			continue
+		var pair := Vector2i(mini(hull.entity_id, other.entity_id), maxi(hull.entity_id, other.entity_id))
+		if pairs.has(pair):
+			continue
+		pairs[pair] = true
+		var own_mass := Vehicle.MASS[hull.kind]
+		var other_mass := Vehicle.MASS[other.kind]
+		# The normal points towards this hull. Stop the other one driving back
+		# into the same impact on its turn, while preserving sideways motion.
+		other.velocity -= normal * maxf(0.0, other.velocity.dot(normal))
+		var enemy := hull.team != other.team
+		var driver := hull.crew[0] if enemy else 0
+		var other_driver := other.crew[0] if enemy else 0
+		_crash_damage(other, speed * own_mass / (own_mass + other_mass), driver)
+		_crash_damage(hull, speed * other_mass / (own_mass + other_mass), other_driver)
+		if not hulls.has(hull.entity_id):
+			return
+	_crash_damage(hull, wall_speed, 0)
+
+
+func _crash_damage(hull: Vehicle, speed: float, driver: int) -> void:
+	if speed <= IMPACT_SPEED:
+		return
+	var severity := (speed - IMPACT_SPEED) / 32.0
+	var amount := Vehicle.MAX_HEALTH[hull.kind] * 0.55 * severity * severity
+	damage(hull, amount, driver, -1, Weapon.VEHICLE_IMPACT)
 
 
 func _spawn(pad: VehiclePad) -> void:
@@ -202,7 +309,10 @@ func _fire(hull: Vehicle, shooter: Soldier) -> void:
 func damage(hull: Vehicle, amount: float, attacker: int, attacker_team: int, slot: int) -> void:
 	if amount <= 0.0 or hull.team == attacker_team or not hulls.has(hull.entity_id):
 		return
-	hull.health = maxf(0.0, hull.health - amount)
+	var loss := minf(hull.health, amount)
+	hull.health -= loss
+	if slot == Weapon.VEHICLE_IMPACT and loss > 0.0:
+		game.vehicle_crashed.emit(hull.crew[0], hull.global_position, loss)
 	if hull.health > 0.0:
 		return
 	var at := hull.position

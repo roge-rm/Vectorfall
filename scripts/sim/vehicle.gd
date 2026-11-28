@@ -38,6 +38,7 @@ var gun_pitch := 0.0
 var cooldown := 0.0
 var unattended := 0.0
 var kick := Vector3.ZERO
+var ram_until: Dictionary[int, int] = {}
 var gun_mount: Node3D
 
 
@@ -96,7 +97,7 @@ func push(impulse: Vector3) -> void:
 	kick = (kick + impulse / MASS[kind]).limit_length(15.0)
 
 
-func drive(command: PlayerCommand, floor_y: float, delta: float) -> void:
+func drive(command: PlayerCommand, floor_y: float, delta: float) -> Vector3:
 	var goal := Vector3.ZERO
 	if command != null:
 		yaw = rotate_toward(yaw, command.yaw, TURN[kind] * delta)
@@ -117,9 +118,11 @@ func drive(command: PlayerCommand, floor_y: float, delta: float) -> void:
 	velocity = flat + Vector3.UP * move_toward(velocity.y, lift, 36.0 * delta)
 	velocity += kick * delta * 4.0
 	kick = kick.move_toward(Vector3.ZERO, delta * 7.0)
+	var incoming := velocity
 	if velocity.length_squared() > 0.0004:
 		move_and_slide()
 	cooldown = maxf(0.0, cooldown - delta)
+	return incoming
 
 
 func aim(command: PlayerCommand, delta: float) -> void:
@@ -140,7 +143,7 @@ func get_state() -> Dictionary:
 		"id": entity_id, "pad": pad_id, "team": team, "kind": kind, "position": position,
 		"velocity": velocity, "yaw": yaw, "crew": crew.duplicate(), "health": health,
 		"gun_yaw": gun_yaw, "gun_pitch": gun_pitch, "cooldown": cooldown,
-		"unattended": unattended, "kick": kick,
+		"unattended": unattended, "kick": kick, "ram_until": ram_until.duplicate(),
 	}
 
 
@@ -155,4 +158,5 @@ func set_state(state: Dictionary) -> void:
 	cooldown = state.cooldown
 	unattended = state.unattended
 	kick = state.kick
+	ram_until.assign(state.get("ram_until", {}))
 	_pose()

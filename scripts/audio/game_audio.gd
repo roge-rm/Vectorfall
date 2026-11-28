@@ -52,7 +52,7 @@ var _ski_surface := ""
 var _hums: Dictionary[Object, AudioStreamPlayer3D] = {}
 var _step_left := 0.0
 var _was_grounded := true
-var _fall_speed := 0.0
+var _fall_velocity := Vector3.ZERO
 var _last_chaingun: Dictionary[int, int] = {}
 ## Sounds dropped because every voice was busy with something that mattered more.
 var dropped := 0
@@ -117,6 +117,8 @@ func watch(match_node: Match, who: Soldier, world: GameMap = null) -> void:
 	map = world
 	game.fired.connect(_on_fired)
 	game.impacted.connect(_on_impacted)
+	game.landed.connect(_on_landed)
+	game.vehicle_crashed.connect(_on_vehicle_crashed)
 	game.hit.connect(_on_hit)
 	game.mine_placed.connect(_on_mine.bind("mine_place", -4.0))
 	game.mine_armed.connect(_on_mine.bind("mine_arm", -8.0))
@@ -278,6 +280,28 @@ func _on_hit(attacker_id: int, victim_id: int, _weapon: int) -> void:
 	play_flat("kill" if victim != null and victim.health <= 0.0 else "hit", -6.0)
 
 
+func _on_landed(soldier_id: int, speed: float) -> void:
+	if speed <= Soldier.FALL_SAFE_SPEED:
+		return
+	var who := game.soldier(soldier_id)
+	if who == null:
+		return
+	if who == soldier:
+		play_flat("hard_land", -4.0)
+		_was_grounded = true
+		_step_left = STEP_TIME
+	else:
+		play_at("hard_land", who.global_position, -10.0, 1)
+
+
+func _on_vehicle_crashed(driver_id: int, at: Vector3, loss: float) -> void:
+	var volume := lerpf(-15.0, -3.0, clampf(loss / 70.0, 0.0, 1.0))
+	if soldier != null and driver_id == soldier.entity_id:
+		play_flat("vehicle_crash", volume)
+	else:
+		play_at("vehicle_crash", at, volume, 2)
+
+
 func _on_flag(team: int, _soldier_id: int, what: String) -> void:
 	if soldier == null:
 		return
@@ -324,11 +348,12 @@ func _own_sounds(delta: float) -> void:
 	_set_loop(_ski, skiing, linear_to_db(clampf(speed / 40.0, 0.15, 1.0)) - 10.0, 0.8 + clampf(speed / 60.0, 0.0, 0.6))
 	if not alive or hull_id != 0:
 		_was_grounded = true
-		_fall_speed = 0.0
+		_fall_velocity = Vector3.ZERO
 		return
-	if soldier.grounded and not _was_grounded and _fall_speed > 6.0:
+	var fall_speed := minf(-_fall_velocity.y, -_fall_velocity.dot(soldier.floor_normal))
+	if soldier.grounded and not _was_grounded and fall_speed > 6.0 and fall_speed <= Soldier.FALL_SAFE_SPEED:
 		var surface := _surface_at(soldier.global_position, soldier.floor_normal)
-		play_flat("land" + surface, linear_to_db(clampf(_fall_speed / 25.0, 0.3, 1.0)) - 6.0)
+		play_flat("land" + surface, linear_to_db(clampf(fall_speed / 25.0, 0.3, 1.0)) - 6.0)
 		_step_left = STEP_TIME
 	elif soldier.grounded and not soldier.skiing and speed > 2.0:
 		_step_left -= delta
@@ -337,7 +362,7 @@ func _own_sounds(delta: float) -> void:
 			var surface := _surface_at(soldier.global_position, soldier.floor_normal)
 			play_flat("step" + surface, -14.0 + linear_to_db(0.2), 0.9 + 0.2 * randf())
 	_was_grounded = soldier.grounded
-	_fall_speed = maxf(-soldier.velocity.y, 0.0)
+	_fall_velocity = soldier.velocity
 
 
 func _set_loop(player: AudioStreamPlayer, on: bool, volume_db: float, pitch: float) -> void:

@@ -74,6 +74,12 @@ func _run() -> void:
 	checks.check(practice.stage == SkiPractice.Stage.SKI and practice.game.running and practice.elapsed_ticks == 0 and not practice.game.flags.has(1),
 		"Run again resets the gates, flag and clock inside the course")
 	checks.check(practice.best_ticks == best and is_equal_approx(player.position.x, PracticeMap.START_X), "reset keeps the best time and moves the player to the starting gate")
+	practice.stage = SkiPractice.Stage.CREST
+	practice.game.damage(player, player.health, player.entity_id, Weapon.FALL_IMPACT, player.position)
+	for i in 2:
+		await physics_frame
+	checks.check(not player.dead and practice.stage == SkiPractice.Stage.SKI and practice.elapsed_ticks == 0 and practice.best_ticks == best,
+		"a fatal landing restarts practice and keeps the best time")
 	practice._quit()
 	await scene_changed
 	var menu := current_scene as MainMenu

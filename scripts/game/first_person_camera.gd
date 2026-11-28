@@ -21,7 +21,18 @@ func _init() -> void:
 	add_child(view_model)
 
 
-func _process(_delta: float) -> void:
+func _ready() -> void:
+	if soldier != null and soldier.game != null:
+		soldier.game.vehicle_crashed.connect(_on_vehicle_crashed)
+
+
+func _on_vehicle_crashed(driver_id: int, _at: Vector3, loss: float) -> void:
+	if soldier != null and driver_id == soldier.entity_id:
+		v_offset = minf(v_offset, -clampf(loss * 0.003, 0.012, 0.15))
+
+
+func _process(delta: float) -> void:
+	v_offset = move_toward(v_offset, 0.0, delta * 0.65)
 	if soldier == null:
 		return
 	if soldier.dead:

@@ -8,11 +8,10 @@ extends Resource
 ## Top speed from running on flat ground.
 @export var run_speed := 8.0
 @export var ground_accel := 60.0
-## How fast you slow down with no input, below run speed.
+## How fast you slow down with no input.
 @export var ground_friction := 40.0
-## How fast speed above run speed fades on the ground, so a fast landing
-## carries on for a while.
-@export var overspeed_decay := 2.5
+## How fast extra speed fades while running in the same direction.
+@export var overspeed_decay := 20.0
 @export var jump_speed := 6.5
 @export var gravity := 20.0
 
@@ -20,8 +19,10 @@ extends Resource
 @export var floor_snap := 0.35
 
 @export_group("Skiing")
-## Slowing on the ground while skiing, in m/s².
+## Slowing on slopes while skiing, in m/s².
 @export var ski_friction := 0.4
+## Slowing on level ground while skiing, in m/s².
+@export var ski_flat_friction := 1.6
 ## Steering while skiing, towards where you push.
 @export var ski_steer_accel := 6.0
 ## Pushing only adds speed in a direction while you're slower than this in it.

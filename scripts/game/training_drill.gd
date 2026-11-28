@@ -1,7 +1,7 @@
 class_name TrainingDrill
 extends Node
 
-enum Kind { AIR, FLAG, REPAIR }
+enum Kind { AIR, FLAG, REPAIR, LANDING }
 
 const MENU_SCENE := "res://scenes/menu.tscn"
 const FLAG_SPEED := 18.0
@@ -86,11 +86,11 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	var choice := args.find("--drill")
 	if choice >= 0 and choice + 1 < args.size():
-		var value := ["air", "flag", "repair"].find(args[choice + 1])
+		var value := ["air", "flag", "repair", "landing"].find(args[choice + 1])
 		if value >= 0:
 			kind = value as Kind
 
-	map = DrillMap.new(kind == Kind.FLAG, kind == Kind.REPAIR)
+	map = DrillMap.new(kind == Kind.FLAG, kind == Kind.REPAIR, kind == Kind.LANDING)
 	add_child(map)
 	game = Match.new()
 	game.terrain = map.terrain
@@ -98,7 +98,8 @@ func _ready() -> void:
 	add_child(game)
 
 	var allowed := MOTION
-	if kind != Kind.FLAG:
+	var armed := kind in [Kind.AIR, Kind.REPAIR]
+	if armed:
 		allowed |= PlayerCommand.FIRE
 	if kind == Kind.REPAIR:
 		allowed |= PlayerCommand.USE
@@ -122,7 +123,7 @@ func _ready() -> void:
 	camera = FirstPersonCamera.new()
 	camera.soldier = player
 	camera.view_model.set_team_colour(Palette.team(0))
-	if kind == Kind.FLAG:
+	if not armed:
 		camera.view_model.process_mode = Node.PROCESS_MODE_DISABLED
 		camera.view_model.hide()
 	add_child(camera)
@@ -187,6 +188,8 @@ func _add_objective() -> void:
 			generator = game.add_asset(0, BaseAsset.Kind.GENERATOR, DrillMap.GENERATOR)
 			turret = game.add_asset(1, BaseAsset.Kind.TURRET, DrillMap.ATTACKER, PI * 0.5)
 			game.asset_repaired.connect(_asset_repaired)
+		Kind.LANDING:
+			game.landed.connect(_landed)
 
 
 func _add_flag(team: int, x: float) -> void:
@@ -280,6 +283,11 @@ func _process(_delta: float) -> void:
 			var health := ceili(player.health * 100.0 / player.tuning.health_max)
 			_readout.text = "Generator %d%%  ·  Health %d%%  ·  %d s" % [power, health, _left(REPAIR_SECONDS, _started)]
 			_show_repair_link()
+		Kind.LANDING:
+			var energy := ceili(player.energy * 100.0 / player.tuning.energy_max)
+			var descent := maxf(-player.velocity.y, 0.0) if not player.grounded else 0.0
+			_readout.text = "Jet %d%%  ·  Down %.0f m/s" % [energy, descent]
+			_update_hint()
 
 
 func _show_repair_link() -> void:
@@ -310,6 +318,11 @@ func _update_hint() -> void:
 				LocalInput.Device.GAMEPAD:
 					control = "X"
 			_hint.text = "Use cover, face the generator and hold %s" % control
+		Kind.LANDING:
+			if player.position.x < DrillMap.LANDING_LIP:
+				_hint.text = "Ski off the ridge and save your jet energy"
+			else:
+				_hint.text = "Jet before touching down inside the lit lane"
 
 
 func _air_hit(attacker: int, victim: int) -> void:
@@ -337,6 +350,19 @@ func _flag_captured(team: int, by: int) -> void:
 func _asset_repaired(id: int, by: int) -> void:
 	if id == generator.entity_id and by == player.entity_id:
 		_finish(true, "Generator online in %.1f s." % _seconds(_started))
+
+
+func _landed(by: int, speed: float) -> void:
+	if by != player.entity_id or player.position.x <= DrillMap.LANDING_LIP:
+		return
+	var words := "Landing speed %.1f m/s." % speed
+	var x := player.position.x
+	if x < DrillMap.LANDING_START or x > DrillMap.LANDING_END or absf(player.position.z) > DrillMap.LANE_HALF_WIDTH:
+		_finish(false, words + " Land inside the lit lane.")
+	elif speed > Soldier.FALL_SAFE_SPEED:
+		_finish(false, words + " Aim for %.0f m/s or less." % Soldier.FALL_SAFE_SPEED)
+	else:
+		_finish(true, words)
 
 
 func _seconds(since: int) -> float:
@@ -379,7 +405,7 @@ func reset_run() -> void:
 	_result.hide()
 	_hint.show()
 	_readout.show()
-	_crosshair.visible = kind != Kind.FLAG
+	_crosshair.visible = kind in [Kind.AIR, Kind.REPAIR]
 	input.held_off = false
 	touch.blocked = false
 	touch.release_all()

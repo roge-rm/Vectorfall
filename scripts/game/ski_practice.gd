@@ -158,7 +158,7 @@ func _physics_process(_delta: float) -> void:
 	if stage == Stage.FINISHED:
 		return
 	var at := player.global_position
-	if absf(at.z) > 44.0 or at.x > PracticeMap.RUNOUT_X or at.x < -141.0 or at.y < -5.0:
+	if player.dead or absf(at.z) > 44.0 or at.x > PracticeMap.RUNOUT_X or at.x < -141.0 or at.y < -5.0:
 		reset_run()
 		return
 	if _start_tick < 0 and at.x >= PracticeMap.START_X + 8.0:

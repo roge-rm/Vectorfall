@@ -58,6 +58,19 @@ func _run() -> void:
 	var point := original.hold_points[1]
 	var lime := original.soldier(native.player_id)
 	var blue := original.soldier(web.player_id)
+	var landings: Array[float] = []
+	var hard_speed := Soldier.FALL_SAFE_SPEED + 1.0
+	scene.game.landed.connect(func(id: int, speed: float) -> void:
+		if id == lime.entity_id:
+			landings.append(speed))
+	original.landed.emit(lime.entity_id, Soldier.FALL_SAFE_SPEED)
+	original.landed.emit(lime.entity_id, hard_speed)
+	original.vehicle_crashed.emit(lime.entity_id, lime.position, 17.5)
+	for index in 90:
+		if scene.hud._hull_damage == 17.5:
+			break
+		await physics_frame
+	checks.check(landings == [hard_speed] and scene.hud._hull_damage == 17.5, "the host relays hard landings and the actual hull loss to the client")
 	checks.check(native.initial.hold_points.size() == 3 and native.initial.flags.is_empty(),
 		"the welcome includes the right objectives")
 	lime.position = point.position + Vector3.UP * 0.2

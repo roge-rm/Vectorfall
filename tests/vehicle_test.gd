@@ -168,4 +168,67 @@ func _run() -> void:
 	await ticks(3)
 	await tap(pilot_input, PlayerCommand.BOARD)
 	checks.check(pilot.vehicle_id == 0 and pilot.position.x < tank.position.x, "exit tries the other side when a field blocks the way")
+	await _impacts()
 	checks.finish(self)
+
+
+func _impacts() -> void:
+	game.queue_free()
+	await process_frame
+	game = Match.new(14)
+	root.add_child(game)
+	var first := game.fleet.add_pad(0, Vehicle.Kind.BIKE, Vector3(-20, 0, 0), 0.0)
+	var second := game.fleet.add_pad(0, Vehicle.Kind.BIKE, Vector3(-30, 0, 0), 0.0)
+	pilot = game.add_soldier(0, Transform3D(Basis.IDENTITY, Vector3(-20, 0, 4)), pilot_input)
+	rider = game.add_soldier(0, Transform3D(Basis.IDENTITY, Vector3(40, 0, 10)))
+	enemy = game.add_soldier(1, Transform3D(Basis.IDENTITY, Vector3(40, 0, 12)))
+	await ticks(4)
+	var bike: Vehicle = game.fleet.hulls.get(first.hull_id)
+	var parked: Vehicle = game.fleet.hulls.get(second.hull_id)
+	await board(bike, pilot, pilot_input)
+	var ride_y := bike.position.y
+	var full := bike.health
+	var impacts := []
+	game.hit.connect(func(attacker: int, victim: int, slot: int) -> void:
+		impacts.append([attacker, victim, slot]))
+	bike.position = Vector3(20, ride_y, 0)
+	bike.velocity = Vector3.FORWARD * 35.0
+	put(enemy, Vector3(20, 0, -2.7))
+	put(rider, Vector3(20, 0, -4.0))
+	pilot_input.command.move = Vector2(0, 1)
+	await ticks(16)
+	checks.check(impacts == [[pilot.entity_id, enemy.entity_id, Weapon.VEHICLE_IMPACT]] and enemy.health < enemy.tuning.health_max and not enemy.dead,
+		"a fast hull hits the enemy once and credits its driver (%s, health %.1f)" % [str(impacts), enemy.health])
+	checks.check(bike.health == full and rider.health == rider.tuning.health_max and bike.position.z < -4.0,
+		"soldiers neither block the hull nor damage it, and teammates take no ram damage")
+
+	var wall := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var wall_box := BoxShape3D.new()
+	wall_box.size = Vector3(20, 12, 1)
+	shape.shape = wall_box
+	wall.add_child(shape)
+	wall.position = Vector3(20, 6, -20)
+	root.add_child(wall)
+	put(enemy, Vector3(20, 0, -21.1))
+	bike.position = Vector3(20, ride_y, -17.65)
+	bike.velocity = Vector3(18, 0, -4)
+	await ticks(6)
+	checks.check(bike.health == full, "a glancing scrape does no crash damage")
+
+	bike.position = Vector3(20, ride_y, -16)
+	bike.velocity = Vector3.FORWARD * 32.0
+	await ticks(8)
+	var crashed_health := bike.health
+	checks.check(crashed_health < full and crashed_health > 0.0 and impacts.size() == 1,
+		"a direct crash hurts the hull without ramming a soldier behind the wall")
+	await ticks(40)
+	checks.check(bike.health == crashed_health, "pushing against a wall does not add crash damage")
+
+	bike.position = Vector3(0, ride_y, 8)
+	bike.velocity = Vector3.FORWARD * 42.0
+	parked.position = Vector3(0, ride_y, 3)
+	await ticks(8)
+	checks.check(bike.health < crashed_health and parked.health < full and parked.health > 0.0,
+		"a fast crash damages both vehicles even on the same team")
+	wall.queue_free()

@@ -91,6 +91,7 @@ func _run() -> void:
 		await ticks(1)
 	checks.check(soldier.horizontal_speed() > 10.0, "landing on a downhill keeps and adds speed (%.2f m/s)" % soldier.horizontal_speed())
 	await _check_bodies_settle()
+	await _check_fall_damage()
 	checks.finish(self)
 
 
@@ -133,3 +134,42 @@ func _state_with(position: Vector3, velocity: Vector3) -> Dictionary:
 	state.grounded = false
 	state.energy = soldier.tuning.energy_max
 	return state
+
+
+func _check_fall_damage() -> void:
+	var high := Transform3D(Basis.IDENTITY, Vector3(0.0, 25.0, 0.0))
+	var fall := Vector3.DOWN * 26.0
+	soldier.revive(high)
+	soldier.velocity = fall
+	await ticks(55)
+	var after := soldier.health
+	checks.check(soldier.grounded and after > 0.0 and after < soldier.tuning.health_max, "a hard landing hurts a living soldier")
+	await ticks(30)
+	checks.check(soldier.health == after, "standing after a hard landing deals damage only once")
+
+	soldier.revive(high)
+	soldier.velocity = fall
+	input.command.buttons = PlayerCommand.JET
+	for i in 120:
+		await ticks(1)
+		if soldier.grounded:
+			break
+	checks.check(soldier.grounded and soldier.health == soldier.tuning.health_max, "jet braking makes the same fall safe")
+	input.command.buttons = 0
+
+	var near_floor := Vector3(0.0, 0.7, 0.0)
+	soldier.set_state(_state_with(near_floor, Vector3(42.0, -8.0, 0.0)))
+	await ticks(12)
+	checks.check(soldier.grounded and soldier.health == soldier.tuning.health_max and soldier.horizontal_speed() > 35.0,
+		"a shallow landing at ski speed keeps momentum and causes no damage")
+
+	game.running = false
+	soldier.set_state(_state_with(near_floor, Vector3.DOWN * 52.0))
+	for i in 3:
+		await ticks(1)
+		soldier.simulate(PlayerCommand.new(), 1.0 / 60.0, true)
+	checks.check(soldier.grounded and soldier.health == soldier.tuning.health_max, "movement prediction leaves fall damage to the host")
+	soldier.set_state(_state_with(near_floor, Vector3.DOWN * 52.0))
+	game.running = true
+	await ticks(3)
+	checks.check(soldier.dead, "a severe impact can kill a full-health soldier")

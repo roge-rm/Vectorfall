@@ -4,11 +4,12 @@ extends Control
 signal closed
 signal drill_pressed(index: int)
 
-const TITLES: Array[String] = ["Air shots", "Flag run", "Restore power"]
+const TITLES: Array[String] = ["Air shots", "Flag run", "Restore power", "Jet landing"]
 const GOALS: Array[String] = [
 	"Lead a flying target with the disc launcher.",
 	"Grab the flag at speed and ski through the exit.",
 	"Use cover and a repair pack to bring a generator back online.",
+	"Save jet energy to slow down before touchdown.",
 ]
 
 var buttons: Array[MenuKit.CoverButton] = []

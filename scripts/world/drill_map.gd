@@ -7,11 +7,14 @@ const LANE_HALF_WIDTH := 9.0
 const TARGET_Z := -42.0
 const GENERATOR := Vector3.ZERO
 const ATTACKER := Vector3(15.0, 0.0, 4.0)
+const LANDING_LIP := -36.0
+const LANDING_START := -26.0
+const LANDING_END := 78.0
 
 var start := Transform3D.IDENTITY
 
 
-func _init(flag_run: bool, repair: bool) -> void:
+func _init(flag_run: bool, repair: bool, landing := false) -> void:
 	name = "DrillMap"
 	palette = Palette.paperback()
 	atmosphere = Atmosphere.new(palette)
@@ -31,6 +34,10 @@ func _init(flag_run: bool, repair: bool) -> void:
 				bank = 28.0 * (1.0 - smoothstep(-72.0, -15.0, x))
 				bank += 11.0 * smoothstep(LANE_HALF_WIDTH, 41.0, absf(z))
 				bank += 14.0 * smoothstep(50.0, 90.0, x)
+			elif landing:
+				bank = 20.0 * (1.0 - smoothstep(-78.0, -39.0, x))
+				bank += 38.0 * (1.0 - smoothstep(LANDING_LIP, LANDING_LIP + CELL, x))
+				bank += 11.0 * smoothstep(LANE_HALF_WIDTH, 41.0, absf(z))
 			heights.append(bank)
 			patches.append(0.5 + 0.24 * sin(x * 0.23) * cos(z * 0.42))
 	terrain = Terrain.new(CELLS, CELL, corner, heights, patches)
@@ -42,6 +49,9 @@ func _init(flag_run: bool, repair: bool) -> void:
 	elif repair:
 		start = pose(Vector2(0.0, 14.0))
 		_build_repair_bay()
+	elif landing:
+		start = pose(Vector2(-78.0, 0.0), -PI * 0.5)
+		_build_landing_lane()
 	else:
 		start = pose(Vector2(0.0, 6.0))
 		_build_range()
@@ -78,6 +88,20 @@ func _build_range() -> void:
 		_view(Vector3(x, ground + 1.5, TARGET_Z), Vector3(0.9, 3.0, 1.3), frame)
 		_view(Vector3(x, ground + 3.0, TARGET_Z), Vector3(1.15, 0.35, 1.5), light)
 	_view(Vector3(0.0, 0.05, 4.0), Vector3(10.0, 0.12, 0.28), Cel.glow(Palette.team(0)))
+
+
+func _build_landing_lane() -> void:
+	var edge := Cel.glow(InkUi.AMBER)
+	for side: float in [-1.0, 1.0]:
+		for x: float in [-69.0, -57.0, -45.0, LANDING_LIP]:
+			var post := pose(Vector2(x, side * LANE_HALF_WIDTH)).origin
+			_view(post + Vector3.UP * 0.35, Vector3(0.4, 1.3, 0.7), edge)
+	var light := Cel.glow(Palette.team(0))
+	var length := LANDING_END - LANDING_START
+	for side: float in [-1.0, 1.0]:
+		_view(Vector3(LANDING_START + length * 0.5, 0.05, side * LANE_HALF_WIDTH), Vector3(length, 0.1, 0.28), light)
+	for x: float in [LANDING_START, LANDING_END]:
+		_view(Vector3(x, 0.05, 0.0), Vector3(0.28, 0.1, LANE_HALF_WIDTH * 2.0), light)
 
 
 func _build_repair_bay() -> void:

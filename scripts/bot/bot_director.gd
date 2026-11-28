@@ -668,7 +668,7 @@ func _on_asset_damaged(asset_id: int, attacker_id: int, _amount: float, _from: V
 
 func _on_hit(attacker_id: int, _victim_id: int, weapon: int) -> void:
 	var brain := brain_of(attacker_id)
-	if brain != null:
+	if brain != null and weapon >= 0:
 		brain.stats.hits[weapon] += 1
 
 

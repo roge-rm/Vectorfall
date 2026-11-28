@@ -304,6 +304,10 @@ func _watch_events() -> void:
 	game.fired.connect(func(a: int, b: int) -> void: _event(["fired", a, b]))
 	game.impacted.connect(func(a: int, b: Vector3, c: Vector3) -> void: _event(["impacted", a, b, c]))
 	game.damaged.connect(func(a: int, b: int, c: float, d: Vector3) -> void: _event(["damaged", a, b, c, d]))
+	game.landed.connect(func(id: int, speed: float) -> void:
+		if speed > Soldier.FALL_SAFE_SPEED:
+			_event(["landed", id, speed]))
+	game.vehicle_crashed.connect(func(id: int, at: Vector3, loss: float) -> void: _event(["vehicle_crashed", id, at, loss]))
 	game.killed.connect(func(a: int, b: int, c: int) -> void: _event(["killed", a, b, c]))
 	game.air_hit.connect(func(a: int, b: int) -> void: _event(["air_hit", a, b]))
 	game.hit.connect(func(a: int, b: int, c: int) -> void: _event(["hit", a, b, c]))

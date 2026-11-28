@@ -35,7 +35,10 @@ const REPAIR_CONE := 0.9
 signal fired(soldier_id: int, weapon: int)
 ## A soldier took damage. from is where it came from: the blast or the shooter.
 signal damaged(victim_id: int, attacker_id: int, amount: float, from: Vector3)
-## A soldier's weapon hurt an enemy, for stats.
+## Downward speed into the floor, in m/s, before fall damage.
+signal landed(soldier_id: int, speed: float)
+signal vehicle_crashed(driver_id: int, at: Vector3, loss: float)
+## A soldier hurt an enemy with a weapon or vehicle impact.
 signal hit(attacker_id: int, victim_id: int, weapon: int)
 ## A slow projectile struck an enemy who was already airborne.
 signal air_hit(attacker_id: int, victim_id: int)
@@ -1222,7 +1225,8 @@ func damage(victim: Soldier, amount: float, attacker_id: int, weapon_slot: int, 
 		return
 	var attacker := soldier(attacker_id)
 	if attacker_id == victim.entity_id:
-		amount *= Weapon.all[weapon_slot].self_damage_share
+		if weapon_slot >= 0:
+			amount *= Weapon.all[weapon_slot].self_damage_share
 	elif team_of(attacker_id) == victim.team:
 		return
 	if victim.shielded():

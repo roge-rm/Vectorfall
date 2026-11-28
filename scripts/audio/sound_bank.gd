@@ -14,7 +14,7 @@ const NAMES: Array[String] = ["disc_fire", "disc_blast", "chaingun", "grenade_fi
 	"engine_sled", "engine_needlewing", "engine_kite", "engine_ferry", "engine_crawler",
 	"ski_rock", "ski_metal", "ski_salt", "step_rock", "step_metal", "step_salt",
 	"land_rock", "land_metal", "land_salt", "impact_rock", "impact_metal", "impact_dust",
-	"vehicle_board", "vehicle_eject",
+	"vehicle_board", "vehicle_eject", "hard_land", "vehicle_crash",
 ]
 const ENGINE_NAMES: Array[String] = ["engine_sled", "engine_needlewing", "engine_kite", "engine_ferry", "engine_crawler"]
 ## Vowel formants in Hz (first, second) for the robot voices.
@@ -102,6 +102,12 @@ static func build() -> void:
 	_streams["impact_dust"] = _wav(_thud(rng, 0.065, 970.0, 0.28))
 	_streams["vehicle_board"] = _wav(_tube(rng, 0.21, 210.0, 0.6))
 	_streams["vehicle_eject"] = _wav(_sweep(rng, 0.21, 410.0, 110.0, 0.43))
+	_streams["hard_land"] = _wav(_thud(rng, 0.29, 230.0, 0.83))
+	var crash := _contact(rng, "metal", 0.34, 0.65)
+	var body := _thud(rng, 0.34, 580.0, 0.65)
+	for i in crash.size():
+		crash[i] = crash[i] * 0.55 + body[i] * 0.72
+	_streams["vehicle_crash"] = _wav(crash)
 	build_ms = (Time.get_ticks_usec() - started) / 1000.0
 
 

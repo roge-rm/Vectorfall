@@ -95,19 +95,23 @@ func _run() -> void:
 		await ticks(1)
 	speed = soldier.horizontal_speed()
 	checks.check(speed > 19.5 and absf(soldier.velocity.y) < 1.0, "landing flat while skiing loses only the fall (%.1f m/s)" % speed)
+	await _check_flat_braking()
 
 	# Over the crest at 40 m/s you fly; at a slow ski you follow the ground.
 	for pace: float in [40.0, 6.0]:
-		soldier.set_state(_state_with(Vector3(-30.0, 0.05, 0.0), Vector3(pace, 0.0, 0.0)))
+		var start := -30.0 if pace > 20.0 else -3.0
+		soldier.set_state(_state_with(Vector3(start, 0.05, 0.0), Vector3(pace, 0.0, 0.0)))
 		var flew := false
-		while soldier.global_position.x < 3.0:
+		for i in 120:
 			await ticks(1)
 			if soldier.global_position.x > 0.5 and not soldier.grounded:
 				flew = true
+			if soldier.global_position.x >= 3.0:
+				break
 		if pace > 20.0:
-			checks.check(flew, "skiing over a crest at %.0f m/s launches you" % pace)
+			checks.check(soldier.global_position.x >= 3.0 and flew, "skiing over a crest at %.0f m/s launches you" % pace)
 		else:
-			checks.check(not flew, "skiing over a crest at %.0f m/s follows the ground" % pace)
+			checks.check(soldier.global_position.x >= 3.0 and not flew, "skiing over a crest at %.0f m/s follows the ground" % pace)
 
 	# Four hills in a row, skiing down each and jetting up the next: the speed at
 	# each ridge top goes up, and passes 50 m/s.
@@ -174,6 +178,33 @@ func _run() -> void:
 	checks.finish(self)
 
 
+func _check_flat_braking() -> void:
+	var state := _state_with(Vector3(-100.0, 0.05, -1000.0), Vector3.RIGHT * 24.0)
+	state.grounded = true
+	state.floor_normal = Vector3.UP
+	soldier.set_state(state)
+	await ticks(60)
+	var coast := soldier.horizontal_speed()
+	checks.check(coast > 21.0 and coast < 23.0, "a flat ski coasts with some friction (%.1f m/s)" % coast)
+
+	input.command.buttons = 0
+	await ticks(30)
+	checks.check(soldier.horizontal_speed() < 4.0, "releasing Ski and movement brakes from ski speed")
+
+	soldier.set_state(state)
+	input.command.move = Vector2.RIGHT
+	await ticks(30)
+	var straight := soldier.horizontal_speed()
+	checks.check(straight > soldier.tuning.run_speed and straight < 16.0, "releasing Ski while holding forward sheds speed")
+
+	soldier.set_state(state)
+	input.command.move = Vector2.DOWN
+	await ticks(30)
+	checks.check(absf(soldier.velocity.x) < 2.0 and soldier.velocity.z < -6.0, "releasing Ski and turning steers across the old velocity")
+	input.command.move = Vector2.ZERO
+	input.command.buttons = PlayerCommand.SKI
+
+
 ## Four hills 150 m apart and 38 m high along x, a ridge at x = 0.
 const HILL_PERIOD := 150.0
 const HILL_HEIGHT := 38.0
@@ -192,5 +223,7 @@ func _state_with(position: Vector3, velocity: Vector3) -> Dictionary:
 	state.position = position
 	state.velocity = velocity
 	state.grounded = false
+	state.dead = false
+	state.health = soldier.tuning.health_max
 	state.energy = soldier.tuning.energy_max
 	return state

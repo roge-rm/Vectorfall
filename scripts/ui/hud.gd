@@ -26,6 +26,7 @@ const CHAT_TIME := 7.0
 const HIT_TIME := 0.25
 const AIR_HIT_TIME := 0.75
 const SHIELD_FLASH_TIME := 0.26
+const HULL_DAMAGE_TIME := 1.5
 const SHIELD_COLOUR := Color("94d9fd")
 const HURT_TIME := 1.5
 const MESSAGE_TIME := 3.5
@@ -51,6 +52,8 @@ var _hit_left := 0.0
 var _hit_killed := false
 var _air_hit_left := 0.0
 var _shield_flash_left := 0.0
+var _hull_damage_left := 0.0
+var _hull_damage := 0.0
 ## Where recent damage came from, with seconds left to show it.
 var _hurts: Array[Dictionary] = []
 var _flash := 0.0
@@ -147,6 +150,7 @@ func show_ladder_clear(words: String) -> void:
 func watch(value: Match) -> void:
 	game = value
 	game.damaged.connect(_on_damaged)
+	game.vehicle_crashed.connect(_on_vehicle_crashed)
 	game.shield_hit.connect(_on_shield_hit)
 	game.air_hit.connect(_on_air_hit)
 	game.killed.connect(_on_killed)
@@ -275,13 +279,23 @@ func _on_damaged(victim_id: int, attacker_id: int, amount: float, from: Vector3)
 			_hurts.append({ "from": from, "left": HURT_TIME, "colour": colour })
 
 
+func _on_vehicle_crashed(driver_id: int, _at: Vector3, loss: float) -> void:
+	if soldier != null and driver_id == soldier.entity_id:
+		_hull_damage = loss
+		_hull_damage_left = HULL_DAMAGE_TIME
+
+
 func _on_killed(victim_id: int, killer_id: int, weapon_slot: int) -> void:
 	if soldier != null and killer_id == soldier.entity_id and victim_id != killer_id:
 		_hit_left = HIT_TIME * 2.0
 		_hit_killed = true
 	var victim := game.soldier(victim_id)
 	var killer := game.soldier(killer_id)
-	var weapon := Weapon.all[weapon_slot].short_name.to_lower()
+	if weapon_slot == Weapon.FALL_IMPACT:
+		_add_line([[_name(victim), InkUi.Face.SERIF_BOLD], [" fell", InkUi.Face.ITALIC]], victim.team if victim != null else 0, FEED_TIME)
+		return
+	var impact := weapon_slot == Weapon.VEHICLE_IMPACT
+	var weapon := "vehicle impact" if impact else Weapon.all[weapon_slot].short_name.to_lower()
 	var parts: Array = []
 	var machine := game.asset(killer_id)
 	if killer == null and machine != null:
@@ -289,7 +303,8 @@ func _on_killed(victim_id: int, killer_id: int, weapon_slot: int) -> void:
 		_add_line(parts, machine.team, FEED_TIME)
 		return
 	if killer == null or killer == victim:
-		parts = [[_name(victim), InkUi.Face.SERIF_BOLD], [" " + weapon + ", self", InkUi.Face.ITALIC]]
+		var cause := " vehicle crash" if impact else " " + weapon + ", self"
+		parts = [[_name(victim), InkUi.Face.SERIF_BOLD], [cause, InkUi.Face.ITALIC]]
 	else:
 		parts = [[_name(killer), InkUi.Face.SERIF_BOLD], [" " + weapon + " ", InkUi.Face.ITALIC], [_name(victim), InkUi.Face.SERIF_BOLD]]
 	var by := killer if killer != null else victim
@@ -342,6 +357,7 @@ func _process(delta: float) -> void:
 	_hit_left = maxf(_hit_left - delta, 0.0)
 	_air_hit_left = maxf(_air_hit_left - delta, 0.0)
 	_shield_flash_left = maxf(_shield_flash_left - delta, 0.0)
+	_hull_damage_left = maxf(_hull_damage_left - delta, 0.0)
 	_flash = maxf(_flash - delta, 0.0)
 	# Each arc fades in while its bar isn't full and out a second after it is.
 	var health_full := soldier.health >= soldier.tuning.health_max
@@ -433,7 +449,11 @@ func _draw() -> void:
 		for dir: Vector2 in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
 			var d := dir.normalized()
 			InkUi.stroke(self, centre + d * 9.0 * u, centre + d * 17.0 * u, colour, thick)
-	if _air_hit_left > 0.0:
+	if _hull_damage_left > 0.0:
+		var alpha := clampf(_hull_damage_left * 4.0, 0.0, 1.0)
+		var loss := "<0.1" if _hull_damage < 0.1 else "%.1f" % _hull_damage
+		InkUi.centred(self, centre - Vector2(0.0, 29.0 * u), "HULL DAMAGE %s" % loss, InkUi.Face.BLACK, _px(14), Color(InkUi.PINK, alpha), 3)
+	elif _air_hit_left > 0.0:
 		var alpha := clampf(_air_hit_left * 4.0, 0.0, 1.0)
 		InkUi.centred(self, centre - Vector2(0.0, 29.0 * u), "AIR HIT", InkUi.Face.BLACK, _px(14), Color(InkUi.AMBER, alpha), 3)
 	if _shield_flash_left > 0.0:

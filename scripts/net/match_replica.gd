@@ -7,7 +7,7 @@ const SMOOTH_DISTANCE := 12.0
 const SIGNALS := ["fired", "impacted", "damaged", "killed", "air_hit", "hit", "shield_hit",
 	"flag_taken", "flag_dropped", "flag_captured", "flag_returned", "carrier_stopped",
 	"power_lost", "power_back", "station_entered", "resupplied", "turret_fired", "asset_destroyed", "asset_damaged",
-	"mine_placed", "mine_armed", "pack_switched"]
+	"mine_placed", "mine_armed", "pack_switched", "landed", "vehicle_crashed"]
 
 var client: OnlineClient
 var game: Match
